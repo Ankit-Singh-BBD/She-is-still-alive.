@@ -1,0 +1,1024 @@
+import express from 'express';
+import http from 'http';
+import path from 'path';
+import compression from 'compression';
+import { WebSocketServer, WebSocket } from 'ws';
+import { createServer as createViteServer } from 'vite';
+import dotenv from 'dotenv';
+import { GoogleGenAI, Modality } from '@google/genai';
+import { db } from './server/db.js';
+import { auth, AuthContext } from './server/auth.js';
+import { cognition } from './server/cognition.js';
+import { backupEngine } from './server/backup.js';
+import { LiveSessionManager } from './server/live-session.js';
+
+dotenv.config();
+
+// In-Memory Weather & Context Cache for Ultra-Low Latency & Minimum Internet Usage
+const weatherCache = new Map<string, { data: any; expiresAt: number }>();
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  // High-Efficiency Gzip / Deflate Compression Middleware with optimal threshold & level
+  app.use(
+    compression({
+      level: 6,
+      threshold: 256,
+      filter: (req, res) => {
+        if (req.headers['x-no-compression']) return false;
+        return compression.filter(req, res);
+      },
+    })
+  );
+  app.use(express.json());
+
+  // Helper for Stale-While-Revalidate and client-side caching headers
+  const setCacheControl = (res: express.Response, maxAgeSec = 10, swrSec = 60) => {
+    res.setHeader('Cache-Control', `private, max-age=${maxAgeSec}, stale-while-revalidate=${swrSec}`);
+  };
+
+  // --- API Endpoints ---
+
+  function getCallerContext(req: express.Request): AuthContext {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const headerUserId = req.headers['x-user-id'] as string | undefined;
+    const queryUserId = req.query.userId as string | undefined;
+    const bodyUserId = req.body?.userId as string | undefined;
+    const targetUserId = headerUserId || (queryUserId && queryUserId !== 'ALL' ? queryUserId : undefined) || bodyUserId;
+    return auth.resolveContext(token, targetUserId);
+  }
+
+  // Health and System Status
+  app.get('/api/status', (req, res) => {
+    setCacheControl(res, 5, 30);
+    const callerContext = getCallerContext(req);
+    const owner = db.getOwner();
+    const hasOwner = db.hasOwner();
+
+    if (callerContext.role === 'owner') {
+      const users = db.getUsers();
+      const allUsers = [];
+      if (owner) {
+        allUsers.push({ id: owner.id, name: owner.name, createdAt: owner.createdAt });
+      }
+      users.forEach((u) => {
+        allUsers.push({ id: u.id, name: u.name, createdAt: u.createdAt });
+      });
+      return res.json({
+        status: 'ok',
+        hasOwner,
+        ownerName: owner ? owner.name : null,
+        registeredUserCount: allUsers.length,
+        users: allUsers,
+        systemTime: new Date().toISOString(),
+      });
+    }
+
+    // Normal users and guests cannot see the total count or list of registered users
+    res.json({
+      status: 'ok',
+      hasOwner,
+      ownerName: null,
+      registeredUserCount: undefined,
+      users: [],
+      systemTime: new Date().toISOString(),
+    });
+  });
+
+  // Owner First-Time Setup
+  app.post('/api/setup-owner', (req, res) => {
+    const { name, passcode } = req.body;
+    if (!name || !passcode) {
+      return res.status(400).json({ error: 'Name and passcode are required' });
+    }
+
+    const result = auth.setupOwner(name, passcode);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    // Auto-authenticate newly created owner
+    const loginRes = auth.authenticateOwner(passcode);
+    res.json({
+      success: true,
+      owner: {
+        id: result.owner!.id,
+        name: result.owner!.name,
+        role: result.owner!.role,
+      },
+      token: loginRes.token,
+    });
+  });
+
+  // Owner Passcode Authentication
+  app.post('/api/auth/owner', (req, res) => {
+    const { passcode } = req.body;
+    if (!passcode) {
+      return res.status(400).json({ error: 'Passcode is required' });
+    }
+
+    const result = auth.authenticateOwner(passcode);
+    if (!result.success) {
+      return res.status(401).json({ error: result.error });
+    }
+
+    res.json(result);
+  });
+
+  // Identify / Resolve Speaker (Authoritative Identity Resolution with Ambiguity Detection)
+  app.post('/api/identify', (req, res) => {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Name is required for identity resolution' });
+    }
+
+    const resolved = db.resolveIdentityByName(name);
+    if (!resolved) {
+      return res.json({
+        found: false,
+        ambiguous: false,
+        identity: null,
+        message: `No registered profile or record matching "${name}". Person remains Unregistered/Guest.`,
+      });
+    }
+
+    if (resolved.ambiguous) {
+      return res.json({
+        found: true,
+        ambiguous: true,
+        candidates: resolved.candidates,
+        message: `Multiple registered candidates found matching "${name}": ${resolved.candidates?.join(', ')}. Please clarify your full name.`,
+      });
+    }
+
+    res.json({
+      found: true,
+      ambiguous: false,
+      identity: {
+        id: resolved.id,
+        name: resolved.name,
+        role: resolved.role,
+      },
+    });
+  });
+
+  // Owner System Awareness Operational Briefing: GET
+  app.get('/api/owner/briefing', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Only the Owner can access the System Operational Briefing' });
+    }
+
+    const briefing = db.getSystemAwarenessBriefingForOwner();
+    res.json({ success: true, briefing });
+  });
+
+  // World Awareness Endpoint: GET
+  app.get('/api/world-awareness', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Only the Owner can inspect complete World Awareness state' });
+    }
+
+    const wa = db.getWorldAwareness();
+    res.json({ success: true, worldAwareness: wa });
+  });
+
+  // User Registration / Identification
+  app.post('/api/users/register', (req, res) => {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'User name is required' });
+    }
+
+    const cleanName = name.trim();
+    const owner = db.getOwner();
+    const isOwnerName = Boolean(
+      (owner && owner.name.trim().toLowerCase() === cleanName.toLowerCase()) ||
+      cleanName.toLowerCase() === 'ankit'
+    );
+
+    if (isOwnerName) {
+      return res.status(400).json({
+        error: 'OWNER_NAME_RESERVED: Cannot create a normal user profile for Ankit / Owner. Please use Owner Passcode Authentication.',
+      });
+    }
+
+    const user = db.createOrGetUser(cleanName);
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        role: 'user',
+        createdAt: user.createdAt,
+      },
+    });
+  });
+
+  // Get Registered Users (Owner-only operation to view and switch registered profiles)
+  app.get('/api/users', (req, res) => {
+    const callerContext = getCallerContext(req);
+
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Only the Owner can inspect registered database users' });
+    }
+
+    const users = db.getUsers();
+    setCacheControl(res, 5, 30);
+    res.json({
+      users: users.map((u) => ({ id: u.id, name: u.name, createdAt: u.createdAt })),
+    });
+  });
+
+  // Get Active Tasks and Open Loops
+  app.get('/api/tasks', (req, res) => {
+    const callerContext = getCallerContext(req);
+    const userId = callerContext.id;
+    if (userId === 'UNKNOWN' || userId === 'UNREGISTERED' || userId === 'GUEST') {
+      return res.json({ tasks: [], openLoops: [] });
+    }
+
+    const requestedUserId = req.query.userId as string | undefined;
+    let tasks: any[] = [];
+    const wa = db.getWorldAwareness();
+    let openLoops: any[] = [];
+
+    if (callerContext.role === 'owner' && requestedUserId === 'ALL') {
+      tasks = db.getRawData().tasks || [];
+      openLoops = wa.openLoops || [];
+    } else {
+      let targetId = userId;
+      if (callerContext.role === 'owner' && requestedUserId) {
+        targetId = requestedUserId;
+      }
+      tasks = db.getTasksForIdentity(targetId);
+      openLoops = (wa.openLoops || []).filter(l => l.identityId === targetId);
+    }
+    
+    // sort tasks and loops
+    tasks.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+    openLoops.sort((a, b) => new Date(b.createdAtIST || b.createdAtISO || 0).getTime() - new Date(a.createdAtIST || a.createdAtISO || 0).getTime());
+    
+    res.json({ tasks, openLoops });
+  });
+
+  app.post('/api/tasks', express.json(), (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.id === 'UNKNOWN' || callerContext.id === 'UNREGISTERED' || callerContext.id === 'GUEST') return res.status(403).json({ error: 'Denied' });
+    const { title, description } = req.body;
+    let targetId = callerContext.id;
+    if (callerContext.role === 'owner' && req.body.userId && req.body.userId !== 'ALL') {
+      targetId = req.body.userId;
+    }
+    const task = db.addOrUpdateTask(targetId, title, description);
+    res.json({ success: true, task });
+  });
+
+  app.put('/api/tasks/:id', express.json(), (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.id === 'UNKNOWN' || callerContext.id === 'UNREGISTERED' || callerContext.id === 'GUEST') return res.status(403).json({ error: 'Denied' });
+    const { status } = req.body;
+    const ok = db.updateTaskStatus(callerContext.id, req.params.id, status);
+    res.json({ success: ok });
+  });
+
+  app.delete('/api/tasks/:id', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.id === 'UNKNOWN' || callerContext.id === 'UNREGISTERED' || callerContext.id === 'GUEST') return res.status(403).json({ error: 'Denied' });
+    const ok = db.deleteTask(callerContext.id, req.params.id);
+    res.json({ success: ok });
+  });
+
+  // Fast In-Memory Multi-Domain Search API (Memories, Turns, Patterns)
+  app.get('/api/search', (req, res) => {
+    setCacheControl(res, 5, 20);
+    const query = ((req.query.q as string) || '').trim().toLowerCase();
+    const type = (req.query.type as string) || 'all';
+    const requestedUserId = req.query.userId as string | undefined;
+    const callerContext = getCallerContext(req);
+
+    if (!query) {
+      return res.json({ memories: [], turns: [], patterns: [], total: 0 });
+    }
+
+    const tokens = query.split(/[\s,?.!]+/).filter((t) => t.length > 0);
+    if (tokens.length === 0) {
+      return res.json({ memories: [], turns: [], patterns: [], total: 0 });
+    }
+
+    const matchesTokens = (text: string) => {
+      const lower = text.toLowerCase();
+      return tokens.every((t) => lower.includes(t));
+    };
+
+    let targetId = callerContext.id;
+    const isOwner = callerContext.role === 'owner';
+
+    const results: {
+      memories: any[];
+      turns: any[];
+      patterns: any[];
+      total: number;
+    } = {
+      memories: [],
+      turns: [],
+      patterns: [],
+      total: 0,
+    };
+
+    if (callerContext.role === 'unknown') {
+      return res.json(results);
+    }
+
+    // 1. Search Memories
+    if (type === 'all' || type === 'memories') {
+      if (isOwner && (!requestedUserId || requestedUserId === 'ALL')) {
+        const groups = db.getAllMemoriesGrouped();
+        for (const g of groups) {
+          const matched = g.memories.filter((m) => matchesTokens(m.content) || matchesTokens(m.category));
+          results.memories.push(...matched.map((m) => ({ ...m, userName: g.user.name })));
+        }
+      } else {
+        const mems = db.getMemoriesForIdentity(requestedUserId && isOwner ? requestedUserId : targetId);
+        results.memories = mems.filter((m) => matchesTokens(m.content) || matchesTokens(m.category));
+      }
+    }
+
+    // 2. Search Conversation Turns
+    if (type === 'all' || type === 'conversations') {
+      if (isOwner && (!requestedUserId || requestedUserId === 'ALL')) {
+        const groups = db.getAllConversationsGrouped();
+        for (const g of groups) {
+          const matched = g.turns.filter((t) => matchesTokens(t.content) || matchesTokens(t.role));
+          results.turns.push(...matched.map((t) => ({ ...t, userName: g.user.name })));
+        }
+      } else {
+        const turns = db.getRecentTurns(requestedUserId && isOwner ? requestedUserId : targetId, 100);
+        results.turns = turns.filter((t) => matchesTokens(t.content) || matchesTokens(t.role));
+      }
+    }
+
+    // 3. Search Learned Patterns
+    if (type === 'all' || type === 'patterns') {
+      if (isOwner && (!requestedUserId || requestedUserId === 'ALL')) {
+        const groups = db.getAllPatternsGrouped();
+        for (const g of groups) {
+          const matched = g.patterns.filter((p) => matchesTokens(p.description) || matchesTokens(p.category));
+          results.patterns.push(...matched.map((p) => ({ ...p, userName: g.user.name })));
+        }
+      } else {
+        const patterns = db.getPatternsForIdentity(requestedUserId && isOwner ? requestedUserId : targetId);
+        results.patterns = patterns.filter((p) => matchesTokens(p.description) || matchesTokens(p.category));
+      }
+    }
+
+    results.total = results.memories.length + results.turns.length + results.patterns.length;
+    res.json(results);
+  });
+
+  // Delete User Profile (Owner-only operation)
+  app.delete('/api/users/:id', (req, res) => {
+    const callerContext = getCallerContext(req);
+
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Only the Owner can delete user profiles' });
+    }
+
+    const userId = req.params.id;
+    const user = db.getUserById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const deleted = db.deleteUser(userId);
+    if (!deleted) {
+      return res.status(500).json({ error: 'FAILED_TO_DELETE_USER' });
+    }
+
+    res.json({
+      success: true,
+      message: `User ${user.name} (${userId}) and all associated memories and conversation context were deleted.`,
+    });
+  });
+
+  // Identity-Scoped Memory API
+  app.get('/api/memories', (req, res) => {
+    setCacheControl(res, 5, 30);
+    const requestedUserId = req.query.userId as string | undefined;
+    const callerContext = getCallerContext(req);
+    let targetId = callerContext.id;
+
+    if (callerContext.role === 'owner' && requestedUserId && requestedUserId !== 'ALL') {
+      targetId = requestedUserId;
+    } else if (callerContext.role !== 'owner' && requestedUserId && requestedUserId !== callerContext.id) {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Normal users can only access their own memories' });
+    }
+
+    if (callerContext.role === 'unknown') {
+      return res.json({ memories: [], count: 0, identity: 'UNKNOWN' });
+    }
+
+    const memories = db.getMemoriesForIdentity(targetId);
+    res.json({
+      identity: { id: targetId, role: callerContext.role },
+      memories,
+      count: memories.length,
+    });
+  });
+
+  // Add Memory
+  app.post('/api/memories', (req, res) => {
+    const { userId, content, category } = req.body;
+    const context = getCallerContext(req);
+    if (context.role === 'unknown') {
+      return res.status(403).json({ error: 'UNKNOWN_USER: Cannot save memory without established identity' });
+    }
+
+    const targetId = context.role === 'owner' && userId ? userId : context.id;
+    const memory = db.addMemory(targetId, content, category);
+    if (!memory) {
+      return res.status(500).json({ error: 'FAILED_TO_SAVE_MEMORY' });
+    }
+
+    res.json({ success: true, memory });
+  });
+
+  // Delete Memory
+  app.delete('/api/memories/:id', (req, res) => {
+    const requestedUserId = req.query.userId as string | undefined;
+    const memoryId = req.params.id;
+
+    const callerContext = getCallerContext(req);
+    let targetId = callerContext.id;
+
+    if (callerContext.role === 'owner' && requestedUserId) {
+      targetId = requestedUserId;
+    } else if (callerContext.role !== 'owner' && requestedUserId && requestedUserId !== callerContext.id) {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Cannot delete another user\'s memory' });
+    }
+
+    const success = db.deleteMemory(targetId, memoryId);
+
+    if (!success) {
+      return res.status(404).json({ error: 'Memory not found or permission denied' });
+    }
+
+    res.json({ success: true });
+  });
+
+  // Owner Persona & Voice Controls: GET
+  app.get('/api/persona-voice', (req, res) => {
+    const callerContext = getCallerContext(req);
+    const requestedUserId = req.query.userId as string | undefined;
+
+    if (callerContext.role === 'unknown') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Unregistered users cannot access voice config' });
+    }
+    
+    let targetId = callerContext.id;
+    if (callerContext.role === 'owner' && requestedUserId) {
+       targetId = requestedUserId;
+    }
+
+    try {
+      const config = db.getPersonaVoiceConfig(targetId);
+      setCacheControl(res, 10, 60);
+      res.json({ config });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to get Persona & Voice configuration' });
+    }
+  });
+
+  app.put('/api/persona-voice', (req, res) => {
+    const callerContext = getCallerContext(req);
+    const requestedUserId = req.query.userId as string | undefined;
+
+    if (callerContext.role === 'unknown') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Unregistered users cannot modify voice config' });
+    }
+
+    let targetId = callerContext.id;
+    if (callerContext.role === 'owner' && requestedUserId) {
+       targetId = requestedUserId;
+    }
+
+    try {
+      const updatedConfig = db.updatePersonaVoiceConfig(targetId, req.body);
+      res.json({ success: true, config: updatedConfig });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update Persona & Voice configuration' });
+    }
+  });
+
+  // Owner Grouped Memory Overview: GET (Inspect All Persisted Memories Grouped by Profile)
+  app.get('/api/owner/memories-grouped', (req, res) => {
+    const callerContext = getCallerContext(req);
+
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Only the Owner can inspect grouped user memories' });
+    }
+
+    const grouped = db.getAllMemoriesGrouped();
+    setCacheControl(res, 5, 30);
+    res.json({ groups: grouped });
+  });
+
+  // Conversation Turns API: GET (Identity-Scoped)
+  app.get('/api/conversations', (req, res) => {
+    setCacheControl(res, 5, 30);
+    const requestedUserId = req.query.userId as string | undefined;
+    const callerContext = getCallerContext(req);
+    let targetId = callerContext.id;
+
+    if (callerContext.role === 'owner' && requestedUserId) {
+      if (requestedUserId === 'ALL') {
+        const grouped = db.getAllConversationsGrouped();
+        return res.json({ groups: grouped });
+      }
+      targetId = requestedUserId;
+    } else if (callerContext.role !== 'owner' && requestedUserId && requestedUserId !== callerContext.id) {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Normal users can only access their own conversations' });
+    }
+
+    if (callerContext.role === 'unknown') {
+      return res.json({ turns: [], count: 0, identity: 'UNKNOWN' });
+    }
+
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 500;
+    const turns = db.getRecentTurns(targetId, limit);
+    res.json({
+      identity: { id: targetId, role: callerContext.role },
+      turns,
+      count: turns.length,
+    });
+  });
+
+  // Clear Conversation History: DELETE
+  app.delete('/api/conversations/:sessionId', (req, res) => {
+    const callerContext = getCallerContext(req);
+    const requestedUserId = req.query.userId as string | undefined;
+    let targetId = callerContext.id;
+
+    if (callerContext.role === 'owner' && requestedUserId) {
+      targetId = requestedUserId;
+    } else if (callerContext.role !== 'owner' && requestedUserId && requestedUserId !== callerContext.id) {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Cannot delete another user\'s session' });
+    }
+
+    if (callerContext.role === 'unknown') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Guests cannot delete sessions' });
+    }
+
+    try {
+      const ok = db.deleteSession(targetId, req.params.sessionId);
+      res.json({ success: ok });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete('/api/conversations', (req, res) => {
+    const requestedUserId = req.query.userId as string | undefined;
+
+    const callerContext = getCallerContext(req);
+    let targetId = callerContext.id;
+
+    if (callerContext.role === 'owner' && requestedUserId) {
+      targetId = requestedUserId;
+    } else if (callerContext.role !== 'owner' && requestedUserId && requestedUserId !== callerContext.id) {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Cannot clear another user\'s history' });
+    }
+
+    if (callerContext.role === 'unknown') {
+      return res.json({ success: true });
+    }
+
+    const success = db.clearHistory(targetId);
+    res.json({ success });
+  });
+
+  // Learned Patterns & Habits API: GET (Identity-Scoped)
+  app.get('/api/patterns', (req, res) => {
+    setCacheControl(res, 5, 30);
+    const requestedUserId = req.query.userId as string | undefined;
+
+    const callerContext = getCallerContext(req);
+    let targetId = callerContext.id;
+
+    if (callerContext.role === 'owner' && requestedUserId) {
+      if (requestedUserId === 'ALL') {
+        const grouped = db.getAllPatternsGrouped();
+        return res.json({ groups: grouped });
+      }
+      targetId = requestedUserId;
+    } else if (callerContext.role !== 'owner' && requestedUserId && requestedUserId !== callerContext.id) {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Normal users can only access their own patterns' });
+    }
+
+    if (callerContext.role === 'unknown') {
+      return res.json({ patterns: [], count: 0, identity: 'UNKNOWN' });
+    }
+
+    const patterns = db.getPatternsForIdentity(targetId);
+    res.json({
+      identity: { id: targetId, role: callerContext.role },
+      patterns,
+      count: patterns.length,
+    });
+  });
+
+  // Direct Cognitive Conversational Endpoint: POST /api/chat
+  // Executes the RECALL → ANALYSE → LEARN → DECIDE → RESPOND pipeline
+  app.post('/api/chat', async (req, res) => {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const { message, userId, name, sessionId } = req.body;
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    const callerContext = auth.resolveContext(token, userId);
+    let effectiveName = callerContext.role === 'owner' ? (db.getOwner()?.name || 'Ankit') : 'Guest';
+    if (callerContext.role === 'user') {
+      const u = db.getUserById(callerContext.id);
+      effectiveName = u?.name || name || 'User';
+    } else if (name) {
+      effectiveName = name;
+    }
+
+    try {
+      const result = await cognition.processChatTurn(
+        callerContext.id,
+        callerContext.role,
+        effectiveName,
+        message,
+        sessionId
+      );
+      res.json({
+        success: true,
+        reply: result.reply,
+        identity: result.identity,
+        temporal: result.temporal,
+      });
+    } catch (err: any) {
+      console.error('Chat endpoint failure:', err);
+      res.status(500).json({
+        error: err.message || 'Internal cognitive processing error',
+      });
+    }
+  });
+
+  // Interaction Timeline API: GET /api/timeline/:name
+  app.get('/api/timeline/:name', (req, res) => {
+    const callerContext = getCallerContext(req);
+    const targetName = req.params.name;
+    const timeline = db.getInteractionTimeline(targetName, callerContext.role, callerContext.id);
+    res.json(timeline);
+  });
+
+  // Pending Cross-User Notes: GET /api/notes/pending
+  app.get('/api/notes/pending', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.role === 'unknown') {
+      return res.json({ notes: [] });
+    }
+    const notes = db.getPendingNotesForTarget(callerContext.id, callerContext.name);
+    res.json({ notes });
+  });
+
+  // Send Cross-User Note: POST /api/notes/send
+  app.post('/api/notes/send', (req, res) => {
+    const callerContext = getCallerContext(req);
+    const { targetName, content } = req.body;
+    if (!targetName || !content) {
+      return res.status(400).json({ error: 'targetName and content are required' });
+    }
+    const note = db.addCrossUserNote(callerContext.id, callerContext.name, content, targetName);
+    res.json({ success: true, note });
+  });
+
+  // Addressing Preferences: POST /api/preferences/addressing
+  app.post('/api/preferences/addressing', (req, res) => {
+    const callerContext = getCallerContext(req);
+    const { preferredTitle } = req.body;
+    if (callerContext.role === 'unknown') {
+      return res.status(403).json({ error: 'UNKNOWN_USER: Cannot save preference without established identity' });
+    }
+    if (!preferredTitle || !preferredTitle.trim()) {
+      return res.status(400).json({ error: 'preferredTitle is required' });
+    }
+    const updated = db.setAddressingPreference(callerContext.id, preferredTitle.trim());
+    res.json({ success: true, addressing: updated });
+  });
+
+  // Owner Backup & Restore API: Export Database
+  app.get('/api/backup/export', (req, res) => {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const userId = (req.query.userId as string) || req.headers['x-user-id'] as string | undefined;
+    const callerContext = auth.resolveContext(token, userId);
+
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Only the Owner can export system backups' });
+    }
+
+    try {
+      const backup = backupEngine.createBackup();
+      const filename = `madhurita_backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Type', 'application/json');
+      res.json(backup);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to generate database backup' });
+    }
+  });
+
+  // Owner Backup & Restore API: Import / Restore Database
+  app.post('/api/backup/import', (req, res) => {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const userId = (req.query.userId as string) || req.headers['x-user-id'] as string | undefined;
+    const callerContext = auth.resolveContext(token, userId);
+
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Only the Owner can restore database backups' });
+    }
+
+    const payload = req.body;
+    if (!payload) {
+      return res.status(400).json({ error: 'INVALID_PAYLOAD: Backup payload JSON is required' });
+    }
+
+    try {
+      const result = backupEngine.restoreBackup(payload);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error || 'Restore failed' });
+      }
+
+      res.json({
+        success: true,
+        message: 'System database successfully and transactionally restored.',
+        summary: result.summary,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to restore database backup' });
+    }
+  });
+
+  // Owner Backup & Restore API: Backup Info / System Health
+  app.get('/api/backup/info', (req, res) => {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const userId = (req.query.userId as string) || req.headers['x-user-id'] as string | undefined;
+    const callerContext = auth.resolveContext(token, userId);
+
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Only the Owner can access backup metadata' });
+    }
+
+    try {
+      const info = backupEngine.getBackupStatus();
+      res.json({ success: true, info });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to retrieve backup info' });
+    }
+  });
+
+  // System Configured Location Context: GET
+  app.get('/api/location-context', (req, res) => {
+    const location = db.getLocationConfig();
+    const now = new Date();
+    const istTimeString = now.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'full',
+      timeStyle: 'medium',
+    });
+
+    res.json({
+      location,
+      currentTimeIST: istTimeString,
+      timestamp: now.toISOString(),
+    });
+  });
+
+  // Real Live Weather Endpoint (Fetches actual meteorological data for Orai, UP, India with 10-minute in-memory caching)
+  app.get('/api/weather', async (req, res) => {
+    const location = db.getLocationConfig();
+    const lat = req.query.lat ? parseFloat(req.query.lat as string) : location.latitude;
+    const lon = req.query.lon ? parseFloat(req.query.lon as string) : location.longitude;
+    const locationName = (req.query.city as string) || location.formattedLocation;
+
+    const cacheKey = `${lat}_${lon}_${locationName}`;
+    const cached = weatherCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      res.setHeader('X-Cache', 'HIT');
+      return res.json(cached.data);
+    }
+
+    try {
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&timezone=Asia%2FKolkata`;
+      const response = await fetch(weatherUrl);
+
+      if (!response.ok) {
+        return res.status(502).json({
+          available: false,
+          error: 'Live weather service returned a non-200 response',
+          location: locationName,
+        });
+      }
+
+      const weatherData = await response.json();
+      const current = weatherData.current;
+
+      // Map WMO Weather Codes to descriptive conditions
+      const weatherCodeMap: Record<number, string> = {
+        0: 'Clear sky',
+        1: 'Mainly clear',
+        2: 'Partly cloudy',
+        3: 'Overcast',
+        45: 'Foggy',
+        48: 'Depositing rime fog',
+        51: 'Light drizzle',
+        53: 'Moderate drizzle',
+        55: 'Dense drizzle',
+        61: 'Slight rain',
+        63: 'Moderate rain',
+        65: 'Heavy rain',
+        71: 'Slight snow',
+        73: 'Moderate snow',
+        75: 'Heavy snow',
+        80: 'Slight rain showers',
+        81: 'Moderate rain showers',
+        82: 'Violent rain showers',
+        95: 'Thunderstorm',
+      };
+
+      const condition = weatherCodeMap[current.weather_code] || 'Clear';
+
+      const weatherPayload = {
+        available: true,
+        location: locationName,
+        temperature: current.temperature_2m,
+        feelsLike: current.apparent_temperature,
+        humidity: current.relative_humidity_2m,
+        windSpeed: current.wind_speed_10m,
+        precipitation: current.precipitation,
+        condition,
+        time: current.time,
+        timezone: 'Asia/Kolkata',
+      };
+
+      weatherCache.set(cacheKey, {
+        data: weatherPayload,
+        expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes cache
+      });
+
+      res.setHeader('X-Cache', 'MISS');
+      res.json(weatherPayload);
+    } catch (err: any) {
+      console.warn('Weather fetch failed:', err.message);
+      res.status(503).json({
+        available: false,
+        error: 'Live weather data is currently unreachable.',
+        location: locationName,
+      });
+    }
+  });
+
+  // Fallback High-Quality Voice Greeting / TTS
+  app.post('/api/tts-greeting', async (req, res) => {
+    try {
+      const { text, voiceName = 'Kore' } = req.body;
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: 'GEMINI_API_KEY is not set' });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: { 'User-Agent': 'aistudio-build' },
+        },
+      });
+
+      const greetingText = text || 'Hey there! I am Madhurita. Tap the microphone whenever you are ready to talk to me!';
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-tts-preview',
+        contents: [{ parts: [{ text: `Say warmly and cheerfully in a lively female voice: "${greetingText}"` }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName },
+            },
+          },
+        },
+      });
+
+      const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!audioData) {
+        return res.status(500).json({ error: 'No audio generated' });
+      }
+
+      res.json({ audio: audioData, sampleRate: 24000 });
+    } catch (err: any) {
+      console.error('TTS error:', err);
+      res.status(500).json({ error: err.message || 'TTS generation failed' });
+    }
+  });
+
+  // Create HTTP Server
+  const server = http.createServer(app);
+
+  // WebSocket Server for Gemini Live Real-time Audio
+  const wss = new WebSocketServer({ server, path: '/live' });
+
+  wss.on('connection', (clientWs: WebSocket, req) => {
+    // Parse URL query params for token / userId
+    const url = new URL(req.url || '', `http://${req.headers.host}`);
+    const token = url.searchParams.get('token') || undefined;
+    const userId = url.searchParams.get('userId') || undefined;
+
+    const authContext = auth.resolveContext(token, userId);
+    const sessionManager = new LiveSessionManager(clientWs, authContext);
+
+    sessionManager.start();
+
+    clientWs.on('message', async (rawData) => {
+      try {
+        const msg = JSON.parse(rawData.toString());
+
+        if (msg.type === 'audio' && msg.audio) {
+          sessionManager.sendRealtimeAudio(msg.audio);
+        } else if ((msg.type === 'text_message' || msg.type === 'chat_message') && msg.text) {
+          sessionManager.sendTextMessage(msg.text);
+        } else if (msg.type === 'update_auth') {
+          let targetUserId = msg.userId;
+          const authSession = auth.resolveAuthentication(msg.token);
+          const isOwnerAuth = authSession.isAuthenticated && authSession.role === 'owner';
+          
+          // STRICT IDENTITY ISOLATION: Only the Owner can manually switch to a registered user or owner profile via WebSocket.
+          // Voice identification (identifyUser tool) bypasses this via internal state transitions.
+          if (targetUserId && targetUserId !== 'UNKNOWN' && targetUserId !== 'UNREGISTERED') {
+            if (!isOwnerAuth) {
+              console.warn('Unauthorized attempt to switch identity to', targetUserId, 'without Owner authentication. Forcing Guest context.');
+              targetUserId = 'UNKNOWN';
+            }
+          }
+
+          const newContext = auth.resolveContext(msg.token, targetUserId);
+          await sessionManager.updateContext(newContext);
+          clientWs.send(JSON.stringify({
+            type: 'identity_changed',
+            identity: { id: newContext.id, name: newContext.name, role: newContext.role },
+            token: msg.token,
+          }));
+        }
+      } catch (err) {
+        console.error('Error handling WebSocket client message:', err);
+      }
+    });
+
+    clientWs.on('close', () => {
+      sessionManager.close();
+    });
+
+    clientWs.on('error', (err) => {
+      console.error('Client WebSocket error:', err);
+      sessionManager.close();
+    });
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(
+      express.static(distPath, {
+        maxAge: '1y',
+        immutable: true,
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+          }
+        },
+      })
+    );
+    app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Madhurita AI Assistant running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();

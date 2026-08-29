@@ -1,0 +1,9 @@
+{
+  "short_name": "Madhurita",
+  "name": "Madhurita — Personal AI Assistant",
+  "start_url": "/",
+  "background_color": "#030712",
+  "theme_color": "#030712",
+  "display": "standalone",
+  "orientation": "portrait"
+}

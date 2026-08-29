@@ -1,0 +1,459 @@
+{
+  "owner": {
+    "id": "OWNER_001",
+    "name": "Ankit Singh",
+    "role": "owner",
+    "relationship": "Creator and Master Identity of Madhurita",
+    "passcodeHash": "09917a82b0e8bac6910792590a96b1fafb8273d1041f20bacc35ece6230319ce20a28a0868983216bc006d2d3f466e341f0b9a16ca66dfd3fbfd0c38d0ae2deb",
+    "passcodeSalt": "5679fd7419e664e9ab0b52da3e705b70",
+    "preferences": {
+      "personalityTone": "energetic_witty",
+      "voiceName": "Kore",
+      "personaAndVoice": {
+        "speakingStyle": "calm_thoughtful",
+        "tone": "poised_professional",
+        "formality": "formal",
+        "preferredLanguage": "English",
+        "hinglishBehavior": "light_conversational",
+        "voiceName": "Charon",
+        "responseLength": "concise",
+        "conversationalStyle": "interactive_engaging"
+      }
+    },
+    "createdAt": "2026-08-25T13:10:07.433Z",
+    "updatedAt": "2026-08-28T06:29:04.180Z"
+  },
+  "users": [
+    {
+      "id": "USER_001",
+      "name": "Sapna",
+      "role": "user",
+      "preferences": {},
+      "createdAt": "2026-08-25T13:40:47.920Z",
+      "updatedAt": "2026-08-25T13:40:47.920Z"
+    },
+    {
+      "id": "USER_002",
+      "name": "Govind Singh",
+      "role": "user",
+      "preferences": {},
+      "createdAt": "2026-08-25T16:30:20.087Z",
+      "updatedAt": "2026-08-25T16:30:20.087Z"
+    },
+    {
+      "id": "USER_003",
+      "name": "Govind",
+      "role": "user",
+      "preferences": {
+        "addressing": {
+          "preferredTitle": "Sir"
+        },
+        "preferredTitle": "Sir"
+      },
+      "createdAt": "2026-08-28T07:08:34.936Z",
+      "updatedAt": "2026-08-28T07:09:13.438Z"
+    }
+  ],
+  "memories": [
+    {
+      "memoryId": "MEM_1787665258188_7nijf",
+      "ownerId": "USER_001",
+      "content": "User's (Sapna) birthday is on September 15th.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T13:40:58.188Z",
+      "updatedAt": "2026-08-25T13:40:58.188Z"
+    },
+    {
+      "memoryId": "MEM_1787667055833_kmdpv",
+      "ownerId": "USER_001",
+      "content": "Birthday is 15th September 2007",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:10:55.833Z",
+      "updatedAt": "2026-08-25T14:10:55.833Z"
+    },
+    {
+      "memoryId": "MEM_1787667072011_4nv0l",
+      "ownerId": "USER_001",
+      "content": "Professional name is Akansha Nishad",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:11:12.011Z",
+      "updatedAt": "2026-08-25T14:11:12.011Z"
+    },
+    {
+      "memoryId": "MEM_1787667096434_iejkh",
+      "ownerId": "USER_001",
+      "content": "Mother's name is Guddi Devi",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:11:36.434Z",
+      "updatedAt": "2026-08-25T14:11:36.434Z"
+    },
+    {
+      "memoryId": "MEM_1787667125760_5mh79",
+      "ownerId": "USER_001",
+      "content": "Father's name is Ramesh Chandra",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:12:05.760Z",
+      "updatedAt": "2026-08-25T14:12:05.760Z"
+    },
+    {
+      "memoryId": "MEM_1787667358766_5v5l5",
+      "ownerId": "USER_001",
+      "content": "User is the sister of the owner (Ankit).",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:15:58.766Z",
+      "updatedAt": "2026-08-25T14:15:58.766Z"
+    },
+    {
+      "memoryId": "MEM_1787667367613_llu83",
+      "ownerId": "USER_001",
+      "content": "User is 3 years younger than the owner (Ankit).",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:16:07.613Z",
+      "updatedAt": "2026-08-25T14:16:07.613Z"
+    },
+    {
+      "memoryId": "MEM_1787667460912_n6bkd",
+      "ownerId": "USER_001",
+      "content": "User (Sapna) is skilled in cooking.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:17:40.913Z",
+      "updatedAt": "2026-08-25T14:17:40.913Z"
+    },
+    {
+      "memoryId": "MEM_1787667658320_jr8qk",
+      "ownerId": "USER_001",
+      "content": "User has passed 12th grade.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:20:58.321Z",
+      "updatedAt": "2026-08-25T14:20:58.321Z"
+    },
+    {
+      "memoryId": "MEM_1787667666605_69uab",
+      "ownerId": "USER_001",
+      "content": "User passed 12th grade in 2024.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:21:06.605Z",
+      "updatedAt": "2026-08-25T14:21:06.605Z"
+    },
+    {
+      "memoryId": "MEM_1787667714377_vsp9w",
+      "ownerId": "USER_001",
+      "content": "User (Sapna)'s mother is a nurse in a government hospital.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:21:54.377Z",
+      "updatedAt": "2026-08-25T14:21:54.377Z"
+    },
+    {
+      "memoryId": "MEM_1787667743560_8w50y",
+      "ownerId": "USER_001",
+      "content": "User (Sapna)'s mother's birthday is on May 14th, 1987",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:22:23.560Z",
+      "updatedAt": "2026-08-25T14:22:23.560Z"
+    },
+    {
+      "memoryId": "MEM_1787667762486_b7b7n",
+      "ownerId": "USER_001",
+      "content": "User (Sapna)'s father's birthday is on April 15th, 1981",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:22:42.486Z",
+      "updatedAt": "2026-08-25T14:22:42.486Z"
+    },
+    {
+      "memoryId": "MEM_1787667822177_dav30",
+      "ownerId": "USER_001",
+      "content": "User (Sapna) is a resin artist.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T14:23:42.177Z",
+      "updatedAt": "2026-08-25T14:23:42.177Z"
+    },
+    {
+      "memoryId": "MEM_1787670065528_ccxc0",
+      "ownerId": "OWNER_001",
+      "content": "Completed B.Tech from BBD University.",
+      "category": "education",
+      "confidence": 1,
+      "createdAt": "2026-08-25T15:01:05.528Z",
+      "updatedAt": "2026-08-25T15:01:05.528Z"
+    },
+    {
+      "memoryId": "MEM_1787670074302_9htzo",
+      "ownerId": "OWNER_001",
+      "content": "The BBD University I graduated from is in Lucknow.",
+      "category": "education",
+      "confidence": 1,
+      "createdAt": "2026-08-25T15:01:14.302Z",
+      "updatedAt": "2026-08-25T15:01:14.302Z"
+    },
+    {
+      "memoryId": "MEM_1787670088504_cj6tr",
+      "ownerId": "OWNER_001",
+      "content": "Specialization in B.Tech was Computer Science and Engineering.",
+      "category": "education",
+      "confidence": 1,
+      "createdAt": "2026-08-25T15:01:28.504Z",
+      "updatedAt": "2026-08-25T15:01:28.504Z"
+    },
+    {
+      "memoryId": "MEM_1787670101285_qg6od",
+      "ownerId": "OWNER_001",
+      "content": "Specialized in Cloud Computing and Machine Learning during B.Tech.",
+      "category": "education",
+      "confidence": 1,
+      "createdAt": "2026-08-25T15:01:41.285Z",
+      "updatedAt": "2026-08-25T15:01:41.285Z"
+    },
+    {
+      "memoryId": "MEM_1787670114035_nfalx",
+      "ownerId": "OWNER_001",
+      "content": "Wants all provided information to be saved.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T15:01:54.035Z",
+      "updatedAt": "2026-08-25T15:01:54.035Z"
+    },
+    {
+      "memoryId": "MEM_1787670167466_kootn",
+      "ownerId": "OWNER_001",
+      "content": "B.Tech admission date: 19 September 2022. Graduation date: 5 June 2026.",
+      "category": "education",
+      "confidence": 1,
+      "createdAt": "2026-08-25T15:02:47.466Z",
+      "updatedAt": "2026-08-25T15:02:47.466Z"
+    },
+    {
+      "memoryId": "MEM_1787670194869_6j57j",
+      "ownerId": "OWNER_001",
+      "content": "Born on 11 January 2002 at 12:00 AM (midnight).",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T15:03:14.869Z",
+      "updatedAt": "2026-08-25T15:03:14.869Z"
+    },
+    {
+      "memoryId": "MEM_1787670531881_8r7f8",
+      "ownerId": "USER_001",
+      "content": "Sapna wants to become Cabin Crew.",
+      "category": "goal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T15:08:51.881Z",
+      "updatedAt": "2026-08-25T15:08:51.881Z"
+    },
+    {
+      "memoryId": "MEM_1787675938804_68oce",
+      "ownerId": "USER_002",
+      "content": "Recently completed pharmacy studies.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T16:38:58.804Z",
+      "updatedAt": "2026-08-25T16:38:58.804Z"
+    },
+    {
+      "memoryId": "MEM_1787675945277_8beb5",
+      "ownerId": "USER_002",
+      "content": "Is a very good friend of Ankit.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T16:39:05.277Z",
+      "updatedAt": "2026-08-25T16:39:05.277Z"
+    },
+    {
+      "memoryId": "MEM_1787677444911_5vcn6",
+      "ownerId": "USER_002",
+      "content": "Owner (Ankit)'s nickname is \"Bahua\". I should address him as \"Sir\" and use \"Bahua\" only sparingly for surprised affection, while always maintaining respect.",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-25T17:04:04.911Z",
+      "updatedAt": "2026-08-25T17:04:04.911Z"
+    },
+    {
+      "memoryId": "MEM_1787677505649_0idc9",
+      "ownerId": "USER_002",
+      "content": "User's (Govind Singh) location is Sareta village, Jalaun district, Uttar Pradesh. Always use this location for weather queries unless specified otherwise.",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-25T17:05:05.649Z",
+      "updatedAt": "2026-08-25T17:05:05.649Z"
+    },
+    {
+      "memoryId": "MEM_1787677636612_gp5ye",
+      "ownerId": "USER_002",
+      "content": "Govind Singh (USER_002) is the maternal uncle (mama) of Owner (Ankit Sir), but they are close friends of the same age and grew up together.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-25T17:07:16.612Z",
+      "updatedAt": "2026-08-25T17:07:16.612Z"
+    },
+    {
+      "memoryId": "MEM_1787677699080_e7xhw",
+      "ownerId": "USER_002",
+      "content": "User's (Govind Singh) location is Sunheta village, Jalaun district, Uttar Pradesh. Correcting previous memory.",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-25T17:08:19.080Z",
+      "updatedAt": "2026-08-25T17:08:19.080Z"
+    },
+    {
+      "memoryId": "MEM_1787678004239_ca0yz",
+      "ownerId": "USER_002",
+      "content": "The correct location name is \"Sunheta\" (S-U-N-E-T-H-A), and this should be explicitly used and remembered for weather or location context, overriding any previous variations.",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-25T17:13:24.239Z",
+      "updatedAt": "2026-08-25T17:13:24.239Z"
+    },
+    {
+      "memoryId": "MEM_1787678047621_h7tuo",
+      "ownerId": "USER_002",
+      "content": "सही लोकेशन का नाम हिंदी में 'सुनहेटा' है।",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-25T17:14:07.621Z",
+      "updatedAt": "2026-08-25T17:14:07.621Z"
+    },
+    {
+      "memoryId": "MEM_1787678094230_qyfc1",
+      "ownerId": "USER_002",
+      "content": "The correct Hindi spelling for Sunheta is with a full 'ha': स(ु)न(े)हटा.",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-25T17:14:54.230Z",
+      "updatedAt": "2026-08-25T17:14:54.230Z"
+    },
+    {
+      "memoryId": "MEM_1787735564798_p5bwn",
+      "ownerId": "OWNER_001",
+      "content": "Sapna is 3 years younger than the owner.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-26T09:12:44.798Z",
+      "updatedAt": "2026-08-26T09:12:44.798Z"
+    },
+    {
+      "memoryId": "MEM_1787735633180_9v874",
+      "ownerId": "OWNER_001",
+      "content": "Owner wants any information related to him or his family to be automatically saved to his memory, with an indication of who provided the information.",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-26T09:13:53.180Z",
+      "updatedAt": "2026-08-26T09:13:53.180Z"
+    },
+    {
+      "memoryId": "MEM_1787850467373_fm0pf",
+      "ownerId": "OWNER_001",
+      "content": "Owner wants me to store more information in his memory.",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-27T17:07:47.373Z",
+      "updatedAt": "2026-08-27T17:07:47.373Z"
+    },
+    {
+      "memoryId": "MEM_1787850482452_eih21",
+      "ownerId": "OWNER_001",
+      "content": "Owner wants me to adopt a female persona in our conversations.",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-27T17:08:02.452Z",
+      "updatedAt": "2026-08-27T17:08:02.452Z"
+    },
+    {
+      "memoryId": "MEM_1787850496876_cebzb",
+      "ownerId": "OWNER_001",
+      "content": "Owner wants me to adopt a female persona in all interactions, not just with him.",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-27T17:08:16.876Z",
+      "updatedAt": "2026-08-27T17:08:16.876Z"
+    },
+    {
+      "memoryId": "MEM_1787853290794_zmi2j",
+      "ownerId": "OWNER_001",
+      "content": "Owner wants me to ask him who provided information when he shares details for memory storage.",
+      "category": "fact",
+      "confidence": 1,
+      "createdAt": "2026-08-27T17:54:50.794Z",
+      "updatedAt": "2026-08-27T17:54:50.794Z"
+    },
+    {
+      "memoryId": "MEM_1787898394812_sgv5k",
+      "ownerId": "USER_001",
+      "content": "Govind Singh ka naam Kans hai.",
+      "category": "personal",
+      "confidence": 1,
+      "createdAt": "2026-08-28T06:26:34.812Z",
+      "updatedAt": "2026-08-28T06:26:34.812Z"
+    },
+    {
+      "memoryId": "MEM_1787900953441_9il5a",
+      "ownerId": "USER_003",
+      "content": "User explicitly instructed to be addressed as \"Sir\".",
+      "category": "preference",
+      "confidence": 1,
+      "createdAt": "2026-08-28T07:09:13.441Z",
+      "updatedAt": "2026-08-28T07:09:13.441Z"
+    }
+  ],
+  "conversations": [],
+  "patterns": [],
+  "sessions": [],
+  "crossUserNotes": [
+    {
+      "noteId": "NOTE_1787898430325_vtdy",
+      "senderId": "USER_001",
+      "senderName": "Sapna",
+      "targetId": "OWNER_001",
+      "targetName": "Ankit",
+      "content": "Sapna aapko bula rahi hain aur keh rahi hain ki unse rakhi bandhwa lijiye.",
+      "createdAt": "2026-08-28T06:27:10.325Z",
+      "createdAtIST": "28/8/2026, 11:57:10 am",
+      "delivered": true
+    },
+    {
+      "noteId": "NOTE_1787898470105_8dbr",
+      "senderId": "OWNER_001",
+      "senderName": "Ankit Singh",
+      "targetId": "OWNER_001",
+      "targetName": "Ankit Singh",
+      "content": "null",
+      "createdAt": "2026-08-28T06:27:50.105Z",
+      "createdAtIST": "28/8/2026, 11:57:50 am",
+      "delivered": true
+    },
+    {
+      "noteId": "NOTE_1787899141365_gijw",
+      "senderId": "OWNER_001",
+      "senderName": "Ankit Singh",
+      "targetId": "USER_001",
+      "targetName": "Sapna",
+      "content": "Aunga. Thodi der mein aunga.",
+      "createdAt": "2026-08-28T06:39:01.365Z",
+      "createdAtIST": "28/8/2026, 12:09:01 pm",
+      "delivered": false
+    },
+    {
+      "noteId": "NOTE_1787900945603_uoci",
+      "senderId": "USER_003",
+      "senderName": "Govind",
+      "targetId": "USER_001",
+      "targetName": "Sapna",
+      "content": "Please check the report by 5 PM",
+      "createdAt": "2026-08-28T07:09:05.603Z",
+      "createdAtIST": "28/8/2026, 12:39:05 pm",
+      "delivered": false
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Madhurita",
+  "description": "A real-time, voice-to-voice personal AI assistant with identity-aware memory, owner authentication, and ultra-low latency audio interaction.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
