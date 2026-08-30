@@ -129,6 +129,19 @@ async function runTests() {
     proactiveEngine.start(2 * 60_000);
     const result = await proactiveEngine.tick();
     console.log(`✅ Proactive engine found ${result.opportunities.length} opportunities`);
+
+    // Test new actOnOpportunity method
+    if (result.opportunities.length > 0) {
+      const acted = await proactiveEngine.actOnOpportunity(result.opportunities[0]);
+      console.log(`   Acted on first opportunity: ${acted.acted}`);
+    }
+
+    // Test getOpportunities
+    const opps = await proactiveEngine.getOpportunities();
+    if (Array.isArray(opps)) {
+      console.log(`   getOpportunities returned ${opps.length} opportunities`);
+    }
+
     passed++;
     proactiveEngine.stop();
   } catch (err: any) {
