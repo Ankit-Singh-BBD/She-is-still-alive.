@@ -59,14 +59,8 @@ export function GreetingHero({ identityName, onQuickAction }: GreetingHeroProps)
         </span>
       </motion.h1>
 
-      <motion.p
-        initial={{ y: 12, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.18, duration: 0.5 }}
-        className="mt-3 text-lg text-white/70 font-light"
-      >
-        How can I help you today?
-      </motion.p>
+      {/* Removed: "How can I help you today?" — that's prompted behavior, not natural intelligence.
+          Madhurita speaks when she has something to say, stays silent otherwise. */}
 
       {/* Quick action chips */}
       <motion.div
