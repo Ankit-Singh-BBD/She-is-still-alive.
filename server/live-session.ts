@@ -26,7 +26,9 @@ export const activeLiveSessions = new Set<LiveSessionManager>();
 export function broadcastVoiceConfigUpdate(updated: PersonaAndVoiceConfig, identityId?: string) {
   for (const session of activeLiveSessions) {
     if (!identityId || session.getCurrentContext().id === identityId) {
-      session.applyVoiceConfig(updated).catch(() => {});
+      try {
+        session.applyVoiceConfig(updated);
+      } catch (e) {}
     }
   }
 }
@@ -51,6 +53,9 @@ export class LiveSessionManager {
   private lastProcessedUserTranscript = '';
   private lastUserTurnContent = '';
   private hasRunStartupCognition = false;
+  private pendingSessionRestart: boolean = false;
+  private pendingContextUpdate: AuthContext | null = null;
+  private pendingVoiceUpdate: PersonaAndVoiceConfig | null = null;
   private sessionId: string;
   private activeSessionToken: object = {};
   private activeVoiceName: FemaleVoiceName = 'Callirrhoe';
@@ -78,42 +83,37 @@ export class LiveSessionManager {
     }
   }
 
-  public async applyVoiceConfig(newVoiceConfig: PersonaAndVoiceConfig) {
+  public applyVoiceConfig(newVoiceConfig: PersonaAndVoiceConfig) {
     this.sendToClient({
       type: 'voice_config_changed',
       config: newVoiceConfig,
     });
     this.broadcastRuntimeState();
-
-    // Reconnect session cleanly so updated voice/language/style/length system instructions take effect
-    if (this.session && this.isAlive) {
-      this.activeVoiceName = newVoiceConfig.voiceName;
-      try {
-        const oldSession = this.session;
-        this.session = null;
-        try {
-          oldSession.close();
-        } catch (e) {
-          // ignore
-        }
-        await this.start();
-      } catch (err) {
-        console.warn('Could not cleanly reinitialize live session with new voice/style config:', err);
-      }
-    }
+    
+    // Defer the restart until the model finishes its current turn
+    this.activeVoiceName = newVoiceConfig.voiceName;
+    this.pendingSessionRestart = true;
   }
 
-  public async updateContext(newContext: AuthContext) {
-    this.activeSessionToken = {}; // Immediately invalidate callbacks from previous session
-    this.currentContext = newContext;
-    this.hasRunStartupCognition = false;
-    this.modelTurnBuffer = '';
-    this.userInputTranscriptBuffer = '';
-    this.lastProcessedUserTranscript = '';
-    this.lastUserTurnContent = '';
-    this.sessionId = `SESS_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  public updateContext(newContext: AuthContext) {
+    // Defer the context update and restart until the model finishes its current turn
+    this.pendingContextUpdate = newContext;
+    this.pendingSessionRestart = true;
+  }
 
-    this.broadcastRuntimeState();
+  private async executePendingRestarts() {
+    if (this.pendingContextUpdate) {
+      this.activeSessionToken = {}; // Invalidate old session callbacks
+      this.currentContext = this.pendingContextUpdate;
+      this.pendingContextUpdate = null;
+      this.hasRunStartupCognition = false;
+      this.modelTurnBuffer = '';
+      this.userInputTranscriptBuffer = '';
+      this.lastProcessedUserTranscript = '';
+      this.lastUserTurnContent = '';
+      this.sessionId = `SESS_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      this.broadcastRuntimeState();
+    }
 
     if (this.session && this.isAlive) {
       try {
@@ -121,17 +121,15 @@ export class LiveSessionManager {
         this.session = null;
         try {
           oldSession.close();
-        } catch (e) {
-          // ignore
-        }
-        await this.start();
+        } catch (e) {}
+        await this.start(true); // skip startup cognition on mid-conversation restart
       } catch (err) {
-        console.warn('Could not cleanly reinitialize live session with updated context:', err);
+        console.warn('Could not cleanly reinitialize live session:', err);
       }
     }
   }
 
-  public async start() {
+  public async start(skipStartupCognition: boolean = false) {
     try {
       const sessionToken = {};
       this.activeSessionToken = sessionToken;
@@ -242,6 +240,11 @@ export class LiveSessionManager {
                   assistantText,
                 }, this.sessionId).catch(() => {});
               }
+
+              if (this.pendingSessionRestart) {
+                this.pendingSessionRestart = false;
+                await this.executePendingRestarts();
+              }
             }
 
             // 3. Interruption signal
@@ -312,7 +315,7 @@ export class LiveSessionManager {
       // Cognitive startup: assemble factual context for the LLM to reason over.
       // The LLM decides whether to speak and what to say based on facts.
       // NO [SYSTEM TRIGGER] injection, NO forced behavioral commands.
-      if (!this.hasRunStartupCognition) {
+      if (!this.hasRunStartupCognition && !skipStartupCognition) {
         this.hasRunStartupCognition = true;
         const cognitiveContext = cognition.assembleCognitiveContext(
           this.currentContext.id,
@@ -372,11 +375,11 @@ export class LiveSessionManager {
       });
     }
 
-    // 2. UPDATE AUTHORITATIVE RUNTIME STATE & SYNC STATE TO UI BEFORE LLM RESPONDS
+    // 2. MARK PENDING RESTARTS BUT KEEP CURRENT SESSION ALIVE
     if (pendingContextUpdate) {
-      await this.updateContext(pendingContextUpdate);
+      this.updateContext(pendingContextUpdate); // Sets pending flag
     } else if (pendingVoiceUpdate) {
-      await this.applyVoiceConfig(pendingVoiceUpdate);
+      this.applyVoiceConfig(pendingVoiceUpdate); // Sets pending flag
     } else {
       this.broadcastRuntimeState();
     }

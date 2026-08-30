@@ -806,6 +806,7 @@ ${relevantLines ? `\n=== RELEVANT HISTORICAL RECALL ===\n\n${relevantLines}` : '
 
 • To clear conversation history: call "clearConversationHistory" tool. Never claim cleared without calling it.
 • To manage tasks: call "manageTask" with appropriate action. Single source of truth is the task record.
+• To update voice profile, language, speaking style, or response length: call "updateVoiceConfiguration" tool. NEVER claim you changed it without calling the tool.
 ${ctx.isOwner ? '• For registered user info: call "getRegisteredUsersInfo" tool. Never guess counts.' : ''}
 ${ctx.currentMessage ? `\n=== CURRENT INPUT ===\n\n"${ctx.currentMessage}"` : ''}`;
   }
@@ -932,7 +933,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-3.5-flash-lite',
         contents: [{ role: 'user', parts: [{ text: analysisPrompt }] }],
         config: {
           temperature: 0.2,
@@ -1109,7 +1110,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
         : allMadhuritaTools.filter((t) => t.name !== 'getRegisteredUsersInfo');
 
       let chatResponse = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-3.5-flash-lite',
         contents,
         config: {
           systemInstruction: systemPrompt,
@@ -1169,7 +1170,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
 
         // Re-generate response with verified tool execution outputs AND updated system prompt
         chatResponse = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: 'gemini-3.5-flash-lite',
           contents,
           config: {
             systemInstruction: updatedSystemPrompt,
