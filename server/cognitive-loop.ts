@@ -10,6 +10,9 @@
 
 import { AuthContext } from './auth.js';
 import { db } from './db.js';
+import { cognitiveDecisionEngine } from './cognitive-decision-engine.js';
+import { responseGenerator } from './response-generator.js';
+import { executeBackendTool } from './tools.js';
 import type { CognitiveDecision } from './cognitive-contract.js';
 
 // ===================================================================
@@ -487,52 +490,142 @@ export class CognitiveLoop {
   }
 
   /**
-   * Execute complete cognitive loop
+   * Execute complete cognitive loop.
+   * Uses real LLM via cognitiveDecisionEngine and responseGenerator.
+   * Uses real tool execution via executeBackendTool.
    */
   async execute(
     userInput: string,
     channel: 'text' | 'voice',
     sessionId: string,
-    authContext: AuthContext,
-    // These functions will be provided by the cognition engine
-    getCognitiveDecisionFn: (context: CognitiveContext) => Promise<CognitiveDecision>,
-    executeToolFn: (name: string, args: any, ctx: AuthContext) => Promise<any>,
-    generateResponseFn: (decision: CognitiveDecision, verification: Verification) => Promise<string>
-  ): Promise<{ response: Response; loopId: string; timings: Map<string, number> }> {
+    authContext: AuthContext
+  ): Promise<{ response: Response; loopId: string; timings: Map<string, number>; decision: CognitiveDecision }> {
     this.currentLoopId = this.generateLoopId();
     this.stageTimings.clear();
 
     console.log(`[COGNITIVE LOOP ${this.currentLoopId}] START`);
+
+    // Persist user turn immediately
+    db.logTurn(authContext.id, 'user', userInput.trim(), sessionId);
 
     // Execute all 12 stages in order
     const perception = await this.perceive(userInput, channel, sessionId);
     const identity = await this.identify(perception, authContext);
     const context = await this.recall(identity, perception);
 
-    // Get cognitive decision from LLM (stages 4-6 combined)
-    const cognitiveDecision = await getCognitiveDecisionFn(context);
+    // Stages 4-6: LLM performs UNDERSTAND/REASON/DECIDE
+    const cognitiveDecision = await cognitiveDecisionEngine.getDecision(context);
+
+    if (!cognitiveDecision) {
+      // Hard failure — respond with fallback
+      const fallbackText = 'I am having trouble thinking right now. Please try again in a moment.';
+      db.logTurn(identity.identityId, 'assistant', fallbackText, sessionId);
+      console.log(`[COGNITIVE LOOP ${this.currentLoopId}] DECISION FAILED — fallback response`);
+      return {
+        response: { text: fallbackText, metadata: { confidence: 0, basedOnVerification: false, tone: 'neutral' } },
+        loopId: this.currentLoopId,
+        timings: new Map(this.stageTimings),
+        decision: {} as CognitiveDecision,
+      };
+    }
 
     const understanding = await this.understand(context, cognitiveDecision);
     const reasoning = await this.reason(understanding, cognitiveDecision);
     const decision = await this.decide(reasoning, cognitiveDecision);
 
-    // Execute and verify
-    const actionResult = await this.act(decision, authContext, executeToolFn);
+    // Stage 7: ACT — execute proposed tools using real executor
+    const actionResult = await this.act(decision, authContext, executeBackendTool);
+
+    // Stage 8: VERIFY
     const verification = await this.verify(actionResult, decision);
 
-    // Generate response AFTER state resolved
-    const response = await this.respond(verification, decision, generateResponseFn);
+    // Stage 9: RESPOND — generate natural language AFTER state resolved
+    const responseText = await responseGenerator.generate(
+      decision.cognitiveDecision,
+      verification,
+      userInput,
+      identity.name,
+      identity.role,
+      identity.isOwnerAuthenticated
+    );
+    const response: Response = {
+      text: responseText,
+      metadata: {
+        confidence: decision.cognitiveDecision.confidence,
+        basedOnVerification: verification.verified,
+        tone: decision.cognitiveDecision.speechDecision.tone || 'neutral',
+      },
+    };
 
-    // Learn and persist
+    // Stage 10: LEARN
     const learning = await this.learn(context, decision, response);
+
+    // Stage 11: UPDATE — apply knowledge updates from decision
     const update = await this.update(learning, decision);
+    this.applyKnowledgeUpdates(decision.cognitiveDecision, identity.identityId);
+
+    // Stage 12: PERSIST
     await this.persist(context, response, update);
 
     return {
       response,
       loopId: this.currentLoopId,
       timings: new Map(this.stageTimings),
+      decision: decision.cognitiveDecision,
     };
+  }
+
+  /**
+   * Apply knowledge updates from a cognitive decision to authoritative state.
+   */
+  private applyKnowledgeUpdates(decision: CognitiveDecision, identityId: string): void {
+    for (const update of decision.knowledgeUpdates) {
+      try {
+        switch (update.action) {
+          case 'create':
+            if (update.content) {
+              db.validateAndApplyMemoryCandidate(
+                identityId,
+                update.content,
+                'fact',
+                update.confidence ?? 0.8,
+                update.importance ?? 0.7,
+                false
+              );
+            }
+            break;
+          // (create case doesn't return memory, that's fine)
+          case 'update':
+            if (update.targetMemoryId && update.content) {
+              db.updateMemoryContent(identityId, update.targetMemoryId, update.content);
+            }
+            break;
+          case 'supersede':
+            if (update.targetMemoryId && update.content) {
+              // Add new memory, then supersede old
+              const result = db.validateAndApplyMemoryCandidate(
+                identityId,
+                update.content,
+                'fact',
+                update.confidence ?? 0.9,
+                update.importance ?? 0.8,
+                false
+              );
+              if (result.memory) {
+                db.supersedeMemory(identityId, update.targetMemoryId, result.memory.memoryId, update.justification);
+              }
+            }
+            break;
+          case 'retire':
+            if (update.targetMemoryId) {
+              db.deleteMemory(identityId, update.targetMemoryId);
+            }
+            break;
+        }
+      } catch (err: any) {
+        console.warn(`[COGNITIVE LOOP ${this.currentLoopId}] knowledge update failed:`, err.message);
+      }
+    }
   }
 }
 

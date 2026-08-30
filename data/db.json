@@ -590,6 +590,20 @@
       "createdAtIST": "30 August 2026, 02:33:11 pm",
       "updatedAt": "2026-08-30T09:03:11.794Z",
       "updatedAtIST": "30 August 2026, 02:33:11 pm"
+    },
+    {
+      "memoryId": "MEM_1788122217849_qksuw",
+      "ownerId": "TEST_USER",
+      "content": "Test user likes testing",
+      "category": "fact",
+      "confidence": 0.9500000000000001,
+      "importance": 0.8,
+      "evidenceCount": 2,
+      "novelty": 1,
+      "createdAt": "2026-08-30T20:36:57.849Z",
+      "createdAtIST": "31 August 2026, 02:06:57 am",
+      "updatedAt": "2026-08-30T20:37:23.300Z",
+      "updatedAtIST": "31 August 2026, 02:07:23 am"
     }
   ],
   "conversations": [
@@ -4723,11 +4737,79 @@
       "referencedPeople": [],
       "importantEvents": [],
       "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788122217838_xwdj",
+      "speaker": "User",
+      "identityId": "UNKNOWN",
+      "role": "user",
+      "content": "Hello, this is a test message",
+      "timestamp": "2026-08-30T20:36:57.838Z",
+      "istDate": "31 August 2026",
+      "istTime": "02:06:57 am",
+      "timestampIST": "31 August 2026, 02:06:57 am",
+      "sessionId": "TEST_SESSION",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788122217845_jgoq",
+      "speaker": "Madhurita",
+      "identityId": "UNKNOWN",
+      "role": "assistant",
+      "content": "Unable to perform full semantic reasoning. Treating as general conversational input.",
+      "timestamp": "2026-08-30T20:36:57.845Z",
+      "istDate": "31 August 2026",
+      "istTime": "02:06:57 am",
+      "timestampIST": "31 August 2026, 02:06:57 am",
+      "sessionId": "TEST_SESSION",
+      "turnOrder": 2,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788122243289_jbbr",
+      "speaker": "User",
+      "identityId": "UNKNOWN",
+      "role": "user",
+      "content": "Hello, this is a test message",
+      "timestamp": "2026-08-30T20:37:23.289Z",
+      "istDate": "31 August 2026",
+      "istTime": "02:07:23 am",
+      "timestampIST": "31 August 2026, 02:07:23 am",
+      "sessionId": "TEST_SESSION",
+      "turnOrder": 3,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788122243295_gj26",
+      "speaker": "Madhurita",
+      "identityId": "UNKNOWN",
+      "role": "assistant",
+      "content": "Unable to perform full semantic reasoning. Treating as general conversational input.",
+      "timestamp": "2026-08-30T20:37:23.295Z",
+      "istDate": "31 August 2026",
+      "istTime": "02:07:23 am",
+      "timestampIST": "31 August 2026, 02:07:23 am",
+      "sessionId": "TEST_SESSION",
+      "turnOrder": 4,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
     }
   ],
   "worldAwareness": {
-    "lastSystemStartup": "2026-08-30T19:46:45.204Z",
-    "lastSystemStartupIST": "31 August 2026, 01:16:45 am",
+    "lastSystemStartup": "2026-08-30T20:42:37.536Z",
+    "lastSystemStartupIST": "31 August 2026, 02:12:37 am",
     "recentVisitors": [
       {
         "identityId": "USER_006",
@@ -4753,9 +4835,9 @@
       {
         "identityId": "UNKNOWN",
         "name": "User",
-        "lastSeenISO": "2026-08-30T10:24:50.110Z",
-        "lastSeenIST": "30 August 2026, 03:54:50 pm",
-        "sessionCount": 12
+        "lastSeenISO": "2026-08-30T20:37:23.295Z",
+        "lastSeenIST": "31 August 2026, 02:07:23 am",
+        "sessionCount": 16
       },
       {
         "identityId": "USER_001",
@@ -4773,7 +4855,26 @@
       }
     ],
     "recentInteractions": [],
-    "openLoops": [],
+    "openLoops": [
+      {
+        "id": "LOOP_1788122243286_15zr",
+        "identityId": "TEST_USER",
+        "name": "Test loop",
+        "description": "This is a test open loop",
+        "createdAtIST": "31 August 2026, 02:07:23 am",
+        "createdAtISO": "2026-08-30T20:37:23.286Z",
+        "status": "open"
+      },
+      {
+        "id": "LOOP_1788122217836_fgvq",
+        "identityId": "TEST_USER",
+        "name": "Test loop",
+        "description": "This is a test open loop",
+        "createdAtIST": "31 August 2026, 02:06:57 am",
+        "createdAtISO": "2026-08-30T20:36:57.836Z",
+        "status": "open"
+      }
+    ],
     "milestones": []
   },
   "patterns": [],
@@ -5027,6 +5128,21 @@
       "turnCount": 2,
       "referencedEntities": [],
       "unresolvedTopics": []
+    },
+    {
+      "sessionId": "TEST_SESSION",
+      "identityId": "UNKNOWN",
+      "userName": "User",
+      "startedAt": "2026-08-30T20:36:57.838Z",
+      "startedAtIST": "31 August 2026, 02:06:57 am",
+      "lastActiveAt": "2026-08-30T20:37:23.295Z",
+      "lastActiveAtIST": "31 August 2026, 02:07:23 am",
+      "durationMs": 25457,
+      "durationHuman": "< 1 min",
+      "topicsDiscussed": [],
+      "turnCount": 4,
+      "referencedEntities": [],
+      "unresolvedTopics": []
     }
   ],
   "systemVoiceConfig": {
@@ -5040,7 +5156,38 @@
     "conversationalStyle": "interactive_engaging"
   },
   "crossUserNotes": [],
-  "tasks": [],
+  "tasks": [
+    {
+      "id": "TASK_1788122217832_7s04",
+      "identityId": "TEST_USER",
+      "title": "Test urgent task",
+      "status": "pending",
+      "createdAt": "2026-08-30T20:36:57.832Z",
+      "updatedAt": "2026-08-30T20:36:57.832Z",
+      "dueAt": "2026-08-30T20:35:57.832Z",
+      "priority": "high",
+      "lastEvaluatedAt": "2026-08-30T20:36:57.835Z",
+      "executionCount": 1,
+      "lastExecutionResult": "pending",
+      "source": "user_explicit",
+      "lastTriggeredAt": "2026-08-30T20:36:57.835Z"
+    },
+    {
+      "id": "TASK_1788122243282_rp5k",
+      "identityId": "TEST_USER",
+      "title": "Test urgent task",
+      "status": "pending",
+      "createdAt": "2026-08-30T20:37:23.282Z",
+      "updatedAt": "2026-08-30T20:37:23.282Z",
+      "dueAt": "2026-08-30T20:36:23.282Z",
+      "priority": "high",
+      "lastEvaluatedAt": "2026-08-30T20:37:23.285Z",
+      "executionCount": 1,
+      "lastExecutionResult": "pending",
+      "source": "user_explicit",
+      "lastTriggeredAt": "2026-08-30T20:37:23.285Z"
+    }
+  ],
   "relationships": [],
   "proactiveEvents": [],
   "requests": [],
@@ -5060,5 +5207,220 @@
       "adapts_naturally": true,
       "one_consistent_entity": true
     }
-  }
+  },
+  "systemEvents": [
+    {
+      "eventId": "event_1788121860365_1_y7vhi",
+      "eventType": "environment_change",
+      "timestamp": "2026-08-30T20:31:00.365Z",
+      "timestampIST": "31/8/2026, 02:01:00",
+      "payload": {
+        "changeType": "system_startup",
+        "description": "Madhurita cognitive system started",
+        "version": "1.0.0",
+        "port": 3000
+      },
+      "importance": 40,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122217829_1_tm9g3",
+      "eventType": "user_arrival",
+      "timestamp": "2026-08-30T20:36:57.828Z",
+      "timestampIST": "31/8/2026, 02:06:57",
+      "identityId": "TEST_USER",
+      "payload": {
+        "name": "Test User",
+        "channel": "text",
+        "isReturningUser": false
+      },
+      "importance": 75,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122217834_2_1c2lb",
+      "eventType": "task_due",
+      "timestamp": "2026-08-30T20:36:57.834Z",
+      "timestampIST": "31/8/2026, 02:06:57",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788122217832_7s04",
+        "taskTitle": "Test urgent task",
+        "dueAt": "2026-08-30T20:35:57.832Z",
+        "overdue": true
+      },
+      "importance": 95,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122217841_3_8ztgl",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-30T20:36:57.841Z",
+      "timestampIST": "31/8/2026, 02:06:57",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788122217832_7s04",
+        "previousState": "none",
+        "newState": "pending",
+        "taskTitle": "Test urgent task"
+      },
+      "importance": 45,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122217843_4_w891v",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-30T20:36:57.843Z",
+      "timestampIST": "31/8/2026, 02:06:57",
+      "identityId": "TEST_USER",
+      "payload": {
+        "loopId": "LOOP_1788122217836_fgvq",
+        "previousState": "none",
+        "newState": "open",
+        "description": "Test loop"
+      },
+      "importance": 55,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122217848_5_ncmdh",
+      "eventType": "user_arrival",
+      "timestamp": "2026-08-30T20:36:57.848Z",
+      "timestampIST": "31/8/2026, 02:06:57",
+      "identityId": "PERSIST_TEST",
+      "payload": {
+        "name": "Persist Test",
+        "channel": "text",
+        "isReturningUser": false
+      },
+      "importance": 75,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122243279_1_6bksb",
+      "eventType": "user_arrival",
+      "timestamp": "2026-08-30T20:37:23.278Z",
+      "timestampIST": "31/8/2026, 02:07:23",
+      "identityId": "TEST_USER",
+      "payload": {
+        "name": "Test User",
+        "channel": "text",
+        "isReturningUser": false
+      },
+      "importance": 75,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122243283_2_l1sef",
+      "eventType": "task_due",
+      "timestamp": "2026-08-30T20:37:23.283Z",
+      "timestampIST": "31/8/2026, 02:07:23",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788122243282_rp5k",
+        "taskTitle": "Test urgent task",
+        "dueAt": "2026-08-30T20:36:23.282Z",
+        "overdue": true
+      },
+      "importance": 95,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122243292_3_haypv",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-30T20:37:23.292Z",
+      "timestampIST": "31/8/2026, 02:07:23",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788122243282_rp5k",
+        "previousState": "none",
+        "newState": "pending",
+        "taskTitle": "Test urgent task"
+      },
+      "importance": 45,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122243294_4_k5jif",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-30T20:37:23.294Z",
+      "timestampIST": "31/8/2026, 02:07:23",
+      "identityId": "TEST_USER",
+      "payload": {
+        "loopId": "LOOP_1788122243286_15zr",
+        "previousState": "none",
+        "newState": "open",
+        "description": "Test loop"
+      },
+      "importance": 55,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122243298_5_8kkfd",
+      "eventType": "user_arrival",
+      "timestamp": "2026-08-30T20:37:23.298Z",
+      "timestampIST": "31/8/2026, 02:07:23",
+      "identityId": "PERSIST_TEST",
+      "payload": {
+        "name": "Persist Test",
+        "channel": "text",
+        "isReturningUser": false
+      },
+      "importance": 75,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122509092_1_rtgao",
+      "eventType": "environment_change",
+      "timestamp": "2026-08-30T20:41:49.091Z",
+      "timestampIST": "31/8/2026, 02:11:49",
+      "payload": {
+        "changeType": "system_startup",
+        "description": "Madhurita cognitive system started",
+        "version": "1.0.0",
+        "port": 3000
+      },
+      "importance": 40,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788122557654_1_ihnfj",
+      "eventType": "environment_change",
+      "timestamp": "2026-08-30T20:42:37.653Z",
+      "timestampIST": "31/8/2026, 02:12:37",
+      "payload": {
+        "changeType": "system_startup",
+        "description": "Madhurita cognitive system started",
+        "version": "1.0.0",
+        "port": 3000
+      },
+      "importance": 40,
+      "processed": false,
+      "cognitionTriggered": false
+    }
+  ]
 }

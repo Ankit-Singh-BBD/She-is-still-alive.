@@ -12,6 +12,14 @@ import { cognition } from './server/cognition.js';
 import { backupEngine } from './server/backup.js';
 import { LiveSessionManager, broadcastVoiceConfigUpdate, broadcastRuntimeStateToAllSessions } from './server/live-session.js';
 import { buildRuntimeContext } from './server/runtime-state.js';
+import { cognitiveLoop } from './server/cognitive-loop.js';
+import { learningPipeline } from './server/learning-pipeline.js';
+import { awarenessEngine } from './server/awareness-engine.js';
+import { taskExecutor } from './server/task-executor.js';
+import { loopManager } from './server/loop-manager.js';
+import { proactiveEngine } from './server/proactive-engine.js';
+import { startEventCognitionDrain } from './server/event-cognition.js';
+import { eventBus, emitUserArrival, emitUserDeparture, emitEnvironmentChange } from './server/event-system.js';
 
 dotenv.config();
 
@@ -235,6 +243,27 @@ async function startServer() {
 
     const wa = db.getWorldAwareness();
     res.json({ success: true, worldAwareness: wa });
+  });
+
+  // Awareness Snapshot Endpoint: GET (Owner-only)
+  app.get('/api/awareness/snapshot', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Owner-only' });
+    }
+    const snapshot = awarenessEngine.snapshot();
+    res.json({ success: true, snapshot });
+  });
+
+  // Recent System Events Endpoint: GET (Owner-only)
+  app.get('/api/events/recent', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Owner-only' });
+    }
+    const limit = parseInt(req.query.limit as string) || 50;
+    const events = db.getRecentSystemEvents(limit);
+    res.json({ success: true, events });
   });
 
   // User Registration / Identification
@@ -909,7 +938,8 @@ async function startServer() {
   });
 
   // Direct Cognitive Conversational Endpoint: POST /api/chat
-  // Executes the RECALL → ANALYSE → LEARN → DECIDE → RESPOND pipeline
+  // Executes the 12-stage cognitive loop: PERCEIVE → IDENTIFY → RECALL →
+  // UNDERSTAND → REASON → DECIDE → ACT → VERIFY → RESPOND → LEARN → UPDATE → PERSIST
   app.post('/api/chat', async (req, res) => {
     const token = req.headers.authorization?.replace('Bearer ', '');
     const { message, userId, name, sessionId } = req.body;
@@ -927,25 +957,67 @@ async function startServer() {
       effectiveName = name;
     }
 
+    // Update presence
+    const finalSessionId = sessionId || `SESSION_${new Date().toISOString().slice(0, 10)}`;
+    db.startPresenceSession({
+      sessionId: finalSessionId,
+      identityId: callerContext.id,
+      connectedAt: new Date().toISOString(),
+      lastActivityAt: new Date().toISOString(),
+      status: 'active',
+      channel: 'text',
+    });
+
     try {
-      const result = await cognition.processChatTurn(
-        callerContext.id,
-        callerContext.role,
-        effectiveName,
+      // Use the 12-stage cognitive loop (Requirement #37)
+      const result = await cognitiveLoop.execute(
         message,
-        sessionId
+        'text',
+        finalSessionId,
+        callerContext
       );
+
+      // Run post-interaction learning pipeline asynchronously (Requirement #15)
+      learningPipeline.run(
+        callerContext.id,
+        effectiveName,
+        callerContext.role,
+        message,
+        result.response.text,
+        finalSessionId
+      ).catch(err => console.warn('[CHAT] post-learning failed:', err.message));
+
       res.json({
         success: true,
-        reply: result.reply,
-        identity: result.identity,
-        temporal: result.temporal,
+        reply: result.response.text,
+        identity: { id: callerContext.id, name: effectiveName, role: callerContext.role },
+        loopId: result.loopId,
+        confidence: result.response.metadata.confidence,
+        basedOnVerification: result.response.metadata.basedOnVerification,
       });
     } catch (err: any) {
       console.error('Chat endpoint failure:', err);
-      res.status(500).json({
-        error: err.message || 'Internal cognitive processing error',
-      });
+      // Fall back to existing cognition engine
+      try {
+        const result = await cognition.processChatTurn(
+          callerContext.id,
+          callerContext.role,
+          effectiveName,
+          message,
+          sessionId
+        );
+        res.json({
+          success: true,
+          reply: result.reply,
+          identity: result.identity,
+          temporal: result.temporal,
+          fallback: true,
+        });
+      } catch (fallbackErr: any) {
+        res.status(500).json({
+          error: fallbackErr.message || 'Internal cognitive processing error',
+        });
+      }
     }
   });
 
@@ -1322,6 +1394,26 @@ async function startServer() {
       console.log(`[MADHURITA IDENTITY] ✓ Version: ${identity?.systemVersion}`);
     }
 
+    // ===================================================================
+    // START COGNITIVE SUBSYSTEMS (Requirement #37, #27, #18, #15)
+    // ===================================================================
+    // Awareness engine: continuous operational awareness
+    awarenessEngine.start(30_000);
+    // Task executor: actually executes due tasks
+    taskExecutor.start(60_000);
+    // Loop manager: continuous relevance evaluation
+    loopManager.start(5 * 60_000);
+    // Proactive reasoning: decide when to initiate
+    proactiveEngine.start(2 * 60_000);
+    // Drain any events recorded but not processed
+    startEventCognitionDrain().catch(err => console.error('[STARTUP] event drain failed:', err.message));
+    // Record system startup event
+    emitEnvironmentChange('system_startup', 'Madhurita cognitive system started', {
+      version: '1.0.0',
+      port: PORT,
+    }).catch(err => console.error('[STARTUP] emit failed:', err.message));
+
+    console.log(`[COGNITIVE] ✓ All subsystems online (awareness, tasks, loops, proactive, events)`);
     console.log(`Madhurita AI Assistant running on http://0.0.0.0:${PORT}`);
   });
 }

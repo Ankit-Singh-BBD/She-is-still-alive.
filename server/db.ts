@@ -106,6 +106,9 @@ export interface MemoryRecord {
   novelty?: number;
   futureUsefulness?: number;
   supersededBy?: string;
+  supersededAt?: string;
+  supersededAtIST?: string;
+  supersededReason?: string;
   expiresAt?: string;
   createdAt: string;
   createdAtIST?: string;
@@ -184,9 +187,17 @@ export interface TaskItem {
   identityId: string;
   title: string;
   description?: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'paused';
+  status: 'pending' | 'in_progress' | 'completed' | 'paused' | 'cancelled';
   createdAt: string;
   updatedAt: string;
+  // Execution fields (Requirement #9: Task system that actually executes)
+  dueAt?: string;
+  priority?: 'low' | 'medium' | 'high';
+  lastEvaluatedAt?: string;
+  lastTriggeredAt?: string;
+  executionCount?: number;
+  lastExecutionResult?: 'success' | 'failure' | 'skipped' | 'pending';
+  source?: 'user_explicit' | 'inferred' | 'commitment' | 'follow_up';
 }
 
 export interface EntityRelationship {
@@ -293,6 +304,78 @@ export interface DatabaseSchema {
   requests?: RequestLifecycleItem[];
   commitments?: ExplicitCommitment[];
   systemVoiceConfig?: PersonaAndVoiceConfig;
+  systemEvents?: SystemEvent[]; // Event log for event-driven cognition
+  failedOperations?: FailedOperation[]; // Failed operation log
+  behaviorEvaluations?: BehaviorEvaluation[]; // Self-improvement evaluations
+  presenceSessions?: PresenceSession[]; // Active presence tracking
+}
+
+// ===================================================================
+// EVENT SYSTEM (Requirement #34)
+// ===================================================================
+export interface SystemEvent {
+  eventId: string;
+  eventType:
+    | 'user_arrival' | 'user_departure' | 'reconnection'
+    | 'new_message' | 'task_state_change' | 'loop_state_change'
+    | 'environment_change' | 'scheduled_event' | 'new_learning'
+    | 'correction' | 'behavior_change' | 'memory_created'
+    | 'memory_superseded' | 'task_due' | 'loop_resolved'
+    | 'relationship_inferred' | 'commitment_made';
+  timestamp: string;
+  timestampIST: string;
+  identityId?: string;
+  payload: any;
+  importance: number; // 0-100
+  processed: boolean;
+  cognitionTriggered: boolean;
+  triggeredActions?: string[];
+  error?: string;
+}
+
+// ===================================================================
+// FAILED OPERATIONS (Requirement #38)
+// ===================================================================
+export interface FailedOperation {
+  operationId: string;
+  timestamp: string;
+  timestampIST: string;
+  operationType: string;
+  identityId?: string;
+  error: string;
+  context: any;
+  retryable: boolean;
+  retryCount: number;
+  recovered: boolean;
+  patternDetected?: string; // e.g., "repeated_failure:tool_x"
+}
+
+// ===================================================================
+// BEHAVIOR EVALUATION (Requirement #15)
+// ===================================================================
+export interface BehaviorEvaluation {
+  evaluationId: string;
+  timestamp: string;
+  timestampIST: string;
+  interactionId: string;
+  category: 'mistake' | 'misunderstanding' | 'inefficiency' | 'repeated_failure' | 'success';
+  description: string;
+  impact: 'low' | 'medium' | 'high';
+  learningExtracted: string;
+  improvementAction: string;
+  status: 'identified' | 'learning_applied' | 'verified';
+}
+
+// ===================================================================
+// PRESENCE TRACKING
+// ===================================================================
+export interface PresenceSession {
+  sessionId: string;
+  identityId: string;
+  connectedAt: string;
+  lastActivityAt: string;
+  status: 'active' | 'idle' | 'away' | 'offline';
+  channel: 'text' | 'voice' | 'both';
 }
 
 export function getISTDateTime(date: Date = new Date()): {
@@ -358,6 +441,10 @@ class DatabaseEngine {
       openLoops: [],
       milestones: [],
     },
+    systemEvents: [],
+    failedOperations: [],
+    behaviorEvaluations: [],
+    presenceSessions: [],
   };
   private isLoaded = false;
 
@@ -559,6 +646,170 @@ class DatabaseEngine {
     }
 
     return { valid: issues.length === 0, issues };
+  }
+
+  // ===================================================================
+  // SYSTEM EVENT OPERATIONS (Requirement #27: Event-Driven Cognition)
+  // ===================================================================
+
+  /**
+   * Persist a system event to authoritative state.
+   * Used by the event system to record meaningful occurrences.
+   */
+  public recordSystemEvent(event: SystemEvent): boolean {
+    if (!this.data.systemEvents) this.data.systemEvents = [];
+    this.data.systemEvents.push(event);
+    // Cap at 2000 events to prevent unbounded growth
+    if (this.data.systemEvents.length > 2000) {
+      this.data.systemEvents = this.data.systemEvents.slice(-2000);
+    }
+    const ok = this.save();
+    this.logMutation(event.identityId, 'recordSystemEvent', ok);
+    return ok;
+  }
+
+  /**
+   * Get recent system events, newest first.
+   * Used by cognitive awareness and decision-making.
+   */
+  public getRecentSystemEvents(limit: number = 50, identityId?: string): SystemEvent[] {
+    const events = this.data.systemEvents || [];
+    const filtered = identityId
+      ? events.filter(e => e.identityId === identityId)
+      : events;
+    return filtered
+      .slice()
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .slice(0, limit);
+  }
+
+  /**
+   * Get unprocessed events (cognition not yet triggered).
+   * Used by event-driven cognition loop.
+   */
+  public getUnprocessedSystemEvents(limit: number = 20): SystemEvent[] {
+    const events = this.data.systemEvents || [];
+    return events
+      .filter(e => !e.processed)
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      .slice(0, limit);
+  }
+
+  /**
+   * Mark a system event as processed.
+   */
+  public markSystemEventProcessed(eventId: string, cognitionTriggered: boolean, triggeredActions: string[]): boolean {
+    if (!this.data.systemEvents) return false;
+    const event = this.data.systemEvents.find(e => e.eventId === eventId);
+    if (!event) return false;
+    event.processed = true;
+    event.cognitionTriggered = cognitionTriggered;
+    event.triggeredActions = triggeredActions;
+    return this.save();
+  }
+
+  // ===================================================================
+  // FAILED OPERATION TRACKING (Requirement #38: Self-Improvement)
+  // ===================================================================
+
+  /**
+   * Record a failed operation for self-improvement analysis.
+   */
+  public recordFailedOperation(failure: FailedOperation): boolean {
+    if (!this.data.failedOperations) this.data.failedOperations = [];
+    this.data.failedOperations.push(failure);
+    if (this.data.failedOperations.length > 500) {
+      this.data.failedOperations = this.data.failedOperations.slice(-500);
+    }
+    return this.save();
+  }
+
+  /**
+   * Get recent failed operations for pattern detection.
+   */
+  public getRecentFailedOperations(limit: number = 50, retryable?: boolean): FailedOperation[] {
+    const failures = this.data.failedOperations || [];
+    const filtered = retryable !== undefined
+      ? failures.filter(f => f.retryable === retryable)
+      : failures;
+    return filtered
+      .slice()
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .slice(0, limit);
+  }
+
+  /**
+   * Increment retry count and update status of a failed operation.
+   */
+  public updateFailedOperation(operationId: string, updates: Partial<FailedOperation>): boolean {
+    if (!this.data.failedOperations) return false;
+    const op = this.data.failedOperations.find(f => f.operationId === operationId);
+    if (!op) return false;
+    Object.assign(op, updates);
+    return this.save();
+  }
+
+  // ===================================================================
+  // BEHAVIOR EVALUATION (Requirement #38: Self-Improvement)
+  // ===================================================================
+
+  /**
+   * Record a behavior evaluation for continuous improvement.
+   */
+  public recordBehaviorEvaluation(evaluation: BehaviorEvaluation): boolean {
+    if (!this.data.behaviorEvaluations) this.data.behaviorEvaluations = [];
+    this.data.behaviorEvaluations.push(evaluation);
+    if (this.data.behaviorEvaluations.length > 200) {
+      this.data.behaviorEvaluations = this.data.behaviorEvaluations.slice(-200);
+    }
+    return this.save();
+  }
+
+  /**
+   * Get recent behavior evaluations by status.
+   */
+  public getBehaviorEvaluations(limit: number = 50, status?: 'identified' | 'learning_applied' | 'verified'): BehaviorEvaluation[] {
+    const evals = this.data.behaviorEvaluations || [];
+    const filtered = status ? evals.filter(e => e.status === status) : evals;
+    return filtered
+      .slice()
+      .sort((a, b) => b.evaluationId.localeCompare(a.evaluationId))
+      .slice(0, limit);
+  }
+
+  // ===================================================================
+  // PRESENCE SESSION TRACKING
+  // ===================================================================
+
+  /**
+   * Start a presence session for an identity.
+   */
+  public startPresenceSession(session: PresenceSession): boolean {
+    if (!this.data.presenceSessions) this.data.presenceSessions = [];
+    this.data.presenceSessions.push(session);
+    return this.save();
+  }
+
+  /**
+   * Update a presence session's last activity or status.
+   */
+  public updatePresenceSession(sessionId: string, updates: Partial<PresenceSession>): boolean {
+    if (!this.data.presenceSessions) return false;
+    const session = this.data.presenceSessions.find(s => s.sessionId === sessionId);
+    if (!session) return false;
+    Object.assign(session, updates);
+    return this.save();
+  }
+
+  /**
+   * Get active presence sessions.
+   */
+  public getActivePresenceSessions(identityId?: string): PresenceSession[] {
+    const sessions = this.data.presenceSessions || [];
+    const filtered = identityId
+      ? sessions.filter(s => s.identityId === identityId)
+      : sessions;
+    return filtered.filter(s => s.status === 'active');
   }
 
   // --- Owner Operations ---
@@ -1142,6 +1393,33 @@ class DatabaseEngine {
     return this.save();
   }
 
+  /**
+   * Mark a memory as superseded by another memory (Requirement #12, #15).
+   * The old memory remains in storage but is no longer the active version.
+   */
+  public supersedeMemory(
+    identityId: string,
+    oldMemoryId: string,
+    newMemoryId: string,
+    reason: string
+  ): boolean {
+    if (!this.data.memories) return false;
+    const oldMem = this.data.memories.find(
+      m => m.memoryId === oldMemoryId && (m.ownerId === identityId || identityId === 'OWNER_001')
+    );
+    if (!oldMem) return false;
+    const newMem = this.data.memories.find(m => m.memoryId === newMemoryId);
+    if (!newMem) return false;
+    const nowIst = getISTDateTime();
+    oldMem.supersededBy = newMemoryId;
+    oldMem.supersededAt = nowIst.iso;
+    oldMem.supersededAtIST = nowIst.istFull;
+    oldMem.supersededReason = reason;
+    oldMem.updatedAt = nowIst.iso;
+    oldMem.updatedAtIST = nowIst.istFull;
+    return this.save();
+  }
+
   // --- Interaction / Session Metadata & World Awareness ---
   public touchSession(identityId: string, sessionId?: string, userName?: string): SessionMetadata {
     if (!this.data.sessions) this.data.sessions = [];
@@ -1716,11 +1994,105 @@ class DatabaseEngine {
     if (!this.data.tasks) return false;
     const task = this.data.tasks.find((t) => t.id === taskId && (t.identityId === identityId || identityId === 'OWNER_001'));
     if (task) {
+      const previousState = task.status;
       task.status = status;
       task.updatedAt = new Date().toISOString();
-      return this.save();
+      this.save();
+      // Emit event for awareness engine (non-blocking)
+      if (previousState !== status) {
+        import('./event-system.js').then(({ emitTaskStateChange }) => {
+          emitTaskStateChange(task.id, task.identityId, previousState, status, task.title).catch(err => {
+            console.error('[DB] emitTaskStateChange error:', err.message);
+          });
+        }).catch(err => console.error('[DB] event-system import error:', err.message));
+      }
+      return true;
     }
     return false;
+  }
+
+  /**
+   * Create a task with full execution metadata (Requirement #9).
+   */
+  public createTaskWithMetadata(
+    identityId: string,
+    title: string,
+    options: {
+      description?: string;
+      dueAt?: string;
+      priority?: 'low' | 'medium' | 'high';
+      source?: 'user_explicit' | 'inferred' | 'commitment' | 'follow_up';
+      status?: TaskItem['status'];
+    } = {}
+  ): TaskItem | null {
+    if (!identityId || !title.trim()) return null;
+    if (!this.data.tasks) this.data.tasks = [];
+
+    const now = new Date().toISOString();
+    const newTask: TaskItem = {
+      id: `TASK_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      identityId,
+      title: title.trim(),
+      description: options.description,
+      status: options.status || 'pending',
+      createdAt: now,
+      updatedAt: now,
+      dueAt: options.dueAt,
+      priority: options.priority || 'medium',
+      lastEvaluatedAt: now,
+      executionCount: 0,
+      lastExecutionResult: 'pending',
+      source: options.source || 'user_explicit',
+    };
+    this.data.tasks.push(newTask);
+    this.save();
+
+    // Emit event
+    import('./event-system.js').then(({ emitTaskStateChange }) => {
+      emitTaskStateChange(newTask.id, identityId, 'none', newTask.status, newTask.title).catch(err => {
+        console.error('[DB] emitTaskStateChange error:', err.message);
+      });
+    }).catch(err => console.error('[DB] event-system import error:', err.message));
+
+    return newTask;
+  }
+
+  /**
+   * Get all tasks across all identities (for awareness engine).
+   */
+  public getAllTasks(): TaskItem[] {
+    return this.data.tasks || [];
+  }
+
+  /**
+   * Update task execution metadata.
+   */
+  public updateTaskExecution(
+    taskId: string,
+    result: 'success' | 'failure' | 'skipped' | 'pending'
+  ): boolean {
+    if (!this.data.tasks) return false;
+    const task = this.data.tasks.find(t => t.id === taskId);
+    if (!task) return false;
+    task.lastEvaluatedAt = new Date().toISOString();
+    task.lastTriggeredAt = task.lastEvaluatedAt;
+    task.executionCount = (task.executionCount || 0) + 1;
+    task.lastExecutionResult = result;
+    return this.save();
+  }
+
+  /**
+   * Get tasks that are due (dueAt <= now and not completed).
+   */
+  public getDueTasks(now: Date = new Date()): TaskItem[] {
+    if (!this.data.tasks) return [];
+    const nowIso = now.toISOString();
+    return this.data.tasks.filter(t =>
+      t.dueAt &&
+      t.dueAt <= nowIso &&
+      t.status !== 'completed' &&
+      t.status !== 'cancelled'
+    );
   }
 
   public deleteTask(identityId: string, taskId: string): boolean {
@@ -2326,6 +2698,14 @@ class DatabaseEngine {
     };
     wa.openLoops.unshift(loop);
     this.save();
+
+    // Emit event
+    import('./event-system.js').then(({ emitLoopStateChange }) => {
+      emitLoopStateChange(id, identityId, 'none', 'open', name.trim()).catch(err => {
+        console.error('[DB] emitLoopStateChange error:', err.message);
+      });
+    }).catch(err => console.error('[DB] event-system import error:', err.message));
+
     return loop;
   }
 
@@ -2335,10 +2715,22 @@ class DatabaseEngine {
     const loop = wa.openLoops.find((l) => l.id === loopId);
     if (loop && loop.status === 'open') {
       const nowIst = getISTDateTime();
+      const previousState = loop.status;
       loop.status = 'resolved';
       loop.resolvedAtISO = nowIst.iso;
       loop.resolvedAtIST = nowIst.istFull;
       this.save();
+
+      // Emit event
+      import('./event-system.js').then(({ emitLoopResolved, emitLoopStateChange }) => {
+        Promise.all([
+          emitLoopStateChange(loopId, loop.identityId, previousState, 'resolved', loop.name),
+          emitLoopResolved(loopId, loop.identityId, loop.name, 'explicitly_resolved'),
+        ]).catch(err => {
+          console.error('[DB] emit loop resolve error:', err.message);
+        });
+      }).catch(err => console.error('[DB] event-system import error:', err.message));
+
       return true;
     }
     return false;
