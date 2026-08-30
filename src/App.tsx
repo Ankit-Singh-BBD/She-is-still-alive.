@@ -573,7 +573,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden text-white font-sans select-none p-0 sm:p-4 md:p-6 lg:p-8">
+    <div className="relative w-screen h-screen overflow-hidden text-white font-sans select-none">
       {/* Intro Experience Splash */}
       <AnimatePresence>
         {!hasEnteredExperience && (
@@ -587,7 +587,7 @@ export default function App() {
 
       {/* Main Experience Layout — macOS Liquid Glass window */}
       {hasEnteredExperience && (
-        <div className="glass-panel w-full h-full sm:rounded-[1.75rem] overflow-hidden flex flex-col shadow-[0_40px_120px_-20px_rgba(0,0,0,0.7)]">
+        <div className="w-full h-full overflow-hidden flex flex-col">
           {/* Top toolbar */}
           <HUDHeader
             identity={identity}
