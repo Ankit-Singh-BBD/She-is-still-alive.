@@ -1,10 +1,11 @@
 import { AudioStreamer } from './audioStreamer.js';
 import { AudioPlayer } from './audioPlayer.js';
-import { Identity, LiveState, ToolActionItem } from '../types.js';
+import { Identity, LiveState, ToolActionItem, RuntimeContext } from '../types.js';
 
 export interface LiveClientCallbacks {
   onStateChange: (state: LiveState) => void;
   onIdentityChange: (identity: Identity, token?: string) => void;
+  onRuntimeState?: (state: RuntimeContext) => void;
   onToolAction: (action: ToolActionItem) => void;
   onUserTranscript?: (transcript: string, isFinal: boolean) => void;
   onAssistantTranscript?: (transcript: string) => void;
@@ -121,6 +122,20 @@ export class LiveClient {
             }
 
             this.callbacks.onToolAction(actionItem);
+          } else if (msg.type === 'runtime_state') {
+            if (msg.state && this.callbacks.onRuntimeState) {
+              this.callbacks.onRuntimeState(msg.state);
+            }
+          } else if (msg.type === 'voice_config_changed') {
+            if (msg.config) {
+              const actionItem: ToolActionItem = {
+                id: `tool_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+                tool: 'updateVoiceConfiguration',
+                data: msg.config,
+                timestamp: Date.now(),
+              };
+              this.callbacks.onToolAction(actionItem);
+            }
           } else if (msg.type === 'identity_changed') {
             if (msg.identity) {
               this.currentIdentity = msg.identity;
@@ -138,9 +153,12 @@ export class LiveClient {
         this.disconnect();
       };
 
-      this.ws.onerror = (err) => {
-        console.error('Live WebSocket error:', err);
-        this.callbacks.onError('Connection error to Madhurita voice server');
+      this.ws.onerror = (err: Event) => {
+        const wasConnecting = this.currentState === 'connecting';
+        console.warn('Live WebSocket connection status update:', err && (err as any).message ? (err as any).message : 'WebSocket disconnected');
+        if (wasConnecting) {
+          this.callbacks.onError('Connection error to Madhurita voice server');
+        }
         this.disconnect();
       };
     } catch (err: any) {

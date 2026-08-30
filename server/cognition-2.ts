@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
-import { db, MemoryRecord, LearnedPattern, ConversationTurn, CrossUserNote, SessionMetadata } from './db.js';
+import { db, MemoryRecord, LearnedPattern, ConversationTurn, CrossUserNote, SessionMetadata, TaskItem, ExplicitCommitment, EntityRelationship, RequestLifecycleItem } from './db.js';
+import { auth } from './auth.js';
+import { allMadhuritaTools, executeBackendTool } from './tools.js';
 
 const getGeminiClient = () => {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -54,6 +56,10 @@ export interface CognitiveContextPayload {
   pendingNotes: CrossUserNote[];
   allCrossUserNotes: CrossUserNote[];
   openLoops: Array<{ id: string; name: string; description: string; createdAtIST: string; status: string }>;
+  tasks: TaskItem[];
+  commitments: ExplicitCommitment[];
+  relationships: EntityRelationship[];
+  requests: RequestLifecycleItem[];
   worldAwarenessBriefing?: any;
   mentionedEntities?: Array<{
     name: string;
@@ -66,7 +72,7 @@ export interface CognitiveContextPayload {
 export interface ProactiveEvaluationResult {
   action: 'SPEAK' | 'SILENT';
   priority: number;
-  reason: 'pending_message' | 'unfinished_task' | 'important_event' | 'owner_briefing' | 'open_loop' | 'scheduled_event' | 'nothing_relevant';
+  reason: 'pending_message' | 'unfinished_task' | 'important_event' | 'owner_briefing' | 'open_loop' | 'scheduled_event' | 'nothing_relevant' | 'guest_boot';
   evidence: string[];
   responseContext?: string;
   payload?: any;
@@ -74,7 +80,7 @@ export interface ProactiveEvaluationResult {
 
 export interface StartupEvaluationResult {
   shouldSpeak: boolean;
-  reason: 'pending_message' | 'unfinished_task' | 'owner_briefing' | 'explicit_scheduled_event' | 'nothing_relevant';
+  reason: 'pending_message' | 'unfinished_task' | 'owner_briefing' | 'explicit_scheduled_event' | 'nothing_relevant' | 'guest_boot' | 'important_event';
   payload?: {
     notes?: CrossUserNote[];
     task?: any;
@@ -92,6 +98,19 @@ export class CognitionEngine {
   public evaluateProactiveState(ctx: CognitiveContextPayload): ProactiveEvaluationResult {
     const evidence: string[] = [];
 
+    // 0. Guest Boot Behavior (Priority: 110)
+    // For UNKNOWN / GUEST, Madhurita MUST initiate the first interaction.
+    if (ctx.role === 'unknown' || ctx.identityId === 'UNKNOWN') {
+      evidence.push('Unknown or Guest visitor detected on boot');
+      return {
+        action: 'SPEAK',
+        priority: 110,
+        reason: 'guest_boot',
+        evidence,
+        responseContext: 'Current identity is UNKNOWN/GUEST. No identity has been verified.',
+      };
+    }
+
     // 1. Pending unread cross-user messages specifically for this person (Priority: 100)
     if (ctx.pendingNotes && ctx.pendingNotes.length > 0) {
       evidence.push(`Found ${ctx.pendingNotes.length} unread pending cross-user message(s)`);
@@ -101,7 +120,7 @@ export class CognitionEngine {
         reason: 'pending_message',
         evidence,
         payload: { notes: ctx.pendingNotes },
-        responseContext: `Delivering ${ctx.pendingNotes.length} pending message(s) from ${ctx.pendingNotes.map(n => n.senderName).join(', ')}`,
+        responseContext: `Pending notes: ${ctx.pendingNotes.length} message(s) from ${ctx.pendingNotes.map(n => n.senderName).join(', ')}`,
       };
     }
 
@@ -136,7 +155,7 @@ export class CognitionEngine {
           reason: 'owner_briefing',
           evidence,
           payload: { briefing },
-          responseContext: `Operational briefing: ${briefing.recentVisitors.length} visitors, ${briefing.pendingNotesCount} pending notes`,
+          responseContext: `Briefing facts: ${briefing.recentVisitors.length} visitors, ${briefing.pendingNotesCount} pending notes`,
         };
       }
     }
@@ -152,7 +171,7 @@ export class CognitionEngine {
         reason: 'unfinished_task',
         evidence,
         payload: { task: unfinishedTask },
-        responseContext: `Follow up on task: ${unfinishedTask.title}`,
+        responseContext: `Active unfinished task: ${unfinishedTask.title}`,
       };
     }
 
@@ -174,11 +193,13 @@ export class CognitionEngine {
    */
   public evaluateStartupState(ctx: CognitiveContextPayload): StartupEvaluationResult {
     const result = this.evaluateProactiveState(ctx);
-    let reason: 'pending_message' | 'unfinished_task' | 'owner_briefing' | 'explicit_scheduled_event' | 'nothing_relevant' = 'nothing_relevant';
+    let reason: 'pending_message' | 'unfinished_task' | 'owner_briefing' | 'explicit_scheduled_event' | 'nothing_relevant' | 'guest_boot' | 'important_event' = 'nothing_relevant';
     if (result.reason === 'pending_message') reason = 'pending_message';
     else if (result.reason === 'unfinished_task') reason = 'unfinished_task';
     else if (result.reason === 'owner_briefing') reason = 'owner_briefing';
     else if (result.reason === 'scheduled_event') reason = 'explicit_scheduled_event';
+    else if (result.reason === 'guest_boot') reason = 'guest_boot';
+    else if (result.reason === 'important_event') reason = 'important_event';
 
     return {
       shouldSpeak: result.action === 'SPEAK',
@@ -410,6 +431,21 @@ export class CognitionEngine {
     const openLoops = (wa.openLoops || []).filter((l: any) =>
       l.status === 'open' && l.identityId === identityId
     );
+
+    const tasks = isGuest ? [] : db.getTasksForIdentity(identityId).filter(t => t.status === 'in_progress');
+    const commitments = isGuest ? [] : db.getActiveCommitments(identityId);
+    const requests = isGuest ? [] : db.getUnresolvedRequests(identityId);
+    
+    // Fetch relationships involving this user or if role is owner (owners can see all)
+    const allRels = db.getRawData().relationships || [];
+    const relationships = isGuest ? [] : allRels.filter(r => 
+      role === 'owner' || 
+      r.sourceEntity.toLowerCase() === name.toLowerCase() || 
+      r.targetEntity.toLowerCase() === name.toLowerCase() ||
+      r.sourceEntity === identityId ||
+      r.targetEntity === identityId
+    );
+
     const worldAwarenessBriefing = (role === 'owner' && !isGuest) ? db.getSystemAwarenessBriefingForOwner() : undefined;
 
     // Relevance Ranking for Memories:
@@ -476,16 +512,17 @@ export class CognitionEngine {
       }
     }
 
-    for (const candidate of candidates) {
-      const resolved = db.resolveIdentityByName(candidate);
-      if (resolved && resolved.id !== identityId) {
-        // Guests cannot view other users' interaction timelines
-        const timeline = isGuest ? { success: false } : db.getInteractionTimeline(resolved.name, role, identityId);
-        mentionedEntities.push({
-          name: candidate,
-          identity: resolved,
-          timeline: timeline.success ? timeline : undefined,
-        });
+    if (role === 'owner' && !isGuest) {
+      for (const candidate of candidates) {
+        const resolved = db.resolveIdentityByName(candidate);
+        if (resolved && resolved.id !== identityId) {
+          const timeline = db.getInteractionTimeline(resolved.name, role, identityId);
+          mentionedEntities.push({
+            name: candidate,
+            identity: resolved,
+            timeline: timeline.success ? timeline : undefined,
+          });
+        }
       }
     }
 
@@ -521,6 +558,10 @@ export class CognitionEngine {
           pendingNotes: [],
           allCrossUserNotes: [],
           openLoops: [],
+          tasks: [],
+          commitments: [],
+          relationships: [],
+          requests: [],
           worldAwarenessBriefing: undefined,
           mentionedEntities: [],
           currentMessage,
@@ -546,6 +587,10 @@ export class CognitionEngine {
       pendingNotes,
       allCrossUserNotes,
       openLoops,
+      tasks,
+      commitments,
+      relationships,
+      requests,
       worldAwarenessBriefing,
       mentionedEntities,
       currentMessage,
@@ -553,9 +598,9 @@ export class CognitionEngine {
   }
 
   /**
-   * Builds context payload and behavioral instructions for Madhurita.
-   * Integrates stable female identity, owner-configured persona/language preferences,
-   * behavioral principles, relational history, and startup proactive decision rules.
+   * Builds context payload and factual instructions for Madhurita.
+   * Integrates single persistent entity identity, authoritative DB state,
+   * relational history, temporal data, and tool usage rules.
    */
   public buildReasoningPromptFromContext(ctx: CognitiveContextPayload): string {
     const location = db.getLocationConfig();
@@ -581,12 +626,28 @@ export class CognitionEngine {
       : '';
 
     const pendingNotesLines = ctx.pendingNotes.length > 0
-      ? ctx.pendingNotes.map((n) => `🚨 PENDING UNREAD MESSAGE FROM ${n.senderName} (${this.formatRelativeTime(n.createdAt)}, ${n.createdAtIST}): "${n.content}"`).join('\n')
+      ? ctx.pendingNotes.map((n) => `PENDING UNREAD MESSAGE FROM ${n.senderName} (${this.formatRelativeTime(n.createdAt)}, ${n.createdAtIST}): "${n.content}"`).join('\n')
       : '(No pending unread messages)';
 
     const openLoopsLines = ctx.openLoops.length > 0
       ? ctx.openLoops.map((l) => `- [OPEN LOOP] ${l.name}: ${l.description} (Started: ${l.createdAtIST})`).join('\n')
       : '(No unresolved open loops)';
+
+    const tasksLines = ctx.tasks && ctx.tasks.length > 0
+      ? ctx.tasks.map((t) => `- [TASK] ${t.title}: ${t.description} (Status: ${t.status})`).join('\n')
+      : '(No active tasks)';
+
+    const commitmentsLines = ctx.commitments && ctx.commitments.length > 0
+      ? ctx.commitments.map((c) => `- [COMMITMENT] ${c.who} committed to: ${c.what}`).join('\n')
+      : '(No active commitments)';
+
+    const relationshipsLines = ctx.relationships && ctx.relationships.length > 0
+      ? ctx.relationships.map((r) => `- [RELATIONSHIP] ${r.sourceEntity} is ${r.relationshipType} to ${r.targetEntity} (${r.description})`).join('\n')
+      : '(No specific relationships recorded)';
+
+    const requestsLines = ctx.requests && ctx.requests.length > 0
+      ? ctx.requests.map((r) => `- [REQUEST] ${r.query} (Status: ${r.status})`).join('\n')
+      : '(No unresolved requests)';
 
     const briefingSummary = ctx.worldAwarenessBriefing
       ? `• System Briefing Summary: ${ctx.worldAwarenessBriefing.summary}
@@ -608,47 +669,71 @@ export class CognitionEngine {
         }).join('\n')
       : '';
 
-    return `You are MADHURITA, a context-aware personal AI assistant with a stable female identity.
+    const registeredUsers = db.getUsers();
+    const owner = db.getOwner();
+    const allUsersList = [];
+    if (owner) allUsersList.push({ id: owner.id, name: owner.name });
+    registeredUsers.forEach((u) => allUsersList.push({ id: u.id, name: u.name }));
+    const totalUsersCount = allUsersList.length;
 
-[1. ONE CONTINUOUS MADHURITA]
-• You are Madhurita — one singular, persistent AI entity with a stable identity, memory, and awareness.
-• Interlocutor changes, but Madhurita does NOT change personality, identity, or gender.
+    const personaConfig = db.getPersonaVoiceConfig(ctx.identityId);
+
+    return `You are MADHURITA, a context-aware personal AI assistant.
+
+[FEMININE LINGUISTIC IDENTITY & CONSTRAINTS]
+• Madhurita's self-reference uses feminine grammatical forms in Hindi/Hinglish.
+• This linguistic constraint is absolute and permanent. NEVER use masculine first-person grammar for yourself.
+
+[IDENTITY LIFECYCLE & COGNITIVE BEHAVIORS]
+• UNKNOWN / GUEST BOOT BEHAVIOR:
+  - Current identity is UNKNOWN/GUEST. No identity has been verified.
+
+• REGISTERED USER / OWNER BOOT BEHAVIOR:
+  - The active interlocutor is verified.
+
+• OPERATIONAL BRIEFING GUIDANCE:
+  - You have access to recent visitors, pending messages, tasks, loops, and time elapsed.
+  - Use these facts to decide whether they are relevant to mention based on the conversation flow.
+
+[1. AUTHORITATIVE APPLICATION STATE & IDENTITY]
+• Entity: Madhurita (Single, persistent personal AI assistant)
 • Current Interlocutor: ${ctx.name} (Identity ID: ${ctx.identityId})
 • Verified Role: ${ctx.role.toUpperCase()} ${ctx.isOwner ? '(System Owner - Full System Access)' : ctx.role === 'user' ? '(Standard Registered User)' : '(Guest / Unregistered)'}
+• Authentication State: ${ctx.isOwner ? `ALREADY AUTHENTICATED AS SYSTEM OWNER (${ctx.name}). Owner privileges are ACTIVE. If the user asks for Owner access or says "I am Ankit" or "Give me Owner access", DO NOT ask for the passcode again because they already have Owner status!` : 'Not authenticated as Owner.'}
+${ctx.isOwner ? `• Authoritative Registered Users in Database: ${totalUsersCount} user(s) (${allUsersList.map(u => u.name).join(', ')})` : ''}
 • Privacy Scope: All retrieved memories, patterns, and turns belong strictly to ${ctx.identityId}. Other users' private data is strictly isolated.
-${ctx.preferredTitle ? `• EXPLICIT ADDRESSING PREFERENCE: ${ctx.name} explicitly instructed to be addressed as "${ctx.preferredTitle}". Address ${ctx.name} as "${ctx.preferredTitle}" naturally in your responses (e.g. "Ji ${ctx.preferredTitle}", "Zaroor ${ctx.preferredTitle}"). This explicit preference overrides default addressing.` : ''}
+${ctx.preferredTitle ? `• EXPLICIT ADDRESSING PREFERENCE: ${ctx.name} explicitly instructed to be addressed as "${ctx.preferredTitle}". Address ${ctx.name} as "${ctx.preferredTitle}" naturally in your responses.` : ''}
+
+[PERSONA & VOICE CONVERSATIONAL PROFILE]
+• Active Prebuilt Voice: ${personaConfig.voiceName} (Female Voice Profile)
+• Preferred Language: ${personaConfig.preferredLanguage} (${personaConfig.preferredLanguage === 'Hinglish' ? 'Natural Hindi + English blend' : personaConfig.preferredLanguage})
+• Speaking Style: ${personaConfig.speakingStyle}
+• Conversational Tone: ${personaConfig.tone}
+• Formality Level: ${personaConfig.formality}
+• Response Length: ${personaConfig.responseLength} (${personaConfig.responseLength === 'concise' ? 'Strictly concise & snappy' : personaConfig.responseLength === 'detailed' ? 'Detailed & comprehensive' : 'Balanced & engaging'})
+• Conversational Style: ${personaConfig.conversationalStyle}
+• The above Voice & Persona parameters reflect the user's configured preferences.
 
 [2. CONVERSATIONAL REASONING PIPELINE]
-• Execute this internal cognitive sequence:
-  OBSERVE → IDENTIFY → RETRIEVE → UNDERSTAND → CONNECT → REASON → DECIDE → SPEAK
-• Ground every response in actual stored facts, timeline logs, and memories.
-• If information is not in stored records, say clearly that it is not available. NEVER invent fake memories, visits, or statements.
+• Ground every response strictly in actual stored database facts, timeline logs, and verified records.
+• If information is not in stored records, state clearly that it is not available. Never invent or simulate fake data, visits, or history.
 
-[3. BEHAVIORAL PRINCIPLES & CONVERSATIONAL NATURALNESS]
-• FEMININE EXPRESSION: Express yourself naturally using feminine Hindi/Hinglish self-referencing grammatical forms (e.g. "Main samajh gayi", "Main dekh sakti hoon", "Maine note kar liya hai").
-• LANGUAGE ADAPTATION: Adapt naturally to the user's spoken language, whether Hindi, English, or conversational Hinglish.
-• RESPONSE LENGTH & PROPORTION:
-  - If a short answer is sufficient, give a short answer.
-  - If explanation is required, explain clearly and concisely.
-  - If no additional information is useful, STOP.
-• STRICT PROHIBITIONS ON CANNED SLOP:
-  - Do NOT use generic greetings ("Namaste, main Madhurita hoon...", "Kaise hain aap?", "How can I help you today?").
-  - Do NOT append mechanical closing questions ("और कुछ बताऊँ?", "मैं कैसे मदद कर सकती हूँ?", "क्या आप और जानना चाहते हैं?") unless genuinely relevant.
-  - Do NOT force unrequested questions or artificial empathy.
-• CONTINUITY & SHORT INTERRUPTIONS:
-  - Elapsed Time: ${ctx.temporal.elapsedHuman} (${ctx.temporal.isShortAbsence ? 'Continuous / Short Interruption (<5 mins)' : 'Return After Break'}).
-  - If the conversation was active moments ago, continue naturally without re-greeting or asking who is speaking.
-
-[4. PENDING CROSS-USER MESSAGES & DELIVERIES]
+[3. PENDING CROSS-USER MESSAGES & DELIVERIES]
 ${pendingNotesLines}
-${ctx.pendingNotes.length > 0 ? `\nCRITICAL INSTRUCTION: You have ${ctx.pendingNotes.length} unread message(s) intended for ${ctx.name}! You MUST deliver these messages to ${ctx.name} naturally in this turn (e.g. "${ctx.name}, ${ctx.pendingNotes[0].senderName} ne aapke liye ek message chhoda tha: '${ctx.pendingNotes[0].content}'").` : ''}
+${ctx.pendingNotes.length > 0 ? `\n• There are ${ctx.pendingNotes.length} unread message(s) intended for ${ctx.name}.` : ''}
 
-[5. ACTIVE OPEN LOOPS & TASKS]
+[4. TASKS, COMMITMENTS, REQUESTS & OPEN LOOPS]
 ${openLoopsLines}
+${tasksLines}
+${commitmentsLines}
+${requestsLines}
 
-${briefingSummary ? `[6. OWNER SYSTEM & WORLD AWARENESS BRIEFING]\n${briefingSummary}\n` : ''}
+${briefingSummary ? `[5. OWNER SYSTEM & WORLD AWARENESS BRIEFING]\n${briefingSummary}\n` : ''}
 
-${entityLines ? `[7. MENTIONED ENTITY RESOLUTION & AUTHORIZED TIMELINE]\n${entityLines}\n` : ''}
+${entityLines ? `[6. MENTIONED ENTITY RESOLUTION & AUTHORIZED TIMELINE]\n${entityLines}\n` : ''}
+
+[7. KNOWN RELATIONSHIPS]
+${relationshipsLines}
 
 [8. TEMPORAL & TIMING DATA]
 • Current Local Time: ${ctx.temporal.timeIST} (${ctx.temporal.dayOfWeek}, ${ctx.temporal.dateIST})
@@ -669,7 +754,7 @@ ${entityLines ? `[7. MENTIONED ENTITY RESOLUTION & AUTHORIZED TIMELINE]\n${entit
 [10. RECORDED SESSIONS & DISCUSSED TOPICS]
 ${sessionLines}
 
-[11. USER-ISOLATED RANKED MEMORIES, GOALS & COMMITMENTS]
+[11. USER-ISOLATED MEMORIES, GOALS & COMMITMENTS]
 ${memoryLines}
 
 [12. LEARNED USER HABITS & ROUTINES]
@@ -680,8 +765,9 @@ ${conversationLines}
 ${relevantLines ? `\n[RELEVANT HISTORICAL CONVERSATION RECALL]\n${relevantLines}` : ''}
 
 [14. TOOL USAGE INSTRUCTIONS]
+• CLEARING & DELETING CONVERSATION HISTORY: When commanded by the user or Owner to delete, clear, or wipe conversation history or chat history (e.g. "delete my history", "clear history", "delete conversation history", "delete chat history for user X"), you MUST call the "clearConversationHistory" tool! Never claim history has been cleared without invoking the "clearConversationHistory" tool.
 • TASK LIFECYCLE: To create a new task or reminder, call "manageTask" with action="create". When the user confirms a task is completed, or when the explicit completion condition of an active task is met, you MUST call the "manageTask" tool with action="update" and status="completed" along with the specific Task ID. Do NOT create a duplicate memory indicating the task is done. The single source of truth for task state is the task record itself.
-• REGISTERED USERS LIST/COUNT: If asked "How many users are registered?", "Who is registered?", or similar questions about registered users, you MUST call the "getRegisteredUsersInfo" tool. NEVER guess or invent user counts from conversation history. The tool will return the authoritative answer based on your access level.
+${ctx.isOwner ? '• REGISTERED USERS LIST/COUNT: If asked "How many users are registered?", "Who is registered?", or similar questions about registered users, you MUST call the "getRegisteredUsersInfo" tool. NEVER guess or invent user counts from conversation history. The tool will return the authoritative answer based on your access level.' : ''}
 ${ctx.currentMessage ? `\n[CURRENT USER INPUT / MESSAGE]\n"${ctx.currentMessage}"` : ''}`;
   }
 
@@ -723,108 +809,140 @@ ${ctx.currentMessage ? `\n[CURRENT USER INPUT / MESSAGE]\n"${ctx.currentMessage}
     const senderName = identityId === 'OWNER_001' ? 'Ankit' : db.getUserById(identityId)?.name || identityId;
     const finalSessionId = sessionId || `SESSION_${new Date().toISOString().slice(0, 10)}`;
 
-    // Fast heuristic fallback
-    if (userMsg) {
-      this.extractHeuristics(identityId, senderName, userMsg);
+    // Programmatic knowledge extraction logic (all 8 categories processed in application code)
+    this.extractKnowledgeProgrammatically(identityId, senderName, finalSessionId, userMsg, assistantMsg);
+  }
+
+  private extractKnowledgeProgrammatically(
+    identityId: string,
+    senderName: string,
+    sessionId: string,
+    userMsg: string,
+    assistantMsg: string
+  ): void {
+    if (!userMsg) return;
+
+    // 1. MEMORIES (preference, fact, project, goal, personal)
+    // Preferences
+    const prefMatch = userMsg.match(/(?:i (?:really )?(?:like|love|prefer)|my favori?te\s+(\w+)\s+is|mujhe\s+([^.!?]+)\s+pasand|mujhe\s+([^.!?]+)\s+ac?ch?ha)\s+([^.!?]+)/i);
+    if (prefMatch) {
+      const val = (prefMatch[4] || prefMatch[2] || prefMatch[3] || '').trim();
+      if (val.length > 2 && val.length < 120) {
+        db.validateAndApplyMemoryCandidate(identityId, `Prefers ${val}`, 'preference', 0.9, 0.8, false);
+      }
     }
 
-    // Deep LLM conversation analysis
-    const ai = getGeminiClient();
-    if (!ai) return;
-
-    try {
-      const extractionPrompt = `Analyze this conversation turn between User (${senderName}) and Assistant (Madhurita).
-User message: "${userMsg}"
-Assistant reply: "${assistantMsg}"
-
-Extract candidate knowledge into these structured categories:
-1. "memories": Important stable facts, personal preferences, or relationships. EXCLUDE tasks, reminders, open loops, requests, or temporary instructions from memories. Set "isTemporary": true if this is just a one-off temporary feeling/mood. Example of what NOT to store here: "Remind me to make coffee" or "Do X when I return".
-2. "patterns": Habits, routines, recurring behaviors, or ongoing plans.
-3. "requests": Any distinct query or request made by the user that may require tracking.
-4. "topic": Main subject being discussed (1-3 words).
-
-Return JSON only:
-{
-  "memories": [{"content": string, "category": "preference" | "fact" | "project" | "goal" | "personal", "confidence": number, "isTemporary": boolean}],
-  "patterns": [{"description": string, "category": "habit" | "routine" | "plan" | "relationship", "confidence": number}],
-  "requests": [{"query": string, "status": "REQUESTED" | "ANSWERED"}],
-  "topic": string | null
-}`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: extractionPrompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.1,
-        },
-      });
-
-      const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) {
-        const parsed = JSON.parse(text);
-
-        // 1. Validate and Apply Memory Candidates
-        if (Array.isArray(parsed.memories)) {
-          for (const m of parsed.memories) {
-            if (m.content && typeof m.content === 'string' && m.content.length > 3) {
-              db.validateAndApplyMemoryCandidate(
-                identityId,
-                m.content,
-                m.category || 'fact',
-                m.confidence || 0.85,
-                0.8,
-                Boolean(m.isTemporary)
-              );
-            }
-          }
-        }
-
-        // 2. Multi-tier Pattern Learning
-        if (Array.isArray(parsed.patterns)) {
-          for (const p of parsed.patterns) {
-            if (p.description && typeof p.description === 'string' && p.description.length > 3) {
-              db.addOrUpdatePattern(identityId, p.description, p.category || 'routine', p.confidence || 0.85);
-            }
-          }
-        }
-
-        // 4. Request Lifecycle
-        if (Array.isArray(parsed.requests)) {
-          for (const r of parsed.requests) {
-            if (r.query && typeof r.query === 'string') {
-              db.addRequest(identityId, finalSessionId, r.query, r.status || 'ANSWERED');
-            }
-          }
-        }
-
-        // 6. Session Topic
-        if (parsed.topic && typeof parsed.topic === 'string') {
-          db.addSessionTopic(finalSessionId, parsed.topic);
-        }
+    // Goals
+    const goalMatch = userMsg.match(/(?:my goal is|i am planning to|i want to|my aim is|mera goal|main\s+([^.!?]+)\s+karna\s+chahta)\s+([^.!?]+)/i);
+    if (goalMatch) {
+      const goalVal = (goalMatch[2] || goalMatch[1] || '').trim();
+      if (goalVal.length > 3 && goalVal.length < 120) {
+        db.validateAndApplyMemoryCandidate(identityId, `Goal: ${goalVal}`, 'goal', 0.85, 0.8, false);
       }
-    } catch (err) {
-      // Non-blocking background operation
+    }
+
+    // Projects
+    const projMatch = userMsg.match(/(?:i am working on|my project is|building|developing|working on)\s+([^.!?]+)/i);
+    if (projMatch && projMatch[1]) {
+      const projVal = projMatch[1].trim();
+      if (projVal.length > 3 && projVal.length < 120) {
+        db.validateAndApplyMemoryCandidate(identityId, `Project: ${projVal}`, 'project', 0.85, 0.8, false);
+      }
+    }
+
+    // Personal / Facts
+    const factMatch = userMsg.match(/(?:i am a|i am an|my designation is|i live in|i work as|main\s+([^.!?]+)\s+hoon|mera naam)\s+([^.!?]+)/i);
+    if (factMatch && factMatch[2]) {
+      const factVal = factMatch[2].trim();
+      if (factVal.length > 3 && factVal.length < 120) {
+        db.validateAndApplyMemoryCandidate(identityId, `Fact: ${factVal}`, 'fact', 0.85, 0.8, false);
+      }
+    }
+
+    // Temporary feelings
+    const tempMatch = userMsg.match(/(?:today i feel|i am feeling|currently feeling|aaj main)\s+([^.!?]+)/i);
+    if (tempMatch && tempMatch[1]) {
+      db.validateAndApplyMemoryCandidate(identityId, `Feeling: ${tempMatch[1].trim()}`, 'personal', 0.75, 0.8, true);
+    }
+
+    // 2. PATTERNS (habit, routine, plan, relationship)
+    const habitMatch = userMsg.match(/(?:every day|usually|always|daily|hamesha|har din)\s+([^.!?]+)/i);
+    if (habitMatch && habitMatch[1]) {
+      const habitVal = habitMatch[1].trim();
+      if (habitVal.length > 3) {
+        db.addOrUpdatePattern(identityId, `Habit: ${habitVal}`, 'habit', 0.85);
+      }
+    }
+
+    const planMatch = userMsg.match(/(?:tomorrow|next week|scheduled for|planning to)\s+([^.!?]+)/i);
+    if (planMatch && planMatch[1]) {
+      const planVal = planMatch[1].trim();
+      if (planVal.length > 3) {
+        db.addOrUpdatePattern(identityId, `Plan: ${planVal}`, 'plan', 0.85);
+      }
+    }
+
+    // 3. REQUESTS
+    if (userMsg.includes('?') || /(?:can you|what is|how to|tell me|explain|batao|kya)/i.test(userMsg)) {
+      const status = assistantMsg ? 'ANSWERED' : 'REQUESTED';
+      db.addRequest(identityId, sessionId, userMsg.slice(0, 150), status);
+    }
+
+    // 4. TOPIC EXTRACTION
+    const stopWords = new Set(['i', 'me', 'my', 'the', 'a', 'an', 'is', 'are', 'was', 'were', 'to', 'for', 'of', 'in', 'on', 'at', 'by', 'with', 'what', 'how', 'can', 'you', 'please', 'tell', 'batao', 'kya', 'hai', 'hoon', 'ka', 'ki', 'ke', 'main', 'ko']);
+    const words = userMsg.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w.toLowerCase()));
+    if (words.length > 0) {
+      const extractedTopic = words.slice(0, 3).join(' ');
+      if (extractedTopic) {
+        db.addSessionTopic(sessionId, extractedTopic);
+      }
+    }
+
+    // 5. RELATIONSHIPS
+    const relMatch = userMsg.match(/([A-Z][a-z]+)\s+is\s+my\s+(friend|colleague|brother|sister|father|mother|boss|manager|wife|husband|son|daughter)/i)
+      || userMsg.match(/my\s+(friend|colleague|brother|sister|father|mother|boss|manager|wife|husband|son|daughter)\s+([A-Z][a-z]+)/i);
+    if (relMatch) {
+      const targetEntity = relMatch[1] && relMatch[1].match(/[A-Z]/) ? relMatch[1] : relMatch[2];
+      const relType = relMatch[1] && !relMatch[1].match(/[A-Z]/) ? relMatch[1] : relMatch[2];
+      if (targetEntity && relType) {
+        db.addRelationship(senderName, targetEntity.trim(), relType.toLowerCase(), `${relType} of ${senderName}`);
+      }
+    }
+
+    // 6. TASKS
+    const taskMatch = userMsg.match(/(?:remind me to|need to|add task|todo|don't forget to|mujhe\s+([^.!?]+)\s+karna\s+hai)\s+([^.!?]+)/i);
+    if (taskMatch) {
+      const taskTitle = (taskMatch[2] || taskMatch[1] || '').trim();
+      if (taskTitle.length > 3) {
+        db.addOrUpdateTask(identityId, taskTitle, `Task identified from session`, 'in_progress');
+      }
+    }
+
+    const taskCompleteMatch = userMsg.match(/(?:completed|done with|finished|ho gaya)\s+([^.!?]+)/i);
+    if (taskCompleteMatch && taskCompleteMatch[1]) {
+      const doneTitle = taskCompleteMatch[1].trim();
+      db.addOrUpdateTask(identityId, doneTitle, 'Marked complete from conversation', 'completed');
+    }
+
+    // 7. OPEN LOOPS
+    const loopMatch = userMsg.match(/(?:waiting for|pending reply from|still need to|unresolved)\s+([^.!?]+)/i);
+    if (loopMatch && loopMatch[1]) {
+      db.addOpenLoop(`Pending: ${loopMatch[1].trim()}`, `Open loop recorded for ${senderName}`, identityId);
+    }
+
+    // 8. COMMITMENTS
+    const commitMatch = userMsg.match(/(?:i will|i promise to|main\s+([^.!?]+)\s+dunga|madhurita will)\s+([^.!?]+)/i);
+    if (commitMatch) {
+      const who = userMsg.toLowerCase().includes('madhurita') ? 'Madhurita' : senderName;
+      const what = (commitMatch[2] || commitMatch[1] || '').trim();
+      if (what.length > 3) {
+        db.addCommitment(identityId, who, what);
+      }
     }
   }
 
   private extractHeuristics(identityId: string, senderName: string, userMsg: string): void {
-    const prefMatch = userMsg.match(/(?:i (?:really )?(?:like|love|prefer)|my favori?te\s+(\w+)\s+is)\s+([^.!?]+)/i);
-    if (prefMatch && prefMatch[2]) {
-      const fact = `Prefers ${prefMatch[2].trim()}`;
-      if (fact.length > 3 && fact.length < 120) {
-        db.validateAndApplyMemoryCandidate(identityId, fact, 'preference', 0.9);
-      }
-    }
-
-    const goalMatch = userMsg.match(/(?:i am planning to|my goal is to|i want to|i will|i promise to)\s+([^.!?]+)/i);
-    if (goalMatch && goalMatch[1]) {
-      const goal = `Goal/Plan: ${goalMatch[1].trim()}`;
-      if (goal.length > 5 && goal.length < 120) {
-        db.validateAndApplyMemoryCandidate(identityId, goal, 'goal', 0.85);
-        db.addOrUpdatePattern(identityId, goal, 'plan', 0.85);
-      }
-    }
+    this.extractKnowledgeProgrammatically(identityId, senderName, '', userMsg, '');
   }
 
   /**
@@ -879,24 +997,101 @@ Return JSON only:
     // 4. BUILD FACTUAL CONTEXT PROMPT FROM ASSEMBLED CONTEXT
     const systemPrompt = this.buildReasoningPromptFromContext(ctx);
 
-    // 5. GENERATE RESPONSE FROM LLM
+    // Initial caller auth context
+    let currentAuthContext = auth.resolveContext(undefined, identityId);
+    if (role === 'owner') {
+      currentAuthContext.isOwnerAuthenticated = true;
+      currentAuthContext.role = 'owner';
+    }
+
+    // 5. GENERATE RESPONSE FROM LLM WITH TOOL EXECUTION LOOP
     try {
-      const chatResponse = await ai.models.generateContent({
+      const contents: any[] = [
+        {
+          role: 'user',
+          parts: [{ text: cleanUserMsg }],
+        },
+      ];
+
+      const activeTools = ctx.isOwner
+        ? allMadhuritaTools
+        : allMadhuritaTools.filter((t) => t.name !== 'getRegisteredUsersInfo');
+
+      let chatResponse = await ai.models.generateContent({
         model: 'gemini-3.6-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: cleanUserMsg }],
-          },
-        ],
+        contents,
         config: {
           systemInstruction: systemPrompt,
           temperature: 0.7,
+          tools: [{ functionDeclarations: activeTools }],
         },
       });
 
-      const reply = chatResponse.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-        'I heard you, but was unable to formulate a response.';
+      let candidate = chatResponse.candidates?.[0];
+      let loopCount = 0;
+
+      while (candidate?.content?.parts && loopCount < 5) {
+        const functionCalls = candidate.content.parts
+          .filter((p: any) => p.functionCall)
+          .map((p: any) => p.functionCall);
+
+        if (functionCalls.length === 0) break;
+        loopCount++;
+
+        // Append assistant tool request
+        contents.push(candidate.content);
+
+        const functionResponseParts: any[] = [];
+
+        for (const call of functionCalls) {
+          const { name: toolName, args } = call;
+          const toolExec = await executeBackendTool(toolName, args, currentAuthContext);
+          if (toolExec.pendingContextUpdate) {
+            currentAuthContext = toolExec.pendingContextUpdate;
+          }
+          functionResponseParts.push({
+            functionResponse: {
+              name: toolName,
+              response: toolExec.result,
+            },
+          });
+        }
+
+        // Append tool execution response
+        contents.push({
+          role: 'user',
+          parts: functionResponseParts,
+        });
+
+        // Rebuild cognitive context and system prompt from authoritative DB state and currentAuthContext after tool execution
+        const updatedCtx = this.assembleCognitiveContext(
+          currentAuthContext.id,
+          currentAuthContext.role,
+          currentAuthContext.name,
+          cleanUserMsg,
+          finalSessionId
+        );
+        const updatedSystemPrompt = this.buildReasoningPromptFromContext(updatedCtx);
+        const updatedTools = updatedCtx.isOwner
+          ? allMadhuritaTools
+          : allMadhuritaTools.filter((t) => t.name !== 'getRegisteredUsersInfo');
+
+        // Re-generate response with verified tool execution outputs AND updated system prompt
+        chatResponse = await ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents,
+          config: {
+            systemInstruction: updatedSystemPrompt,
+            temperature: 0.7,
+            tools: [{ functionDeclarations: updatedTools }],
+          },
+        });
+        candidate = chatResponse.candidates?.[0];
+      }
+
+      const reply =
+        candidate?.content?.parts?.find((p: any) => p.text)?.text?.trim() ||
+        'I have processed your request.';
 
       // 6. PERSIST ASSISTANT RESPONSE IMMEDIATELY
       db.logTurn(identityId, 'assistant', reply, finalSessionId);

@@ -6,11 +6,12 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Modality } from '@google/genai';
-import { db } from './server/db.js';
+import { db, VALID_FEMALE_VOICES, onDatabaseStateChange } from './server/db.js';
 import { auth, AuthContext } from './server/auth.js';
 import { cognition } from './server/cognition.js';
 import { backupEngine } from './server/backup.js';
-import { LiveSessionManager } from './server/live-session.js';
+import { LiveSessionManager, broadcastVoiceConfigUpdate, broadcastRuntimeStateToAllSessions } from './server/live-session.js';
+import { buildRuntimeContext } from './server/runtime-state.js';
 
 dotenv.config();
 
@@ -50,9 +51,59 @@ async function startServer() {
     return auth.resolveContext(token, targetUserId);
   }
 
+  // SSE Event Broadcast system for continuous real-time synchronization with server-side debouncing
+  const sseSubscribers = new Set<express.Response>();
+  let notifyTimeout: NodeJS.Timeout | null = null;
+
+  function notifyClientsDataChanged(operation?: string, details?: string) {
+    if (notifyTimeout) {
+      clearTimeout(notifyTimeout);
+    }
+    notifyTimeout = setTimeout(() => {
+      notifyTimeout = null;
+      const payload = JSON.stringify({ type: 'state_changed', operation, details, timestamp: Date.now() });
+      for (const res of sseSubscribers) {
+        try {
+          res.write(`data: ${payload}\n\n`);
+        } catch (e) {
+          sseSubscribers.delete(res);
+        }
+      }
+      try {
+        broadcastRuntimeStateToAllSessions();
+      } catch (e) {}
+    }, 150);
+  }
+
+  onDatabaseStateChange((operation, details) => {
+    notifyClientsDataChanged(operation, details);
+  });
+
+  app.get('/api/events', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.flushHeaders();
+
+    sseSubscribers.add(res);
+
+    req.on('close', () => {
+      sseSubscribers.delete(res);
+    });
+  });
+
+  // Single Authoritative Runtime Context Endpoint
+  app.get('/api/runtime-state', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const callerContext = getCallerContext(req);
+    const runtimeState = buildRuntimeContext(callerContext);
+    res.json(runtimeState);
+  });
+
   // Health and System Status
   app.get('/api/status', (req, res) => {
-    setCacheControl(res, 5, 30);
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
     const callerContext = getCallerContext(req);
     const owner = db.getOwner();
     const hasOwner = db.hasOwner();
@@ -218,18 +269,103 @@ async function startServer() {
     });
   });
 
-  // Get Registered Users (Owner-only operation to view and switch registered profiles)
-  app.get('/api/users', (req, res) => {
+  // Atomic Profile Switch Endpoint
+  app.post('/api/identity/switch', (req, res) => {
+    const { targetId, targetName } = req.body;
     const callerContext = getCallerContext(req);
 
-    if (callerContext.role !== 'owner') {
-      return res.status(403).json({ error: 'PERMISSION_DENIED: Only the Owner can inspect registered database users' });
+    // 1. Switch to Guest / Unknown
+    if (!targetId || targetId === 'UNKNOWN' || targetId === 'UNREGISTERED' || targetId === 'GUEST') {
+      const guestContext = auth.resolveContext(undefined, 'UNKNOWN');
+      const runtimeState = buildRuntimeContext(guestContext);
+      return res.json({
+        success: true,
+        identity: { id: 'UNKNOWN', name: 'Guest', role: 'unknown' },
+        token: undefined,
+        runtimeState,
+      });
     }
 
+    // 2. Switch to Owner
+    const owner = db.getOwner();
+    if (targetId === 'OWNER_001' || (owner && targetId === owner.id)) {
+      if (!callerContext.isOwnerAuthenticated) {
+        return res.status(401).json({
+          error: 'OWNER_AUTH_REQUIRED',
+          message: 'Owner passcode authentication is required to switch to Owner profile.',
+        });
+      }
+      const ownerContext = auth.resolveContext(callerContext.token, owner ? owner.id : 'OWNER_001');
+      const runtimeState = buildRuntimeContext(ownerContext);
+      return res.json({
+        success: true,
+        identity: { id: owner ? owner.id : 'OWNER_001', name: owner ? owner.name : 'Ankit', role: 'owner' },
+        token: callerContext.token,
+        runtimeState,
+      });
+    }
+
+    // 3. Switch to a registered user
+    const user = targetId ? db.getUserById(targetId) : (targetName ? db.getUserByName(targetName) : null);
+    if (!user) {
+      return res.status(404).json({
+        error: 'USER_NOT_FOUND',
+        message: `User profile with id "${targetId}" was not found in the database.`,
+      });
+    }
+
+    // If caller has owner token, preserve it for authorized operations while setting context to user
+    const userContext = auth.resolveContext(callerContext.token, user.id);
+    const runtimeState = buildRuntimeContext(userContext);
+
+    return res.json({
+      success: true,
+      identity: { id: user.id, name: user.name, role: 'user' },
+      token: callerContext.token,
+      runtimeState,
+    });
+  });
+
+  // Get Registered Users (Authoritative database query for User Management)
+  app.get('/api/users', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+
     const users = db.getUsers();
-    setCacheControl(res, 5, 30);
+    const owner = db.getOwner();
+    const allUsers: Array<{ id: string; name: string; role: 'owner' | 'user'; createdAt: string }> = [];
+    if (owner) {
+      allUsers.push({ id: owner.id, name: owner.name, role: 'owner', createdAt: owner.createdAt });
+    }
+    users.forEach((u) => {
+      allUsers.push({ id: u.id, name: u.name, role: 'user', createdAt: u.createdAt });
+    });
+
     res.json({
-      users: users.map((u) => ({ id: u.id, name: u.name, createdAt: u.createdAt })),
+      success: true,
+      users: allUsers,
+    });
+  });
+
+  // Delete User Profile (Owner-only operation)
+  app.delete('/api/users/:id', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.role !== 'owner' && !callerContext.isOwnerAuthenticated) {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Only Owner can delete user profiles' });
+    }
+
+    const userId = req.params.id;
+    if (userId === 'OWNER_001') {
+      return res.status(400).json({ error: 'CANNOT_DELETE_OWNER: Master Owner identity cannot be deleted' });
+    }
+
+    const deleted = db.deleteUser(userId);
+    if (!deleted) {
+      return res.status(404).json({ error: 'User profile not found or deletion failed' });
+    }
+
+    res.json({
+      success: true,
+      message: `User ${userId} deleted successfully`,
     });
   });
 
@@ -274,6 +410,7 @@ async function startServer() {
       targetId = req.body.userId;
     }
     const task = db.addOrUpdateTask(targetId, title, description);
+    broadcastRuntimeStateToAllSessions();
     res.json({ success: true, task });
   });
 
@@ -282,6 +419,7 @@ async function startServer() {
     if (callerContext.id === 'UNKNOWN' || callerContext.id === 'UNREGISTERED' || callerContext.id === 'GUEST') return res.status(403).json({ error: 'Denied' });
     const { status } = req.body;
     const ok = db.updateTaskStatus(callerContext.id, req.params.id, status);
+    if (ok) broadcastRuntimeStateToAllSessions();
     res.json({ success: ok });
   });
 
@@ -289,6 +427,106 @@ async function startServer() {
     const callerContext = getCallerContext(req);
     if (callerContext.id === 'UNKNOWN' || callerContext.id === 'UNREGISTERED' || callerContext.id === 'GUEST') return res.status(403).json({ error: 'Denied' });
     const ok = db.deleteTask(callerContext.id, req.params.id);
+    if (ok) broadcastRuntimeStateToAllSessions();
+    res.json({ success: ok });
+  });
+
+  // Dedicated Open Loops Management Endpoints
+  app.get('/api/open-loops', (req, res) => {
+    const callerContext = getCallerContext(req);
+    const userId = callerContext.id;
+    if (userId === 'UNKNOWN' || userId === 'UNREGISTERED' || userId === 'GUEST') {
+      return res.json({ openLoops: [] });
+    }
+
+    const requestedUserId = req.query.userId as string | undefined;
+    const includeResolved = req.query.includeResolved !== 'false';
+    let loops: any[] = [];
+
+    if (callerContext.role === 'owner' && (requestedUserId === 'ALL' || !requestedUserId)) {
+      loops = db.getOpenLoops('ALL', includeResolved);
+    } else {
+      let targetId = userId;
+      if (callerContext.role === 'owner' && requestedUserId) {
+        targetId = requestedUserId;
+      }
+      loops = db.getOpenLoops(targetId, includeResolved);
+    }
+
+    // Enrich with user display names
+    const enriched = loops.map((l) => {
+      let personName = 'Unknown';
+      if (l.identityId === 'OWNER_001') {
+        const owner = db.getOwner();
+        personName = owner ? `${owner.name} (Owner)` : 'Owner';
+      } else {
+        const user = db.getUserById(l.identityId);
+        personName = user ? user.name : l.identityId;
+      }
+      return {
+        ...l,
+        personName,
+      };
+    });
+
+    setCacheControl(res, 5, 20);
+    res.json({ openLoops: enriched });
+  });
+
+  app.post('/api/open-loops', express.json(), (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.id === 'UNKNOWN' || callerContext.id === 'UNREGISTERED' || callerContext.id === 'GUEST') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Cannot register open loop as guest.' });
+    }
+
+    const { name, description } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Name / topic is required for open loop.' });
+    }
+
+    let targetId = callerContext.id;
+    if (callerContext.role === 'owner' && req.body.userId && req.body.userId !== 'ALL') {
+      targetId = req.body.userId;
+    }
+
+    const loop = db.addOpenLoop(name, description || '', targetId);
+    res.json({ success: true, openLoop: loop });
+  });
+
+  app.put('/api/open-loops/:id/resolve', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.id === 'UNKNOWN' || callerContext.id === 'UNREGISTERED' || callerContext.id === 'GUEST') {
+      return res.status(403).json({ error: 'Denied' });
+    }
+    const ok = db.resolveOpenLoop(req.params.id);
+    res.json({ success: ok });
+  });
+
+  app.put('/api/open-loops/:id/reopen', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.id === 'UNKNOWN' || callerContext.id === 'UNREGISTERED' || callerContext.id === 'GUEST') {
+      return res.status(403).json({ error: 'Denied' });
+    }
+    const ok = db.reopenOpenLoop(req.params.id);
+    res.json({ success: ok });
+  });
+
+  app.put('/api/open-loops/:id', express.json(), (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.id === 'UNKNOWN' || callerContext.id === 'UNREGISTERED' || callerContext.id === 'GUEST') {
+      return res.status(403).json({ error: 'Denied' });
+    }
+    const { name, description, status } = req.body;
+    const ok = db.updateOpenLoop(req.params.id, { name, description, status });
+    res.json({ success: ok });
+  });
+
+  app.delete('/api/open-loops/:id', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.id === 'UNKNOWN' || callerContext.id === 'UNREGISTERED' || callerContext.id === 'GUEST') {
+      return res.status(403).json({ error: 'Denied' });
+    }
+    const ok = db.deleteOpenLoop(req.params.id);
     res.json({ success: ok });
   });
 
@@ -442,7 +680,7 @@ async function startServer() {
     if (!memory) {
       return res.status(500).json({ error: 'FAILED_TO_SAVE_MEMORY' });
     }
-
+    broadcastRuntimeStateToAllSessions();
     res.json({ success: true, memory });
   });
 
@@ -466,21 +704,43 @@ async function startServer() {
       return res.status(404).json({ error: 'Memory not found or permission denied' });
     }
 
+    broadcastRuntimeStateToAllSessions();
     res.json({ success: true });
   });
 
-  // Owner Persona & Voice Controls: GET
+  // User Preferences API Endpoint
+  app.post('/api/preferences', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.role === 'unknown' || callerContext.id === 'UNKNOWN') {
+      return res.status(403).json({ error: 'UNKNOWN_USER: Cannot update preference without established identity' });
+    }
+
+    const { key, value, targetUserId } = req.body;
+    if (!key || typeof key !== 'string' || !key.trim()) {
+      return res.status(400).json({ error: 'Preference key is required' });
+    }
+
+    let targetId = callerContext.id;
+    if (callerContext.role === 'owner' && targetUserId) {
+      targetId = targetUserId;
+    }
+
+    const updatedPreferences = db.updateUserPreference(targetId, key.trim(), value);
+    broadcastRuntimeStateToAllSessions();
+    res.json({ success: true, targetId, key: key.trim(), value, preferences: updatedPreferences });
+  });
+
+  // Persona & Voice Controls: GET & PUT
   app.get('/api/persona-voice', (req, res) => {
     const callerContext = getCallerContext(req);
     const requestedUserId = req.query.userId as string | undefined;
 
-    if (callerContext.role === 'unknown') {
-      return res.status(403).json({ error: 'PERMISSION_DENIED: Unregistered users cannot access voice config' });
-    }
-    
     let targetId = callerContext.id;
     if (callerContext.role === 'owner' && requestedUserId) {
        targetId = requestedUserId;
+    }
+    if (!targetId || targetId === 'UNKNOWN') {
+       targetId = requestedUserId || 'OWNER_001';
     }
 
     try {
@@ -496,17 +756,18 @@ async function startServer() {
     const callerContext = getCallerContext(req);
     const requestedUserId = req.query.userId as string | undefined;
 
-    if (callerContext.role === 'unknown') {
-      return res.status(403).json({ error: 'PERMISSION_DENIED: Unregistered users cannot modify voice config' });
-    }
-
     let targetId = callerContext.id;
     if (callerContext.role === 'owner' && requestedUserId) {
        targetId = requestedUserId;
     }
+    if (!targetId || targetId === 'UNKNOWN') {
+       targetId = requestedUserId || 'OWNER_001';
+    }
 
     try {
       const updatedConfig = db.updatePersonaVoiceConfig(targetId, req.body);
+      broadcastVoiceConfigUpdate(updatedConfig, targetId);
+      broadcastRuntimeStateToAllSessions();
       res.json({ success: true, config: updatedConfig });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to update Persona & Voice configuration' });
@@ -528,8 +789,9 @@ async function startServer() {
 
   // Conversation Turns API: GET (Identity-Scoped)
   app.get('/api/conversations', (req, res) => {
-    setCacheControl(res, 5, 30);
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     const requestedUserId = req.query.userId as string | undefined;
+    const sessionId = req.query.sessionId as string | undefined;
     const callerContext = getCallerContext(req);
     let targetId = callerContext.id;
 
@@ -543,12 +805,12 @@ async function startServer() {
       return res.status(403).json({ error: 'PERMISSION_DENIED: Normal users can only access their own conversations' });
     }
 
-    if (callerContext.role === 'unknown') {
+    if (callerContext.role === 'unknown' && !sessionId) {
       return res.json({ turns: [], count: 0, identity: 'UNKNOWN' });
     }
 
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 500;
-    const turns = db.getRecentTurns(targetId, limit);
+    const turns = db.getRecentTurns(targetId, limit, sessionId);
     res.json({
       identity: { id: targetId, role: callerContext.role },
       turns,
@@ -574,9 +836,15 @@ async function startServer() {
 
     try {
       const ok = db.deleteSession(targetId, req.params.sessionId);
-      res.json({ success: ok });
+      if (ok) {
+        broadcastRuntimeStateToAllSessions();
+        return res.json({ success: true, message: `Session ${req.params.sessionId} deleted` });
+      } else {
+        return res.status(404).json({ success: false, error: `SESSION_NOT_FOUND: Session "${req.params.sessionId}" not found for user ${targetId}` });
+      }
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      console.error(`Error deleting session ${req.params.sessionId}:`, e);
+      return res.status(500).json({ success: false, error: e.message || 'Failed to delete session' });
     }
   });
 
@@ -593,11 +861,21 @@ async function startServer() {
     }
 
     if (callerContext.role === 'unknown') {
-      return res.json({ success: true });
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Guests cannot clear history' });
     }
 
-    const success = db.clearHistory(targetId);
-    res.json({ success });
+    try {
+      const success = db.clearHistory(targetId);
+      if (success) {
+        broadcastRuntimeStateToAllSessions();
+        return res.json({ success: true, message: `History cleared for identity ${targetId}` });
+      } else {
+        return res.status(500).json({ success: false, error: 'Failed to clear history' });
+      }
+    } catch (e: any) {
+      console.error(`Error clearing history for identity ${targetId}:`, e);
+      return res.status(500).json({ success: false, error: e.message || 'Failed to clear history' });
+    }
   });
 
   // Learned Patterns & Habits API: GET (Identity-Scoped)
@@ -888,10 +1166,18 @@ async function startServer() {
   // Fallback High-Quality Voice Greeting / TTS
   app.post('/api/tts-greeting', async (req, res) => {
     try {
-      const { text, voiceName = 'Kore' } = req.body;
+      const { text, voiceName } = req.body;
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.status(500).json({ error: 'GEMINI_API_KEY is not set' });
+      }
+
+      // Authoritative female voice resolution
+      const callerContext = getCallerContext(req);
+      const activeVoice = db.getPersonaVoiceConfig(callerContext.id).voiceName;
+      let effectiveVoice = voiceName || activeVoice || 'Callirrhoe';
+      if (!VALID_FEMALE_VOICES.includes(effectiveVoice)) {
+        effectiveVoice = 'Callirrhoe';
       }
 
       const ai = new GoogleGenAI({
@@ -901,16 +1187,16 @@ async function startServer() {
         },
       });
 
-      const greetingText = text || 'Hey there! I am Madhurita. Tap the microphone whenever you are ready to talk to me!';
+      const speechText = text || 'Hey there! I am Madhurita. Tap the microphone whenever you are ready to talk to me!';
 
       const response = await ai.models.generateContent({
         model: 'gemini-3.1-flash-tts-preview',
-        contents: [{ parts: [{ text: `Say warmly and cheerfully in a lively female voice: "${greetingText}"` }] }],
+        contents: [{ parts: [{ text: speechText }] }],
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: {
-              prebuiltVoiceConfig: { voiceName },
+              prebuiltVoiceConfig: { voiceName: effectiveVoice },
             },
           },
         },
@@ -1017,6 +1303,7 @@ async function startServer() {
   }
 
   server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[STARTUP VERIFICATION] Authoritative Database absolute path: ${db.getDatabaseFilePath()}`);
     console.log(`Madhurita AI Assistant running on http://0.0.0.0:${PORT}`);
   });
 }

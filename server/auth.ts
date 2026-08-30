@@ -104,8 +104,8 @@ class AuthEngine {
       passcodeHash: hash,
       passcodeSalt: salt,
       preferences: {
-        personalityTone: 'energetic_witty',
-        voiceName: 'Kore',
+        personalityTone: 'warm_conversational',
+        voiceName: 'Callirrhoe',
       },
       createdAt: now,
       updatedAt: now,

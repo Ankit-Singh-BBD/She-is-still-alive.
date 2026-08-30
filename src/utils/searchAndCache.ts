@@ -12,38 +12,21 @@ export class SWRClientCache<T = any> {
   private memoryCache = new Map<string, CacheEntry<T>>();
   private maxMemoryEntries: number;
   private defaultTtlMs: number;
-  private storagePrefix: string;
 
-  constructor(maxMemoryEntries = 100, defaultTtlMs = 1000 * 60 * 5, storagePrefix = 'madhurita_swr_') {
+  constructor(maxMemoryEntries = 100, defaultTtlMs = 1000 * 5) {
     this.maxMemoryEntries = maxMemoryEntries;
     this.defaultTtlMs = defaultTtlMs;
-    this.storagePrefix = storagePrefix;
   }
 
   /**
-   * Retrieves data from cache.
+   * Retrieves data from in-memory cache.
    * Returns { data, isStale } for stale-while-revalidate execution.
    */
   public get(key: string, customTtl?: number): { data: T | null; isStale: boolean } {
     const cleanKey = key.trim();
     const ttl = customTtl ?? this.defaultTtlMs;
 
-    // 1. Check L1 In-Memory Cache (<0.1ms)
-    let entry = this.memoryCache.get(cleanKey);
-
-    // 2. Check L2 SessionStorage Cache (<1ms)
-    if (!entry && typeof window !== 'undefined') {
-      try {
-        const raw = sessionStorage.getItem(this.storagePrefix + cleanKey);
-        if (raw) {
-          entry = JSON.parse(raw) as CacheEntry<T>;
-          this.memoryCache.set(cleanKey, entry);
-        }
-      } catch {
-        // storage quota or sandbox restrictions
-      }
-    }
-
+    const entry = this.memoryCache.get(cleanKey);
     if (!entry) {
       return { data: null, isStale: true };
     }
@@ -55,7 +38,7 @@ export class SWRClientCache<T = any> {
   }
 
   /**
-   * Writes data to L1 and L2 cache
+   * Writes data to in-memory cache
    */
   public set(key: string, data: T): void {
     const cleanKey = key.trim();
@@ -64,20 +47,11 @@ export class SWRClientCache<T = any> {
       data,
     };
 
-    // Trim in-memory cache if exceeding limits
     if (this.memoryCache.size >= this.maxMemoryEntries) {
       const oldestKey = this.memoryCache.keys().next().value;
       if (oldestKey) this.memoryCache.delete(oldestKey);
     }
     this.memoryCache.set(cleanKey, entry);
-
-    if (typeof window !== 'undefined') {
-      try {
-        sessionStorage.setItem(this.storagePrefix + cleanKey, JSON.stringify(entry));
-      } catch {
-        // ignore quota errors
-      }
-    }
   }
 
   /**
@@ -86,13 +60,6 @@ export class SWRClientCache<T = any> {
   public delete(key: string): void {
     const cleanKey = key.trim();
     this.memoryCache.delete(cleanKey);
-    if (typeof window !== 'undefined') {
-      try {
-        sessionStorage.removeItem(this.storagePrefix + cleanKey);
-      } catch {
-        // ignore
-      }
-    }
   }
 
   /**
@@ -101,43 +68,12 @@ export class SWRClientCache<T = any> {
   public invalidate(prefix?: string): void {
     if (!prefix) {
       this.memoryCache.clear();
-      if (typeof window !== 'undefined') {
-        try {
-          const keysToRemove: string[] = [];
-          for (let i = 0; i < sessionStorage.length; i++) {
-            const k = sessionStorage.key(i);
-            if (k && k.startsWith(this.storagePrefix)) {
-              keysToRemove.push(k);
-            }
-          }
-          keysToRemove.forEach((k) => sessionStorage.removeItem(k));
-        } catch {
-          // ignore
-        }
-      }
       return;
     }
 
-    // Prefix invalidation
     for (const k of Array.from(this.memoryCache.keys())) {
       if (k.startsWith(prefix)) {
         this.memoryCache.delete(k);
-      }
-    }
-
-    if (typeof window !== 'undefined') {
-      try {
-        const target = this.storagePrefix + prefix;
-        const keysToRemove: string[] = [];
-        for (let i = 0; i < sessionStorage.length; i++) {
-          const k = sessionStorage.key(i);
-          if (k && k.startsWith(target)) {
-            keysToRemove.push(k);
-          }
-        }
-        keysToRemove.forEach((k) => sessionStorage.removeItem(k));
-      } catch {
-        // ignore
       }
     }
   }

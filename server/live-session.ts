@@ -1,8 +1,10 @@
-import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { WebSocket } from 'ws';
-import { db } from './db.js';
+import { db, PersonaAndVoiceConfig, FemaleVoiceName, VALID_FEMALE_VOICES } from './db.js';
 import { auth, AuthContext } from './auth.js';
 import { cognition } from './cognition.js';
+import { buildRuntimeContext } from './runtime-state.js';
+import { allMadhuritaTools, executeBackendTool } from './tools.js';
 
 const getGeminiClient = () => {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -19,283 +21,25 @@ const getGeminiClient = () => {
   });
 };
 
-// Available tools for Madhurita
-const openWebsiteTool: FunctionDeclaration = {
-  name: 'openWebsite',
-  description: 'Opens a website or web search URL in the user browser when they request to visit a site or search the web.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      url: {
-        type: Type.STRING,
-        description: 'The complete HTTP or HTTPS URL to open (e.g. https://www.google.com, https://en.wikipedia.org).',
-      },
-      title: {
-        type: Type.STRING,
-        description: 'Short title or description of the website.',
-      },
-    },
-    required: ['url'],
-  },
-};
+export const activeLiveSessions = new Set<LiveSessionManager>();
 
-const rememberFactTool: FunctionDeclaration = {
-  name: 'rememberFact',
-  description: 'Stores an important fact, personal preference, goal, or project detail into the CURRENT verified user private memory store. Fails if user identity is unknown.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      fact: {
-        type: Type.STRING,
-        description: 'The precise fact or preference to remember for this specific user.',
-      },
-      category: {
-        type: Type.STRING,
-        description: 'Category: "preference", "fact", "project", "goal", or "personal".',
-      },
-    },
-    required: ['fact'],
-  },
-};
+export function broadcastVoiceConfigUpdate(updated: PersonaAndVoiceConfig, identityId?: string) {
+  for (const session of activeLiveSessions) {
+    if (!identityId || session.getCurrentContext().id === identityId) {
+      session.applyVoiceConfig(updated).catch(() => {});
+    }
+  }
+}
 
-const getStoredMemoriesTool: FunctionDeclaration = {
-  name: 'getStoredMemories',
-  description: 'Retrieves memories. Normal users can ONLY retrieve their own memories. Authenticated Owner can retrieve their own memories or specify targetUserName to inspect another user memory.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      targetUserName: {
-        type: Type.STRING,
-        description: 'Optional name of a user whose memory to retrieve. ONLY permitted if current role is OWNER.',
-      },
-      query: {
-        type: Type.STRING,
-        description: 'Optional keyword to filter within memories.',
-      },
-    },
-  },
-};
-
-const recallConversationContextTool: FunctionDeclaration = {
-  name: 'recallConversationContext',
-  description: 'Recalls recent conversation topics and interaction context. Normal users can only recall their own previous discussion. Authenticated Owner can view context for any user.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      targetUserName: {
-        type: Type.STRING,
-        description: 'Optional name of user to recall conversation context for (Owner-only).',
-      },
-    },
-  },
-};
-
-const identifyUserTool: FunctionDeclaration = {
-  name: 'identifyUser',
-  description: 'Identifies the conversational speaker name when someone says who they are (e.g. "I am Rahul"). If anyone says "I am Ankit" or requests Owner access, immediately requires the Owner Passcode. For other names, recognizes the speaker in conversation without creating a persistent profile automatically.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      name: {
-        type: Type.STRING,
-        description: 'The user declared name.',
-      },
-    },
-    required: ['name'],
-  },
-};
-
-const registerUserTool: FunctionDeclaration = {
-  name: 'registerUser',
-  description: 'Creates a persistent registered user profile in the database ONLY when the person explicitly agrees or requests registration/profile creation. NEVER call this when someone merely states a name in passing. Cannot be used to register Ankit (Owner uses passcode authentication).',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      name: {
-        type: Type.STRING,
-        description: 'The name of the user to officially register.',
-      },
-    },
-    required: ['name'],
-  },
-};
-
-const ownerAuthenticateTool: FunctionDeclaration = {
-  name: 'ownerAuthenticate',
-  description: 'Authenticates as the Owner using their secret passcode. NEVER expose the passcode or hash in speech.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      passcode: {
-        type: Type.STRING,
-        description: 'The secret owner passcode provided by the user.',
-      },
-    },
-    required: ['passcode'],
-  },
-};
-
-const switchContextTool: FunctionDeclaration = {
-  name: 'switchContext',
-  description: 'Switches active conversation identity and context between Owner, Guest, or a specified registered user. Permitted ONLY for the authenticated Owner. Switching INTO Owner context strictly requires valid Owner passcode.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      targetRole: {
-        type: Type.STRING,
-        description: 'Target role: "owner", "user", or "guest".',
-      },
-      targetUserName: {
-        type: Type.STRING,
-        description: 'If switching to a specific registered user, their name.',
-      },
-      passcode: {
-        type: Type.STRING,
-        description: 'Required if targetRole is "owner".',
-      },
-    },
-    required: ['targetRole'],
-  },
-};
-
-const deleteUserProfileTool: FunctionDeclaration = {
-  name: 'deleteUserProfile',
-  description: 'Permanently deletes a registered user profile along with all associated memories and conversation context. Permitted ONLY for the authenticated Owner.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      userId: {
-        type: Type.STRING,
-        description: 'The unique user ID to delete (e.g. USER_001).',
-      },
-    },
-    required: ['userId'],
-  },
-};
-
-const deleteMemoryTool: FunctionDeclaration = {
-  name: 'deleteMemory',
-  description: 'Permanently deletes a specific memory from the real persistent database. Authenticated Owner can delete any memory or any user\'s memory. Normal registered users can delete ONLY their own memories. After deletion, the memory is permanently gone and cannot be recalled.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      query: {
-        type: Type.STRING,
-        description: 'The memory ID, keyword, or exact phrase/content of the memory to delete.',
-      },
-      targetUserName: {
-        type: Type.STRING,
-        description: 'Optional name of the registered user whose memory to delete (Permitted ONLY for the authenticated Owner).',
-      },
-    },
-    required: ['query'],
-  },
-};
-
-const getTimeAndStatusTool: FunctionDeclaration = {
-  name: 'getTimeAndStatus',
-  description: 'Gets current real-time clock in Indian Standard Time (IST / Asia/Kolkata), date, configured home location (Orai, Uttar Pradesh, India), active user identity, and Madhurita system status.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {},
-  },
-};
-
-const getWeatherTool: FunctionDeclaration = {
-  name: 'getWeather',
-  description: 'Fetches real live meteorological weather data for Madhurita\'s home location (Orai, Uttar Pradesh, India) or any specified location. Returns real live temperatures, humidity, wind, and conditions. Never fabricate weather information.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      location: {
-        type: Type.STRING,
-        description: 'Optional city or location name. Defaults to configured home location (Orai, Uttar Pradesh, India).',
-      },
-    },
-  },
-};
-
-const getInteractionTimelineTool: FunctionDeclaration = {
-  name: 'getInteractionTimeline',
-  description: 'Retrieves authoritative interaction timeline, session metadata, turn count, discussed topics, and exact last active IST timestamp for any user or the Owner.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      targetUserName: {
-        type: Type.STRING,
-        description: 'The name or ID of the user to query (e.g. "Sapna", "Govind", "Ankit").',
-      },
-    },
-    required: ['targetUserName'],
-  },
-};
-
-const manageCrossUserNoteTool: FunctionDeclaration = {
-  name: 'manageCrossUserNote',
-  description: 'Creates, updates, or deletes a cross-user note (message). Use this to send messages or update existing ones.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      action: {
-        type: Type.STRING,
-        description: 'The action to perform: "create", "update", "delete".',
-      },
-      noteId: {
-        type: Type.STRING,
-        description: 'The ID of the note (required for update/delete).',
-      },
-      targetUserName: {
-        type: Type.STRING,
-        description: 'The recipient user name (required for create).',
-      },
-      content: {
-        type: Type.STRING,
-        description: 'The message content (required for create/update).',
-      },
-    },
-    required: ['action'],
-  },
-};
-
-const manageTaskTool: FunctionDeclaration = {
-  name: 'manageTask',
-  description: 'Creates, updates, or deletes a task or open loop for a user.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      action: {
-        type: Type.STRING,
-        description: 'The action: "create", "update", "delete".',
-      },
-      taskId: {
-        type: Type.STRING,
-        description: 'The ID of the task (required for update/delete).',
-      },
-      title: {
-        type: Type.STRING,
-        description: 'The task title (required for create/update).',
-      },
-      status: {
-        type: Type.STRING,
-        description: 'The status: "in_progress", "completed", "paused".',
-      },
-      targetUserName: {
-        type: Type.STRING,
-        description: 'The name of the user to assign the task to (if not the current user).',
-      }
-    },
-    required: ['action'],
-  },
-};
-
-const getRegisteredUsersInfoTool: FunctionDeclaration = {
-  name: 'getRegisteredUsersInfo',
-  description: 'Retrieves authoritative information about registered users. Owner gets a full list, while normal users just get the count of registered users without private details.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {}
-  },
-};
+export function broadcastRuntimeStateToAllSessions() {
+  for (const session of activeLiveSessions) {
+    try {
+      session.broadcastRuntimeState();
+    } catch (e) {
+      // ignore
+    }
+  }
+}
 
 export class LiveSessionManager {
   private clientWs: WebSocket;
@@ -309,11 +53,54 @@ export class LiveSessionManager {
   private hasRunStartupCognition = false;
   private sessionId: string;
   private activeSessionToken: object = {};
+  private activeVoiceName: FemaleVoiceName = 'Callirrhoe';
 
   constructor(clientWs: WebSocket, initialContext: AuthContext) {
     this.clientWs = clientWs;
     this.currentContext = initialContext;
     this.sessionId = `SESS_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    activeLiveSessions.add(this);
+  }
+
+  public getCurrentContext(): AuthContext {
+    return this.currentContext;
+  }
+
+  public broadcastRuntimeState() {
+    try {
+      const runtimeState = buildRuntimeContext(this.currentContext, this.sessionId);
+      this.sendToClient({
+        type: 'runtime_state',
+        state: runtimeState,
+      });
+    } catch (err) {
+      console.error('Failed to broadcast runtime state:', err);
+    }
+  }
+
+  public async applyVoiceConfig(newVoiceConfig: PersonaAndVoiceConfig) {
+    this.sendToClient({
+      type: 'voice_config_changed',
+      config: newVoiceConfig,
+    });
+    this.broadcastRuntimeState();
+
+    // Reconnect session cleanly so updated voice/language/style/length system instructions take effect
+    if (this.session && this.isAlive) {
+      this.activeVoiceName = newVoiceConfig.voiceName;
+      try {
+        const oldSession = this.session;
+        this.session = null;
+        try {
+          oldSession.close();
+        } catch (e) {
+          // ignore
+        }
+        await this.start();
+      } catch (err) {
+        console.warn('Could not cleanly reinitialize live session with new voice/style config:', err);
+      }
+    }
   }
 
   public async updateContext(newContext: AuthContext) {
@@ -325,6 +112,8 @@ export class LiveSessionManager {
     this.lastProcessedUserTranscript = '';
     this.lastUserTurnContent = '';
     this.sessionId = `SESS_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    this.broadcastRuntimeState();
 
     if (this.session && this.isAlive) {
       try {
@@ -349,8 +138,9 @@ export class LiveSessionManager {
 
       const ai = getGeminiClient();
 
-      // Read persistent user-configured Persona & Voice parameters
+      // Read persistent user-configured Persona & Voice parameters (strict female voice)
       const personaConfig = db.getPersonaVoiceConfig(this.currentContext.id);
+      this.activeVoiceName = personaConfig.voiceName;
 
       // Formulate identity and context-aware system instruction via full cognition retrieval pipeline
       const cognitiveContext = cognition.assembleCognitiveContext(
@@ -373,26 +163,10 @@ export class LiveSessionManager {
           },
           systemInstruction,
           inputAudioTranscription: {},
+          outputAudioTranscription: {},
           tools: [
             {
-              functionDeclarations: [
-                openWebsiteTool,
-                rememberFactTool,
-                getStoredMemoriesTool,
-                deleteMemoryTool,
-                recallConversationContextTool,
-                identifyUserTool,
-                registerUserTool,
-                ownerAuthenticateTool,
-                switchContextTool,
-                deleteUserProfileTool,
-                getTimeAndStatusTool,
-                getWeatherTool,
-                getInteractionTimelineTool,
-                manageCrossUserNoteTool,
-                manageTaskTool,
-                getRegisteredUsersInfoTool,
-              ],
+              functionDeclarations: allMadhuritaTools,
             },
           ],
         },
@@ -419,6 +193,11 @@ export class LiveSessionManager {
               this.finalizeUserTranscript();
             }
 
+            // Handle Gemini Live output audio transcription (model speech transcript)
+            if (message.serverContent?.outputTranscription?.text) {
+              this.modelTurnBuffer += message.serverContent.outputTranscription.text;
+            }
+
             // 1. Audio and text parts from Gemini (24kHz PCM)
             const parts = message.serverContent?.modelTurn?.parts;
             if (parts && parts.length > 0) {
@@ -432,7 +211,7 @@ export class LiveSessionManager {
                     audio: part.inlineData.data,
                   });
                 }
-                if (part.text) {
+                if (part.text && !message.serverContent?.outputTranscription?.text) {
                   this.modelTurnBuffer += part.text;
                 }
               }
@@ -528,45 +307,42 @@ export class LiveSessionManager {
         },
       });
 
+      this.broadcastRuntimeState();
+
       // Deterministic startup cognition evaluation:
       // Only speak when authoritative application state contains an explicit reason or meaningful return.
       // If shouldSpeak === false: DO NOT send anything to Gemini Live realtime input.
       if (!this.hasRunStartupCognition) {
         this.hasRunStartupCognition = true;
-        try {
-          const evalResult = cognition.evaluateStartupState(cognitiveContext);
-          const isRegisteredOrOwner = this.currentContext.role !== 'unknown' && this.currentContext.id !== 'UNKNOWN' && this.currentContext.id !== 'UNREGISTERED';
-          const isMeaningfulReturn = isRegisteredOrOwner && !cognitiveContext.temporal.isShortAbsence && cognitiveContext.temporal.totalTurnCount > 0;
-
-          if (evalResult.shouldSpeak) {
-            if (evalResult.reason === 'pending_message' && evalResult.payload?.notes) {
-              const notes = evalResult.payload.notes;
-              const messageText = notes.map((n) => `From ${n.senderName}: "${n.content}"`).join('; ');
-              await this.session.sendRealtimeInput({
-                text: `[SYSTEM_DIRECTIVE: Deliver these pending unread message(s) to ${this.currentContext.name} immediately: ${messageText}]`,
-              });
-              db.markNotesDelivered(notes.map((n) => n.noteId));
-            } else if (evalResult.reason === 'owner_briefing' && evalResult.payload?.briefing) {
-              const b = evalResult.payload.briefing;
-              const visitors = b.recentVisitors?.map((v: any) => `${v.name} at ${v.lastSeenIST}`).join(', ') || 'None';
-              const notesCount = b.pendingNotes?.length || 0;
-              const openLoopsCount = b.openLoops?.length || 0;
-              await this.session.sendRealtimeInput({
-                text: `[SYSTEM_DIRECTIVE: Briefly and concisely provide an operational briefing to the Owner (${this.currentContext.name}). Summary: ${b.summary}. Recent Visitors: ${visitors}. Pending notes across system: ${notesCount}. Active open loops: ${openLoopsCount}. Only highlight what is meaningful. Do not dump raw data.]`,
-              });
-            } else if (evalResult.reason === 'unfinished_task' && evalResult.payload?.task) {
-              const task = evalResult.payload.task;
-              await this.session.sendRealtimeInput({
-                text: `[SYSTEM_DIRECTIVE: You may briefly check in on the active unfinished task with ${this.currentContext.name}: "${task.title}"]`,
-              });
-            }
-          } else if (isMeaningfulReturn) {
-            await this.session.sendRealtimeInput({
-              text: `[SYSTEM_DIRECTIVE: ${this.currentContext.name} has re-connected after a meaningful absence (${cognitiveContext.temporal.elapsedHuman}). Address or greet ${this.currentContext.name} naturally and seamlessly continue the conversation or topic from last time. Do not force a generic greeting if unnecessary.]`,
-            });
+        const cognitiveContext = cognition.assembleCognitiveContext(
+          this.currentContext.id,
+          this.currentContext.role,
+          this.currentContext.name
+        );
+        const startupEval = cognition.evaluateStartupState(cognitiveContext);
+        if (startupEval.shouldSpeak) {
+          let triggerText = '';
+          if (startupEval.reason === 'guest_boot') {
+            triggerText = '[SYSTEM TRIGGER: New Guest connected. Current identity is UNKNOWN/GUEST. No identity has been verified.]';
+          } else if (startupEval.reason === 'owner_briefing') {
+            triggerText = '[SYSTEM TRIGGER: Owner returned. New information, pending items, or elapsed absence detected.]';
+          } else if (startupEval.reason === 'pending_message') {
+            triggerText = '[SYSTEM TRIGGER: Pending unread messages detected.]';
+          } else if (startupEval.reason === 'unfinished_task') {
+            triggerText = '[SYSTEM TRIGGER: Active unfinished task detected.]';
+          } else if (startupEval.reason === 'important_event') {
+            triggerText = '[SYSTEM TRIGGER: Important proactive event detected.]';
           }
-        } catch (e) {
-          console.warn('Startup cognition evaluation error:', e);
+
+          if (triggerText) {
+            try {
+              await this.session.sendRealtimeInput({
+                text: triggerText,
+              });
+            } catch (err) {
+              console.error('Failed to send startup trigger to Gemini Live:', err);
+            }
+          }
         }
       }
     } catch (err: any) {
@@ -587,672 +363,40 @@ export class LiveSessionManager {
 
     const functionResponses: any[] = [];
     let pendingContextUpdate: AuthContext | null = null;
+    let pendingVoiceUpdate: PersonaAndVoiceConfig | null = null;
 
+    // 1. EXECUTE REQUIRED TOOL/ACTION & UPDATE DATABASE FIRST
     for (const call of toolCall.functionCalls) {
       const { name, args, id } = call;
-      let result: any = {};
+      const toolExec = await executeBackendTool(name, args, this.currentContext);
 
-      try {
-        if (name === 'openWebsite') {
-          let url = args?.url || '';
-          if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            url = `https://${url}`;
-          }
-          const title = args?.title || url;
-          result = { success: true, action: 'opened_website', url, title };
-          this.sendToClient({
-            type: 'tool_action',
-            tool: 'openWebsite',
-            data: { url, title },
-          });
-        } else if (name === 'rememberFact') {
-          // Verify identity is registered and established
-          if (
-            this.currentContext.role === 'unknown' ||
-            this.currentContext.id === 'UNKNOWN' ||
-            this.currentContext.id === 'UNREGISTERED'
-          ) {
-            result = {
-              success: false,
-              error: 'IDENTITY_NOT_REGISTERED',
-              message: 'Cannot store persistent memory for an unregistered or guest user. Please ask if they would like to register a profile first using registerUser.',
-            };
-          } else {
-            const fact = args?.fact;
-            const category = args?.category || 'fact';
-            const record = db.addMemory(this.currentContext.id, fact, category);
-            result = {
-              success: Boolean(record),
-              memoryId: record?.memoryId,
-              ownerId: this.currentContext.id,
-              userName: this.currentContext.name,
-              message: `Memory securely stored for ${this.currentContext.name} (${this.currentContext.id}).`,
-            };
-            this.sendToClient({
-              type: 'tool_action',
-              tool: 'rememberFact',
-              data: { fact, category, ownerId: this.currentContext.id, userName: this.currentContext.name },
-            });
-          }
-        } else if (name === 'getStoredMemories') {
-          const targetUserName = args?.targetUserName?.trim();
-          const isOwner = this.currentContext.role === 'owner';
-
-          if (targetUserName && !isOwner) {
-            // Normal user trying to access someone else's memory
-            if (targetUserName.toLowerCase() !== this.currentContext.name.toLowerCase()) {
-              result = {
-                count: 0,
-                memories: [],
-                error: 'ACCESS_DENIED',
-                message: `Access denied. Normal users can only retrieve their own memories. You cannot access ${targetUserName}'s memories.`,
-              };
-            } else {
-              const memories = db.getMemoriesForIdentity(this.currentContext.id);
-              result = {
-                count: memories.length,
-                identity: this.currentContext.name,
-                memories: memories.map((m) => ({ category: m.category, content: m.content })),
-              };
-            }
-          } else if (targetUserName && isOwner) {
-            // Owner accessing specified user's memories
-            const targetUser = db.getUserByName(targetUserName);
-            if (targetUser) {
-              const memories = db.getMemoriesForIdentity(targetUser.id);
-              result = {
-                count: memories.length,
-                targetUser: targetUser.name,
-                targetUserId: targetUser.id,
-                memories: memories.map((m) => ({ category: m.category, content: m.content })),
-                message: `Authorized Owner retrieval for user ${targetUser.name}.`,
-              };
-            } else {
-              result = {
-                count: 0,
-                memories: [],
-                message: `No user found with name "${targetUserName}".`,
-              };
-            }
-          } else {
-            // Querying own memories
-            if (this.currentContext.role === 'unknown') {
-              result = {
-                count: 0,
-                memories: [],
-                message: 'No stored memories available in guest mode.',
-              };
-            } else {
-              const memories = db.getMemoriesForIdentity(this.currentContext.id);
-              result = {
-                count: memories.length,
-                identity: this.currentContext.name,
-                memories: memories.map((m) => ({ category: m.category, content: m.content })),
-              };
-            }
-          }
-        } else if (name === 'deleteMemory') {
-          const query = args?.query?.trim();
-          const targetUserName = args?.targetUserName?.trim();
-          const isOwner = this.currentContext.role === 'owner';
-
-          if (!query) {
-            result = {
-              success: false,
-              error: 'QUERY_REQUIRED',
-              message: 'Please specify the memory ID, keyword, or text content of the memory to delete.',
-            };
-          } else if (this.currentContext.role === 'unknown') {
-            result = {
-              success: false,
-              error: 'PERMISSION_DENIED',
-              message: 'Unregistered guests do not have stored persistent memories.',
-            };
-          } else if (isOwner) {
-            let targetUserId: string | undefined = undefined;
-            if (targetUserName) {
-              const targetUser = db.getUserByName(targetUserName);
-              if (!targetUser) {
-                result = {
-                  success: false,
-                  error: 'USER_NOT_FOUND',
-                  message: `User "${targetUserName}" was not found in the database.`,
-                };
-              } else {
-                targetUserId = targetUser.id;
-              }
-            }
-
-            if (result.success !== false) {
-              const res = db.deleteMemoryAsOwner(query, targetUserId);
-              if (res.success) {
-                result = {
-                  success: true,
-                  deletedCount: res.deletedCount,
-                  deletedMemories: res.deleted.map((m) => m.content),
-                  message: `Permanently deleted ${res.deletedCount} memory item(s) from persistent database.`,
-                };
-                this.sendToClient({
-                  type: 'tool_action',
-                  tool: 'deleteMemory',
-                  data: { query, deletedCount: res.deletedCount, deleted: res.deleted },
-                });
-              } else {
-                result = {
-                  success: false,
-                  error: 'MEMORY_NOT_FOUND',
-                  message: `No matching memory found for query "${query}".`,
-                };
-              }
-            }
-          } else {
-            // Normal user can ONLY delete their own memories
-            if (targetUserName && targetUserName.toLowerCase() !== this.currentContext.name.toLowerCase()) {
-              result = {
-                success: false,
-                error: 'PERMISSION_DENIED',
-                message: 'Permission denied: Normal users can only delete their own memories.',
-              };
-            } else {
-              const res = db.deleteMemoryByQuery(this.currentContext.id, query);
-              if (res.success) {
-                result = {
-                  success: true,
-                  deletedCount: res.deletedCount,
-                  deletedMemories: res.deleted.map((m) => m.content),
-                  message: `Permanently deleted ${res.deletedCount} memory item(s) from your profile.`,
-                };
-                this.sendToClient({
-                  type: 'tool_action',
-                  tool: 'deleteMemory',
-                  data: { query, deletedCount: res.deletedCount, deleted: res.deleted },
-                });
-              } else {
-                result = {
-                  success: false,
-                  error: 'MEMORY_NOT_FOUND',
-                  message: `No matching memory found in your profile for "${query}".`,
-                };
-              }
-            }
-          }
-        } else if (name === 'recallConversationContext') {
-          const targetUserName = args?.targetUserName?.trim();
-          const isOwner = this.currentContext.role === 'owner';
-
-          if (targetUserName && !isOwner) {
-            if (targetUserName.toLowerCase() !== this.currentContext.name.toLowerCase()) {
-              result = {
-                error: 'ACCESS_DENIED',
-                message: 'Access denied. You can only recall your own conversation context.',
-              };
-            } else {
-              const turns = db.getRecentTurns(this.currentContext.id, 6);
-              result = {
-                user: this.currentContext.name,
-                recentTopics: turns.map((t) => `${t.role}: ${t.content}`),
-              };
-            }
-          } else if (targetUserName && isOwner) {
-            const targetUser = db.getUserByName(targetUserName);
-            if (targetUser) {
-              const turns = db.getRecentTurns(targetUser.id, 6);
-              result = {
-                targetUser: targetUser.name,
-                recentTopics: turns.map((t) => `${t.role}: ${t.content}`),
-              };
-            } else {
-              result = { message: `No conversation context found for ${targetUserName}.` };
-            }
-          } else {
-            const turns = db.getRecentTurns(this.currentContext.id, 6);
-            result = {
-              user: this.currentContext.name,
-              recentTopics: turns.map((t) => `${t.role}: ${t.content}`),
-            };
-          }
-        } else if (name === 'identifyUser') {
-          const userName = (args?.name || '').trim();
-          const cleanUser = userName.toLowerCase();
-          const owner = db.getOwner();
-          const isOwnerNameMatch = Boolean(
-            (owner && owner.name.trim().toLowerCase() === cleanUser) ||
-            cleanUser === 'ankit'
-          );
-
-          if (isOwnerNameMatch) {
-            // NEVER create or switch to a normal Ankit user profile.
-            // Always ask for the existing Owner Passcode. Never grant Owner access from name alone.
-            // Never treat previous authentication as permanent authorization for a new Owner-access request.
-            result = {
-              isOwnerNameMatch: true,
-              name: userName,
-              requiresPasscode: true,
-              role: 'unknown',
-              message: `The user stated "${userName}" / requested Owner access. ALWAYS ask for the existing Owner Passcode. Never grant Owner access from the name alone, and never treat previous authentication as permanent authorization for a new Owner-access request. Prompt the user to provide their Owner Passcode, which will be verified authoritatively via ownerAuthenticate.`,
-            };
-          } else if (userName.length > 0) {
-            const existing = db.getUserByName(userName);
-            if (existing) {
-              // Existing registered user in the database
-              const newContext = auth.resolveContext(undefined, existing.id);
-              pendingContextUpdate = newContext;
-
-              result = {
-                isOwnerNameMatch: false,
-                isRegistered: true,
-                userId: existing.id,
-                name: existing.name,
-                role: 'user',
-                message: `Existing registered profile found for ${existing.name} (${existing.id}). Active user context and isolated memories loaded.`,
-              };
-
-              this.sendToClient({
-                type: 'identity_changed',
-                identity: { id: existing.id, name: existing.name, role: 'user' },
-              });
-            } else {
-              // Unregistered user: do NOT automatically create a profile in the database!
-              const newContext: AuthContext = {
-                id: 'UNREGISTERED',
-                name: userName,
-                role: 'unknown',
-                isOwnerAuthenticated: false,
-                scopes: ['conversation:general', 'user:register', 'owner:auth', 'tool:info'],
-              };
-              pendingContextUpdate = newContext;
-
-              result = {
-                isOwnerNameMatch: false,
-                isRegistered: false,
-                name: userName,
-                role: 'unknown',
-                message: `The user is "${userName}", but is NOT registered in the database. DO NOT automatically create a persistent profile. Treat them as an unregistered user. Continue the conversation normally, and ask if they would like you to create a registered user profile for them. Call registerUser ONLY if they explicitly agree.`,
-              };
-
-              this.sendToClient({
-                type: 'identity_changed',
-                identity: { id: 'UNREGISTERED', name: userName, role: 'unknown' },
-              });
-            }
-          } else {
-            result = { error: 'INVALID_NAME', message: 'Please provide a valid name.' };
-          }
-        } else if (name === 'registerUser') {
-          const regName = (args?.name || '').trim();
-          const cleanReg = regName.toLowerCase();
-          const owner = db.getOwner();
-          const isOwnerNameMatch = Boolean(
-            (owner && owner.name.trim().toLowerCase() === cleanReg) ||
-            cleanReg === 'ankit'
-          );
-
-          if (isOwnerNameMatch) {
-            result = {
-              success: false,
-              error: 'OWNER_NAME_RESERVED',
-              message: 'Cannot create a normal user profile for Ankit / Owner. Owner access requires Owner Passcode Authentication.',
-            };
-          } else if (regName.length > 0) {
-            const profile = db.createOrGetUser(regName);
-            const newContext = auth.resolveContext(undefined, profile.id);
-            pendingContextUpdate = newContext;
-
-            result = {
-              success: true,
-              userId: profile.id,
-              name: profile.name,
-              role: 'user',
-              message: `Persistent user profile created in database for ${profile.name} (${profile.id}). Normal user permissions and memory persistence now active.`,
-            };
-
-            this.sendToClient({
-              type: 'identity_changed',
-              identity: { id: profile.id, name: profile.name, role: 'user' },
-            });
-          } else {
-            result = { success: false, error: 'INVALID_NAME', message: 'Please provide a valid name for registration.' };
-          }
-        } else if (name === 'ownerAuthenticate') {
-          const passcode = args?.passcode || '';
-          const authRes = auth.authenticateOwner(passcode);
-          if (authRes.success && authRes.token) {
-            const newContext = auth.resolveContext(authRes.token);
-            pendingContextUpdate = newContext;
-            result = {
-              success: true,
-              role: 'owner',
-              name: newContext.name,
-              message: 'Owner passcode verified successfully. Full owner privileges granted.',
-            };
-            this.sendToClient({
-              type: 'identity_changed',
-              token: authRes.token,
-              identity: { id: newContext.id, name: newContext.name, role: 'owner' },
-            });
-          } else {
-            result = {
-              success: false,
-              error: authRes.error || 'AUTHENTICATION_FAILED',
-              message: 'Invalid owner passcode. Access remains at current permission level.',
-            };
-          }
-        } else if (name === 'switchContext') {
-          const targetRole = (args?.targetRole || 'guest').toLowerCase();
-          const targetUserName = args?.targetUserName?.trim();
-          const passcode = args?.passcode;
-
-          if (targetRole === 'owner') {
-            // Switching into Owner ALWAYS requires passcode
-            if (!passcode) {
-              result = {
-                success: false,
-                requiresPasscode: true,
-                error: 'PASSCODE_REQUIRED',
-                message: 'Switching into Owner context strictly requires the secret Owner passcode. Prompt the user for the passcode.',
-              };
-            } else {
-              const authRes = auth.authenticateOwner(passcode);
-              if (authRes.success && authRes.token) {
-                const newContext = auth.resolveContext(authRes.token);
-                pendingContextUpdate = newContext;
-                result = {
-                  success: true,
-                  role: 'owner',
-                  name: newContext.name,
-                  message: 'Owner passcode verified. Switched to Owner context.',
-                };
-                this.sendToClient({
-                  type: 'identity_changed',
-                  token: authRes.token,
-                  identity: { id: newContext.id, name: newContext.name, role: 'owner' },
-                });
-              } else {
-                result = {
-                  success: false,
-                  error: 'AUTHENTICATION_FAILED',
-                  message: 'Incorrect Owner passcode. Could not switch to Owner context.',
-                };
-              }
-            }
-          } else {
-            // Only the authenticated Owner is permitted to switch identities to another user or guest
-            if (this.currentContext.role !== 'owner') {
-              result = {
-                success: false,
-                error: 'PERMISSION_DENIED',
-                message: 'Identity profile switching is restricted exclusively to the authenticated Owner.',
-              };
-            } else if (targetRole === 'guest' || targetRole === 'unknown') {
-              const guestContext = auth.resolveContext(undefined, undefined);
-              pendingContextUpdate = guestContext;
-              result = {
-                success: true,
-                role: 'unknown',
-                name: 'Guest',
-                message: 'Owner requested switch to Guest context.',
-              };
-              this.sendToClient({
-                type: 'identity_changed',
-                identity: { id: 'UNKNOWN', name: 'Guest', role: 'unknown' },
-              });
-            } else if (targetRole === 'user') {
-              if (targetUserName) {
-                const profile = db.getUserByName(targetUserName);
-                if (!profile) {
-                  result = {
-                    success: false,
-                    error: 'USER_NOT_FOUND',
-                    message: `Registered user profile "${targetUserName}" was not found in the database. switchContext only resolves existing registered users.`,
-                  };
-                } else {
-                  const newContext = auth.resolveContext(undefined, profile.id);
-                  pendingContextUpdate = newContext;
-                  result = {
-                    success: true,
-                    role: 'user',
-                    name: profile.name,
-                    userId: profile.id,
-                    message: `Owner switched active conversation context to user ${profile.name} (${profile.id}).`,
-                  };
-                  this.sendToClient({
-                    type: 'identity_changed',
-                    identity: { id: profile.id, name: profile.name, role: 'user' },
-                  });
-                }
-              } else {
-                result = {
-                  success: false,
-                  error: 'USER_NAME_REQUIRED',
-                  message: 'Please specify the name of the user profile to switch to.',
-                };
-              }
-            } else {
-              result = { error: 'UNKNOWN_ROLE', message: 'Target role must be owner, user, or guest.' };
-            }
-          }
-        } else if (name === 'deleteUserProfile') {
-          // Deleting users is an authoritative Owner-only action
-          if (this.currentContext.role !== 'owner') {
-            result = {
-              success: false,
-              error: 'PERMISSION_DENIED',
-              message: 'Only the authenticated Owner can delete user profiles and associated records.',
-            };
-          } else {
-            const userId = args?.userId?.trim();
-            if (!userId) {
-              result = { success: false, error: 'MISSING_USER_ID', message: 'You must provide the exact user ID to delete.' };
-            } else if (userId === 'OWNER_001') {
-              result = { success: false, error: 'CANNOT_DELETE_OWNER', message: 'The Owner profile cannot be deleted.' };
-            } else {
-              const targetUser = db.getUserById(userId);
-              if (!targetUser) {
-                result = {
-                  success: false,
-                  error: 'USER_NOT_FOUND',
-                  message: `Could not find a registered user with ID "${userId}".`,
-                };
-              } else {
-                const deleted = db.deleteUser(targetUser.id);
-                if (deleted) {
-                  result = {
-                    success: true,
-                    message: `User ${targetUser.name} (${targetUser.id}) and all associated memories and conversation context were permanently deleted.`,
-                  };
-                  this.sendToClient({
-                    type: 'tool_action',
-                    action: {
-                      type: 'user_deleted',
-                      userId: targetUser.id,
-                      userName: targetUser.name,
-                    },
-                  });
-                } else {
-                  result = {
-                    success: false,
-                    error: 'DELETE_FAILED',
-                    message: `Failed to delete user ${targetUser.name}.`,
-                  };
-                }
-              }
-            }
-          }
-        } else if (name === 'getTimeAndStatus') {
-          const now = new Date();
-          const locationConfig = db.getLocationConfig();
-          const registeredUsers = db.getUsers();
-          const owner = db.getOwner();
-          const isOwner = this.currentContext.role === 'owner';
-          const timeIST = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true });
-          const dateIST = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-          result = {
-            currentTimeIST: timeIST,
-            currentDateIST: dateIST,
-            timezone: 'Asia/Kolkata (IST, UTC+05:30)',
-            homeLocation: locationConfig.formattedLocation,
-            totalRegisteredUsers: isOwner ? registeredUsers.length : undefined,
-            registeredUsers: isOwner ? registeredUsers.map((u) => ({ id: u.id, name: u.name })) : undefined,
-            activeIdentity: {
-              id: this.currentContext.id,
-              name: this.currentContext.name,
-              role: this.currentContext.role,
-            },
-            accessLevel: isOwner ? 'Owner' : this.currentContext.role === 'user' ? 'Registered User' : 'Unregistered',
-            ownerName: isOwner ? (owner ? owner.name : null) : undefined,
-            systemHealth: 'Optimal',
-          };
-        } else if (name === 'getWeather') {
-          const locationConfig = db.getLocationConfig();
-          const targetLocation = args?.location?.trim() || locationConfig.formattedLocation;
-          try {
-            const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${locationConfig.latitude}&longitude=${locationConfig.longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&timezone=Asia%2FKolkata`;
-            const weatherRes = await fetch(weatherUrl);
-            if (!weatherRes.ok) {
-              result = {
-                available: false,
-                message: 'Live weather service returned an error. Current meteorological data is unavailable.',
-                location: targetLocation,
-              };
-            } else {
-              const weatherData = await weatherRes.json();
-              const current = weatherData.current;
-              const weatherCodeMap: Record<number, string> = {
-                0: 'Clear sky',
-                1: 'Mainly clear',
-                2: 'Partly cloudy',
-                3: 'Overcast',
-                45: 'Foggy',
-                48: 'Depositing rime fog',
-                51: 'Light drizzle',
-                53: 'Moderate drizzle',
-                55: 'Dense drizzle',
-                61: 'Slight rain',
-                63: 'Moderate rain',
-                65: 'Heavy rain',
-                71: 'Slight snow',
-                73: 'Moderate snow',
-                75: 'Heavy snow',
-                80: 'Slight rain showers',
-                81: 'Moderate rain showers',
-                82: 'Violent rain showers',
-                95: 'Thunderstorm',
-              };
-              const condition = weatherCodeMap[current.weather_code] || 'Clear';
-              result = {
-                available: true,
-                location: targetLocation,
-                temperature: `${current.temperature_2m}°C`,
-                feelsLike: `${current.apparent_temperature}°C`,
-                humidity: `${current.relative_humidity_2m}%`,
-                windSpeed: `${current.wind_speed_10m} km/h`,
-                precipitation: `${current.precipitation} mm`,
-                condition,
-                timezone: 'Asia/Kolkata (IST)',
-              };
-            }
-          } catch (err: any) {
-            console.warn('Weather fetch error in tool:', err);
-            result = {
-              available: false,
-              message: 'Live weather service is currently unreachable.',
-              location: targetLocation,
-            };
-          }
-        } else if (name === 'getInteractionTimeline') {
-          const targetUserName = args?.targetUserName?.trim();
-          result = db.getInteractionTimeline(
-            targetUserName || this.currentContext.name,
-            this.currentContext.role,
-            this.currentContext.id
-          );
-        } else if (name === 'manageCrossUserNote') {
-          const action = args?.action;
-          const targetUserName = args?.targetUserName?.trim();
-          const content = args?.content?.trim();
-          const noteId = args?.noteId?.trim();
-
-          if (action === 'create') {
-            if (!content) {
-              result = { success: false, error: 'CONTENT_REQUIRED' };
-            } else {
-              const note = db.addCrossUserNote(this.currentContext.id, this.currentContext.name, content, targetUserName);
-              result = { success: Boolean(note), noteId: note?.noteId, targetUserName, message: 'Message securely saved.' };
-              this.sendToClient({ type: 'tool_action', tool: 'manageCrossUserNote', data: { action, targetUserName, content, noteId: note?.noteId } });
-            }
-          } else if (action === 'update' || action === 'delete' || action === 'mark_delivered') {
-            if (!noteId) {
-               result = { success: false, error: 'NOTEID_REQUIRED' };
-            } else {
-               if (action === 'update') {
-                  const success = db.editCrossUserNote(this.currentContext.id, noteId, content);
-                  result = { success };
-               } else if (action === 'delete') {
-                  const success = db.deleteCrossUserNote(this.currentContext.id, noteId);
-                  result = { success };
-               } else if (action === 'mark_delivered') {
-                  db.markNotesDelivered([noteId]);
-                  result = { success: true };
-               }
-            }
-          }
-        } else if (name === 'manageTask') {
-          const action = args?.action;
-          const taskId = args?.taskId?.trim();
-          const title = args?.title?.trim();
-          const status = args?.status?.trim() as any;
-          const targetUserName = args?.targetUserName?.trim();
-
-          let targetId = this.currentContext.id;
-          if (targetUserName && this.currentContext.role === 'owner') {
-             const u = db.resolveIdentityByName(targetUserName);
-             if (u) targetId = u.id;
-          }
-
-          if (action === 'create' || action === 'update') {
-            if (action === 'create' && !title) {
-               result = { success: false, error: 'TITLE_REQUIRED' };
-            } else if (action === 'update' && !taskId) {
-               result = { success: false, error: 'TASKID_REQUIRED' };
-            } else {
-               if (action === 'create') {
-                 const t = db.addOrUpdateTask(targetId, title, '', status || 'in_progress');
-                 result = { success: true, taskId: t?.id };
-               } else {
-                 if (status) db.updateTaskStatus(targetId, taskId, status);
-                 // We don't have update title yet in db, but we can just update status for now.
-                 result = { success: true };
-               }
-               this.sendToClient({ type: 'tool_action', tool: 'manageTask', data: { action, taskId, title, status } });
-            }
-          } else if (action === 'delete') {
-             if (!taskId) result = { success: false, error: 'TASKID_REQUIRED' };
-             else {
-               const ok = db.deleteTask(targetId, taskId);
-               result = { success: ok };
-             }
-          }
-        } else if (name === 'getRegisteredUsersInfo') {
-          const registeredUsers = db.getUsers();
-          const isOwner = this.currentContext.role === 'owner';
-          result = {
-            totalRegisteredUsers: registeredUsers.length,
-            registeredUsers: isOwner ? registeredUsers.map((u) => ({ id: u.id, name: u.name })) : undefined,
-          };
-        } else {
-          result = { error: 'Unknown tool declaration' };
-        }
-      } catch (err: any) {
-        result = { error: err.message || 'Tool execution error' };
+      if (toolExec.clientEvent) {
+        this.sendToClient(toolExec.clientEvent);
+      }
+      if (toolExec.pendingContextUpdate) {
+        pendingContextUpdate = toolExec.pendingContextUpdate;
+      }
+      if (toolExec.pendingVoiceUpdate) {
+        pendingVoiceUpdate = toolExec.pendingVoiceUpdate;
       }
 
       functionResponses.push({
         id,
         name,
-        response: result,
+        response: toolExec.result,
       });
     }
 
+    // 2. UPDATE AUTHORITATIVE RUNTIME STATE & SYNC STATE TO UI BEFORE LLM RESPONDS
+    if (pendingContextUpdate) {
+      await this.updateContext(pendingContextUpdate);
+    } else if (pendingVoiceUpdate) {
+      await this.applyVoiceConfig(pendingVoiceUpdate);
+    } else {
+      this.broadcastRuntimeState();
+    }
+
+    // 3. ONLY THEN GIVE THE FINAL REAL STATE TO LLM TO REASON OVER
     if (this.session && this.isAlive && typeof this.session.sendToolResponse === 'function') {
       try {
         await this.session.sendToolResponse({ functionResponses });
@@ -1261,10 +405,6 @@ export class LiveSessionManager {
       }
     } else {
       console.warn('Live session is inactive or closed; skipped sending tool response.');
-    }
-
-    if (pendingContextUpdate) {
-      await this.updateContext(pendingContextUpdate);
     }
   }
 
@@ -1291,6 +431,62 @@ export class LiveSessionManager {
     if (addressingMatch && addressingMatch[1]) {
       const preferredTitle = addressingMatch[1].trim();
       db.setAddressingPreference(this.currentContext.id, preferredTitle);
+    }
+
+    const lower = cleanText.toLowerCase();
+
+    // 1. Detect Natural Voice Control
+    let detectedVoice: FemaleVoiceName | null = null;
+    if (lower.includes('callirrhoe')) detectedVoice = 'Callirrhoe';
+    else if (lower.includes('aoede')) detectedVoice = 'Aoede';
+    else if (lower.includes('kore')) detectedVoice = 'Kore';
+    else if (lower.includes('leda')) detectedVoice = 'Leda';
+    else if (lower.includes('despina')) detectedVoice = 'Despina';
+
+    // 2. Detect Language directives
+    let detectedLanguage: 'Hinglish' | 'English' | 'Hindi' | null = null;
+    if (lower.includes('speak in hindi') || lower.includes('hindi me bolo') || lower.includes('hindi me baat') || lower.includes('use hindi')) {
+      detectedLanguage = 'Hindi';
+    } else if (lower.includes('speak in english') || lower.includes('english me bolo') || lower.includes('use english')) {
+      detectedLanguage = 'English';
+    } else if (lower.includes('speak in hinglish') || lower.includes('hinglish me bolo') || lower.includes('use hinglish')) {
+      detectedLanguage = 'Hinglish';
+    }
+
+    // 3. Detect Response Length directives
+    let detectedLength: 'concise' | 'balanced' | 'detailed' | null = null;
+    if (lower.includes('keep responses short') || lower.includes('chote javab') || lower.includes('short response') || lower.includes('be concise') || lower.includes('brief me bolo')) {
+      detectedLength = 'concise';
+    } else if (lower.includes('detailed response') || lower.includes('detailed answer') || lower.includes('bada javab') || lower.includes('explain in detail')) {
+      detectedLength = 'detailed';
+    } else if (lower.includes('balanced response') || lower.includes('normal length')) {
+      detectedLength = 'balanced';
+    }
+
+    // 4. Detect Speaking Style directives
+    let detectedStyle: 'warm_conversational' | 'expressive_witty' | 'calm_thoughtful' | 'concise_direct' | null = null;
+    if (lower.includes('speak casually') || lower.includes('be casual') || lower.includes('witty style') || lower.includes('expressive style')) {
+      detectedStyle = 'expressive_witty';
+    } else if (lower.includes('be warm') || lower.includes('warm style')) {
+      detectedStyle = 'warm_conversational';
+    } else if (lower.includes('be calm') || lower.includes('thoughtful style')) {
+      detectedStyle = 'calm_thoughtful';
+    }
+
+    const updates: Partial<PersonaAndVoiceConfig> = {};
+    if (detectedVoice) updates.voiceName = detectedVoice;
+    if (detectedLanguage) updates.preferredLanguage = detectedLanguage;
+    if (detectedLength) updates.responseLength = detectedLength;
+    if (detectedStyle) updates.speakingStyle = detectedStyle;
+
+    if (Object.keys(updates).length > 0) {
+      try {
+        const updated = db.updatePersonaVoiceConfig(this.currentContext.id, updates);
+        broadcastVoiceConfigUpdate(updated, this.currentContext.id);
+        broadcastRuntimeStateToAllSessions();
+      } catch (e) {
+        console.warn('Failed to apply detected voice/style directive:', e);
+      }
     }
   }
 
@@ -1373,6 +569,7 @@ export class LiveSessionManager {
 
   public close() {
     this.isAlive = false;
+    activeLiveSessions.delete(this);
     if (this.session) {
       try {
         this.session.close();

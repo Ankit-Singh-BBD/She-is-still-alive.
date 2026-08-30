@@ -1,13 +1,16 @@
 import fs from 'fs';
 import path from 'path';
 
+export type FemaleVoiceName = 'Callirrhoe' | 'Aoede' | 'Kore' | 'Leda' | 'Despina';
+export const VALID_FEMALE_VOICES: readonly FemaleVoiceName[] = ['Callirrhoe', 'Aoede', 'Kore', 'Leda', 'Despina'] as const;
+
 export interface PersonaAndVoiceConfig {
   speakingStyle: 'warm_conversational' | 'expressive_witty' | 'calm_thoughtful' | 'concise_direct';
   tone: 'friendly_warm' | 'energetic_witty' | 'poised_professional' | 'playful_charming';
   formality: 'casual' | 'balanced' | 'formal';
   preferredLanguage: 'Hinglish' | 'English' | 'Hindi';
   hinglishBehavior: 'natural_mix' | 'light_conversational' | 'strict_english';
-  voiceName: 'Aoede' | 'Kore' | 'Puck' | 'Charon' | 'Fenrir';
+  voiceName: FemaleVoiceName;
   responseLength: 'concise' | 'balanced' | 'detailed';
   conversationalStyle: 'interactive_engaging' | 'direct_snappy' | 'deep_analytical';
 }
@@ -38,7 +41,7 @@ export const DEFAULT_PERSONA_VOICE_CONFIG: PersonaAndVoiceConfig = {
   formality: 'balanced',
   preferredLanguage: 'Hinglish',
   hinglishBehavior: 'natural_mix',
-  voiceName: 'Aoede',
+  voiceName: 'Callirrhoe',
   responseLength: 'balanced',
   conversationalStyle: 'interactive_engaging',
 };
@@ -263,6 +266,7 @@ export interface DatabaseSchema {
   proactiveEvents?: ProactiveEventRecord[];
   requests?: RequestLifecycleItem[];
   commitments?: ExplicitCommitment[];
+  systemVoiceConfig?: PersonaAndVoiceConfig;
 }
 
 export function getISTDateTime(date: Date = new Date()): {
@@ -291,6 +295,23 @@ export function getISTDateTime(date: Date = new Date()): {
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+
+export type StateChangeListener = (operation: string, details?: string) => void;
+const stateChangeListeners: StateChangeListener[] = [];
+
+export function onDatabaseStateChange(listener: StateChangeListener) {
+  stateChangeListeners.push(listener);
+}
+
+export function emitDatabaseStateChange(operation: string, details?: string) {
+  for (const listener of stateChangeListeners) {
+    try {
+      listener(operation, details);
+    } catch (e) {
+      console.error('Error in state change listener:', e);
+    }
+  }
+}
 
 class DatabaseEngine {
   private data: DatabaseSchema = {
@@ -401,6 +422,20 @@ class DatabaseEngine {
     }
 
     this.isLoaded = true;
+    console.log(`[DB AUTHORITATIVE INSTANCE] Initialized Database at absolute path: ${path.resolve(DB_FILE)}`);
+  }
+
+  public getDatabaseFilePath(): string {
+    return path.resolve(DB_FILE);
+  }
+
+  public logMutation(identityId: string, operation: string, success: boolean, details?: string): void {
+    const now = getISTDateTime().iso;
+    const dbPath = path.resolve(DB_FILE);
+    console.log(`[STATE MUTATION LOG] timestamp: ${now} | identityId: ${identityId || 'UNKNOWN'} | operation: ${operation} | success: ${success} | path: ${dbPath}${details ? ` | details: ${details}` : ''}`);
+    if (success) {
+      emitDatabaseStateChange(operation, details);
+    }
   }
 
   private save(): boolean {
@@ -408,7 +443,11 @@ class DatabaseEngine {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
-      fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
+      const tmpFile = path.join(DATA_DIR, `.db.json.${Date.now()}.${Math.random().toString(36).substring(2, 6)}.tmp`);
+      const content = JSON.stringify(this.data, null, 2);
+      fs.writeFileSync(tmpFile, content, 'utf-8');
+      fs.renameSync(tmpFile, DB_FILE);
+      emitDatabaseStateChange('db_saved');
       return true;
     } catch (err) {
       console.error('DATABASE_WRITE_FAILED', err);
@@ -423,7 +462,9 @@ class DatabaseEngine {
 
   public setOwner(owner: OwnerProfile): boolean {
     this.data.owner = owner;
-    return this.save();
+    const ok = this.save();
+    this.logMutation(owner.id, 'setOwner', ok);
+    return ok;
   }
 
   public hasOwner(): boolean {
@@ -465,12 +506,15 @@ class DatabaseEngine {
       id,
       name: cleanName,
       role: 'user',
-      preferences: {},
+      preferences: {
+        personaAndVoice: { ...DEFAULT_PERSONA_VOICE_CONFIG },
+      },
       createdAt: now,
       updatedAt: now,
     };
     this.data.users.push(newUser);
     this.save();
+    this.logMutation(newUser.id, 'createOrGetUser', true);
     return newUser;
   }
 
@@ -491,9 +535,58 @@ class DatabaseEngine {
     }
 
     // 4. Cascade delete all conversation context turns
-    this.data.conversations = this.data.conversations.filter((c) => c.identityId !== userId);
+    if (this.data.conversations) {
+      this.data.conversations = this.data.conversations.filter((c) => c.identityId !== userId);
+    }
 
-    return this.save();
+    // 5. Cascade delete tasks
+    if (this.data.tasks) {
+      this.data.tasks = this.data.tasks.filter((t) => t.identityId !== userId);
+    }
+
+    // 6. Cascade delete sessions
+    if (this.data.sessions) {
+      this.data.sessions = this.data.sessions.filter((s) => s.identityId !== userId);
+    }
+
+    // 7. Cascade delete open loops
+    if (this.data.worldAwareness && this.data.worldAwareness.openLoops) {
+      this.data.worldAwareness.openLoops = this.data.worldAwareness.openLoops.filter((ol) => ol.identityId !== userId);
+    }
+
+    // 8. Cascade delete requests
+    if (this.data.requests) {
+      this.data.requests = this.data.requests.filter((r) => r.identityId !== userId);
+    }
+
+    // 9. Cascade delete commitments
+    if (this.data.commitments) {
+      this.data.commitments = this.data.commitments.filter((cm) => cm.identityId !== userId);
+    }
+
+    // 10. Cascade delete cross-user notes
+    if (this.data.crossUserNotes) {
+      this.data.crossUserNotes = this.data.crossUserNotes.filter((n) => n.senderId !== userId && n.targetId !== userId);
+    }
+
+    // 11. Cascade delete world awareness visitors & interactions
+    if (this.data.worldAwareness) {
+      if (this.data.worldAwareness.recentVisitors) {
+        this.data.worldAwareness.recentVisitors = this.data.worldAwareness.recentVisitors.filter((v) => v.identityId !== userId);
+      }
+      if (this.data.worldAwareness.recentInteractions) {
+        this.data.worldAwareness.recentInteractions = this.data.worldAwareness.recentInteractions.filter((i) => i.identityId !== userId);
+      }
+    }
+
+    // 12. Cascade delete proactive events targeting user
+    if (this.data.proactiveEvents) {
+      this.data.proactiveEvents = this.data.proactiveEvents.filter((pe) => pe.relevanceTarget !== userId);
+    }
+
+    const ok = this.save();
+    this.logMutation(userId, 'deleteUser', ok);
+    return ok;
   }
 
   // --- Identity-Scoped Memory Operations ---
@@ -918,6 +1011,9 @@ class DatabaseEngine {
     // Update Madhurita World Awareness: Recent Visitors
     this.recordVisitor(identityId, sess.userName || 'Guest', nowIst.iso, nowIst.istFull);
 
+    const ok = this.save();
+    this.logMutation(identityId, 'touchSession', ok, `sessionId: ${sess.sessionId}`);
+
     return sess;
   }
 
@@ -1085,24 +1181,48 @@ class DatabaseEngine {
       const removeIds = new Set(turnsToRemove.map((t) => t.turnId));
       this.data.conversations = this.data.conversations.filter((c) => !removeIds.has(c.turnId));
     }
-    this.save();
+    const ok = this.save();
+    if (!ok) {
+      this.data.conversations = this.data.conversations.filter((c) => c.turnId !== turnId);
+      console.error(`[DB ERROR] Failed to save conversation turn for identity ${identityId}`);
+      throw new Error(`DATABASE_SAVE_FAILED: Failed to save conversation turn for identity ${identityId}`);
+    }
+    this.logMutation(identityId, 'logTurn', true, `${role}: ${cleanContent.slice(0, 40)}`);
     return turn;
   }
 
   public deleteSession(identityId: string, sessionId: string): boolean {
-    if (!this.data.conversations) return false;
-    const initialLen = this.data.conversations.length;
-    this.data.conversations = this.data.conversations.filter(
-      (c) => !(c.sessionId === sessionId && (c.identityId === identityId || identityId === 'OWNER_001'))
-    );
-    if (this.data.conversations.length !== initialLen) {
-      // Also delete from sessions metadata
-      if (this.data.sessions) {
-        this.data.sessions = this.data.sessions.filter(
-          (s) => !(s.sessionId === sessionId && (s.identityId === identityId || identityId === 'OWNER_001'))
-        );
+    if (!this.data.conversations && !this.data.sessions) return false;
+
+    let convRemoved = false;
+    if (this.data.conversations) {
+      const initialConvLen = this.data.conversations.length;
+      this.data.conversations = this.data.conversations.filter(
+        (c) => !(c.identityId === identityId && (c.sessionId === sessionId || (!c.sessionId && sessionId === 'unknown')))
+      );
+      if (this.data.conversations.length !== initialConvLen) {
+        convRemoved = true;
       }
-      this.save();
+    }
+
+    let sessionRemoved = false;
+    if (this.data.sessions) {
+      const initialSessLen = this.data.sessions.length;
+      this.data.sessions = this.data.sessions.filter(
+        (s) => !(s.identityId === identityId && (s.sessionId === sessionId || (!s.sessionId && sessionId === 'unknown')))
+      );
+      if (this.data.sessions.length !== initialSessLen) {
+        sessionRemoved = true;
+      }
+    }
+
+    if (convRemoved || sessionRemoved) {
+      this.logMutation(identityId, 'deleteSession', true, `sessionId: ${sessionId}`);
+      const ok = this.save();
+      if (!ok) {
+        console.error(`[DB ERROR] Failed to save database after deleting session ${sessionId} for identity ${identityId}`);
+        throw new Error(`DATABASE_SAVE_FAILED: Could not persist session deletion for ${sessionId}`);
+      }
       return true;
     }
     return false;
@@ -1200,8 +1320,24 @@ class DatabaseEngine {
   }
 
   public clearHistory(identityId: string): boolean {
-    this.data.conversations = this.data.conversations.filter((c) => c.identityId !== identityId);
-    return this.save();
+    if (!identityId) return false;
+    this.data.conversations = (this.data.conversations || []).filter((c) => c.identityId !== identityId);
+    if (this.data.sessions) {
+      this.data.sessions = this.data.sessions.filter((s) => s.identityId !== identityId);
+    }
+    if (this.data.requests) {
+      this.data.requests = this.data.requests.filter((r) => r.identityId !== identityId);
+    }
+    if (this.data.worldAwareness && this.data.worldAwareness.recentInteractions) {
+      this.data.worldAwareness.recentInteractions = this.data.worldAwareness.recentInteractions.filter((i) => i.identityId !== identityId);
+    }
+    this.logMutation(identityId, 'clearHistory', true);
+    const ok = this.save();
+    if (!ok) {
+      console.error(`[DB ERROR] Failed to save database after clearing history for identity ${identityId}`);
+      throw new Error(`DATABASE_SAVE_FAILED: Failed to save database after clearing history for ${identityId}`);
+    }
+    return true;
   }
 
   public getUserPreferences(identityId: string): Record<string, any> {
@@ -1214,13 +1350,14 @@ class DatabaseEngine {
   }
 
   public updateUserPreference(identityId: string, key: string, value: any): Record<string, any> {
+    let result: Record<string, any> = {};
     if (identityId === 'OWNER_001' || (this.data.owner && identityId === this.data.owner.id)) {
       if (this.data.owner) {
         if (!this.data.owner.preferences) this.data.owner.preferences = {};
         this.data.owner.preferences[key] = value;
         this.data.owner.updatedAt = new Date().toISOString();
         this.save();
-        return this.data.owner.preferences;
+        result = this.data.owner.preferences;
       }
     } else {
       const user = this.data.users.find((u) => u.id === identityId);
@@ -1229,10 +1366,11 @@ class DatabaseEngine {
         user.preferences[key] = value;
         user.updatedAt = new Date().toISOString();
         this.save();
-        return user.preferences;
+        result = user.preferences;
       }
     }
-    return {};
+    this.logMutation(identityId, `updateUserPreference:${key}`, true);
+    return result;
   }
 
   public setAddressingPreference(identityId: string, title: string): boolean {
@@ -1244,8 +1382,7 @@ class DatabaseEngine {
     this.updateUserPreference(identityId, 'addressing', addressing);
     this.updateUserPreference(identityId, 'preferredTitle', cleanTitle);
 
-    // Also persist high-priority Memory record
-    this.addMemory(identityId, `User explicitly instructed to be addressed as "${cleanTitle}".`, 'preference', 1.0, 1.0);
+    this.logMutation(identityId, 'setAddressingPreference', true);
     return true;
   }
 
@@ -1504,10 +1641,14 @@ class DatabaseEngine {
   public getPendingNotesForTarget(targetId: string, targetName?: string): CrossUserNote[] {
     if (!targetId || targetId === 'UNKNOWN' || targetId === 'UNREGISTERED' || targetId === 'GUEST') return [];
     if (!this.data.crossUserNotes) return [];
+    const cleanTargetName = targetName?.trim().toLowerCase();
 
     return this.data.crossUserNotes.filter((n) => {
       if (n.delivered) return false;
-      return n.targetId === targetId;
+      if (n.targetId && n.targetId === targetId) return true;
+      if (cleanTargetName && n.targetName && n.targetName.trim().toLowerCase() === cleanTargetName) return true;
+      if (targetId === 'OWNER_001' && (n.targetName?.toLowerCase() === 'ankit' || n.targetName?.toLowerCase() === 'owner')) return true;
+      return false;
     });
   }
 
@@ -1787,31 +1928,68 @@ class DatabaseEngine {
     };
   }
 
-  // --- Persona & Voice Configuration (Owner-Controlled) ---
-  public getPersonaVoiceConfig(identityId: string): PersonaAndVoiceConfig {
-    let prefs;
-    if (identityId === 'OWNER_001') {
+  // --- Persona & Voice Configuration (Authoritative System & Per-Identity) ---
+  public getPersonaVoiceConfig(identityId?: string): PersonaAndVoiceConfig {
+    let prefs: Partial<PersonaAndVoiceConfig> | undefined;
+    const ownerId = this.data.owner?.id || 'OWNER_001';
+    if (identityId === 'OWNER_001' || identityId === ownerId) {
       prefs = this.data.owner?.preferences?.personaAndVoice;
-    } else {
+    } else if (identityId && identityId !== 'UNKNOWN' && identityId !== 'UNREGISTERED') {
       const user = this.getUserById(identityId);
       prefs = user?.preferences?.personaAndVoice;
     }
-    return prefs ? { ...DEFAULT_PERSONA_VOICE_CONFIG, ...prefs } : { ...DEFAULT_PERSONA_VOICE_CONFIG };
+
+    const baseConfig = this.data.systemVoiceConfig || DEFAULT_PERSONA_VOICE_CONFIG;
+    const merged: PersonaAndVoiceConfig = {
+      ...DEFAULT_PERSONA_VOICE_CONFIG,
+      ...baseConfig,
+      ...(prefs || {}),
+    };
+
+    // STRICT FEMALE VOICE SANITIZATION: Never fall back to or allow a male voice
+    if (!VALID_FEMALE_VOICES.includes(merged.voiceName)) {
+      merged.voiceName = 'Callirrhoe';
+    }
+
+    return merged;
   }
 
   public updatePersonaVoiceConfig(identityId: string, config: Partial<PersonaAndVoiceConfig>): PersonaAndVoiceConfig {
-    let target;
-    if (identityId === 'OWNER_001') {
+    // Validate voiceName if provided: Must be a supported female voice
+    if (config.voiceName) {
+      const rawName = String(config.voiceName).trim();
+      const normalizedMatch = VALID_FEMALE_VOICES.find(
+        (v) => v.toLowerCase() === rawName.toLowerCase()
+      );
+
+      if (!normalizedMatch) {
+        throw new Error(
+          `MALE_VOICE_PROHIBITED: All Madhurita voice profiles must use female voices (${VALID_FEMALE_VOICES.join(', ')}). '${config.voiceName}' is not a permitted voice.`
+        );
+      }
+      config.voiceName = normalizedMatch;
+    }
+
+    let target: OwnerProfile | UserProfile | null = null;
+    const ownerId = this.data.owner?.id || 'OWNER_001';
+    if (identityId === 'OWNER_001' || identityId === ownerId) {
       target = this.data.owner;
-    } else {
+    } else if (identityId && identityId !== 'UNKNOWN' && identityId !== 'UNREGISTERED') {
       target = this.getUserById(identityId);
     }
-    if (!target) throw new Error('IDENTITY_NOT_FOUND');
-    if (!target.preferences) target.preferences = {};
+
     const current = this.getPersonaVoiceConfig(identityId);
-    const updated = { ...current, ...config };
-    target.preferences.personaAndVoice = updated;
-    target.updatedAt = new Date().toISOString();
+    const updated: PersonaAndVoiceConfig = { ...current, ...config };
+
+    // Ensure persistent system-wide voice configuration
+    this.data.systemVoiceConfig = updated;
+
+    if (target) {
+      if (!target.preferences) target.preferences = {};
+      target.preferences.personaAndVoice = updated;
+      target.updatedAt = new Date().toISOString();
+    }
+
     this.save();
     return updated;
   }
@@ -1948,6 +2126,22 @@ class DatabaseEngine {
     return (wa.recentInteractions || []).slice(0, limit);
   }
 
+  public getOpenLoops(identityId?: string, includeResolved = true): OpenLoopItem[] {
+    const wa = this.getWorldAwareness();
+    let loops = wa.openLoops || [];
+    if (identityId && identityId !== 'ALL' && identityId !== 'UNKNOWN') {
+      loops = loops.filter((l) => l.identityId === identityId);
+    }
+    if (!includeResolved) {
+      loops = loops.filter((l) => l.status === 'open');
+    }
+    return [...loops].sort((a, b) => {
+      const timeA = new Date(a.createdAtISO || 0).getTime();
+      const timeB = new Date(b.createdAtISO || 0).getTime();
+      return timeB - timeA;
+    });
+  }
+
   public addOpenLoop(name: string, description: string, identityId: string = 'UNKNOWN'): OpenLoopItem {
     const wa = this.getWorldAwareness();
     if (!wa.openLoops) wa.openLoops = [];
@@ -1980,6 +2174,55 @@ class DatabaseEngine {
       return true;
     }
     return false;
+  }
+
+  public reopenOpenLoop(loopId: string): boolean {
+    const wa = this.getWorldAwareness();
+    if (!wa.openLoops) return false;
+    const loop = wa.openLoops.find((l) => l.id === loopId);
+    if (loop && loop.status === 'resolved') {
+      loop.status = 'open';
+      loop.resolvedAtISO = undefined;
+      loop.resolvedAtIST = undefined;
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
+  public deleteOpenLoop(loopId: string): boolean {
+    const wa = this.getWorldAwareness();
+    if (!wa.openLoops) return false;
+    const initialLen = wa.openLoops.length;
+    wa.openLoops = wa.openLoops.filter((l) => l.id !== loopId);
+    if (wa.openLoops.length !== initialLen) {
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
+  public updateOpenLoop(loopId: string, updates: { name?: string; description?: string; status?: 'open' | 'resolved' }): boolean {
+    const wa = this.getWorldAwareness();
+    if (!wa.openLoops) return false;
+    const loop = wa.openLoops.find((l) => l.id === loopId);
+    if (!loop) return false;
+    if (updates.name !== undefined) loop.name = updates.name.trim();
+    if (updates.description !== undefined) loop.description = updates.description.trim();
+    if (updates.status !== undefined && updates.status !== loop.status) {
+      if (updates.status === 'resolved') {
+        const nowIst = getISTDateTime();
+        loop.status = 'resolved';
+        loop.resolvedAtISO = nowIst.iso;
+        loop.resolvedAtIST = nowIst.istFull;
+      } else {
+        loop.status = 'open';
+        loop.resolvedAtISO = undefined;
+        loop.resolvedAtIST = undefined;
+      }
+    }
+    this.save();
+    return true;
   }
 
   public recordMilestone(description: string, identityId?: string) {
@@ -2053,6 +2296,9 @@ class DatabaseEngine {
 
   // --- Persistence & Backup Operations ---
   public getRawData(): DatabaseSchema {
+    if (!fs.existsSync(DB_FILE)) {
+      this.save();
+    }
     return JSON.parse(JSON.stringify(this.data));
   }
 
@@ -2073,8 +2319,11 @@ class DatabaseEngine {
         this.data = JSON.parse(raw);
         this.isLoaded = true;
         return true;
+      } else {
+        this.save();
+        this.isLoaded = true;
+        return true;
       }
-      return false;
     } catch (err) {
       console.error('DATABASE_RELOAD_FAILED', err);
       return false;

@@ -1,12 +1,13 @@
-import { useState, useMemo, type FormEvent, type MouseEvent } from 'react';
+import { useState, useMemo, useEffect, useCallback, type FormEvent, type MouseEvent } from 'react';
 import { motion } from 'motion/react';
-import { Users, UserPlus, UserX, Check, X, Trash2, Crown, Search } from 'lucide-react';
+import { Users, UserPlus, UserX, Check, X, Trash2, Crown, Search, Loader2 } from 'lucide-react';
 import { Identity } from '../types.js';
+import { sanitizeAuthToken } from '../utils/auth.js';
 
 interface IdentitySwitchModalProps {
   isOpen: boolean;
   currentIdentity: Identity;
-  users: Array<{ id: string; name: string; createdAt: string }>;
+  authToken?: string;
   onSelectIdentity: (identity: Identity) => void;
   onRegisterUser: (name: string) => Promise<void>;
   onDeleteUser?: (userId: string) => Promise<void>;
@@ -16,22 +17,53 @@ interface IdentitySwitchModalProps {
 export function IdentitySwitchModal({
   isOpen,
   currentIdentity,
-  users,
+  authToken,
   onSelectIdentity,
   onRegisterUser,
   onDeleteUser,
   onClose,
 }: IdentitySwitchModalProps) {
+  const [usersList, setUsersList] = useState<Array<{ id: string; name: string; createdAt: string }>>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  const fetchUsers = useCallback(async () => {
+    if (!isOpen) return;
+    setIsLoadingUsers(true);
+    try {
+      const headers: Record<string, string> = {};
+      const cleanToken = sanitizeAuthToken(authToken);
+      if (cleanToken) {
+        headers['Authorization'] = `Bearer ${cleanToken}`;
+      }
+      const res = await fetch('/api/users', { headers, cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.users)) {
+          setUsersList(data.users);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not load registered users:', err);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  }, [isOpen, authToken]);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchUsers();
+    }
+  }, [isOpen, fetchUsers]);
+
   const filteredUsers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter((u) => u.name.toLowerCase().includes(q) || u.id.toLowerCase().includes(q));
-  }, [users, searchQuery]);
+    if (!q) return usersList;
+    return usersList.filter((u) => u.name.toLowerCase().includes(q) || u.id.toLowerCase().includes(q));
+  }, [usersList, searchQuery]);
 
   if (!isOpen) return null;
 
@@ -43,6 +75,7 @@ export function IdentitySwitchModal({
     try {
       await onRegisterUser(newUserName.trim());
       setNewUserName('');
+      await fetchUsers();
     } catch (err) {
       console.error(err);
     } finally {
@@ -56,6 +89,7 @@ export function IdentitySwitchModal({
     setDeletingId(userId);
     try {
       await onDeleteUser(userId);
+      await fetchUsers();
     } catch (err) {
       console.error(err);
     } finally {
@@ -92,12 +126,12 @@ export function IdentitySwitchModal({
                 <Crown className="w-2.5 h-2.5" /> Owner Only
               </span>
             </div>
-            <p className="text-xs text-white/50">Manage registered profiles & switch active context</p>
+            <p className="text-xs text-white/50">Live database profiles & active context switching</p>
           </div>
         </div>
 
         {/* Search Filter for Fast Identity Switch */}
-        {users.length > 3 && (
+        {usersList.length > 3 && (
           <div className="relative mb-3">
             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
             <input
@@ -121,35 +155,73 @@ export function IdentitySwitchModal({
         {/* Existing Users List */}
         <div className="flex-1 max-h-72 overflow-y-auto space-y-2 mb-4 pr-1.5 custom-scrollbar">
           <div className="text-[11px] font-medium text-white/40 uppercase tracking-[0.15em] mb-1 flex items-center justify-between">
-            <span>Registered Identities ({filteredUsers.length})</span>
+            <span>Registered Identities ({isLoadingUsers ? '...' : filteredUsers.length})</span>
             {searchQuery && <span className="text-pink-400 font-normal">Filtered</span>}
           </div>
 
-          {filteredUsers.length === 0 ? (
+          {isLoadingUsers && usersList.length === 0 ? (
+            <div className="p-6 rounded-2xl bg-white/5 border border-white/5 flex flex-col items-center justify-center gap-2 text-white/40 text-xs">
+              <Loader2 className="w-5 h-5 animate-spin text-purple-400" />
+              <span>Fetching live user database...</span>
+            </div>
+          ) : filteredUsers.length === 0 ? (
             <div className="p-4 rounded-2xl bg-white/5 border border-white/5 text-center text-xs text-white/40">
               {searchQuery ? `No identities matching "${searchQuery}"` : 'No registered user profiles in database yet.'}
             </div>
           ) : (
             filteredUsers.map((u) => {
               const isSelected = currentIdentity.id === u.id;
+              const isOwnerUser = u.id === 'OWNER_001';
               return (
                 <div
                   key={u.id}
-                  onClick={() => onSelectIdentity({ id: u.id, name: u.name, role: 'user' })}
+                  onClick={() =>
+                    onSelectIdentity({
+                      id: u.id,
+                      name: u.name,
+                      role: isOwnerUser ? 'owner' : 'user',
+                    })
+                  }
                   className={`w-full flex items-center justify-between p-3.5 rounded-2xl border transition-all text-left cursor-pointer group ${
                     isSelected
-                      ? 'bg-gradient-to-r from-blue-500/15 via-purple-500/15 to-transparent border-purple-500/40 text-purple-200 shadow-[0_0_15px_rgba(168,85,247,0.15)]'
+                      ? isOwnerUser
+                        ? 'bg-gradient-to-r from-amber-500/20 via-purple-500/20 to-transparent border-amber-500/50 text-amber-200 shadow-[0_0_15px_rgba(245,158,11,0.2)]'
+                        : 'bg-gradient-to-r from-blue-500/15 via-purple-500/15 to-transparent border-purple-500/40 text-purple-200 shadow-[0_0_15px_rgba(168,85,247,0.15)]'
+                      : isOwnerUser
+                      ? 'bg-amber-500/5 border-amber-500/20 hover:bg-amber-500/10 text-amber-200/90'
                       : 'bg-white/5 border-white/5 hover:bg-white/10 text-white/70'
                   }`}
                 >
-                  <div className="flex-1">
-                    <div className="text-sm font-semibold text-white">{u.name}</div>
-                    <div className="text-[10px] text-white/40">{u.id} • Registered User</div>
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                        isOwnerUser ? 'bg-amber-500/20 text-amber-300' : 'bg-purple-500/20 text-purple-300'
+                      }`}
+                    >
+                      {isOwnerUser ? <Crown className="w-4 h-4" /> : <Users className="w-4 h-4" />}
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-white flex items-center gap-2">
+                        <span>{u.name}</span>
+                        {isOwnerUser && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] bg-amber-500/30 text-amber-300 uppercase font-bold tracking-wider">
+                            Owner
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-white/40">
+                        {u.id} • {isOwnerUser ? 'Master Authority' : 'Private Memory Context'}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {isSelected && <Check className="w-4 h-4 text-purple-400" />}
-                    {onDeleteUser && u.id !== 'OWNER_001' && (
+                    {isSelected && (
+                      <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Active
+                      </span>
+                    )}
+                    {onDeleteUser && !isOwnerUser && (
                       <button
                         type="button"
                         onClick={(e) => handleDelete(e, u.id)}

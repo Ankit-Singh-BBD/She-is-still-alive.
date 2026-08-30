@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense, FormEvent } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { LiveClient } from './services/liveClient.js';
-import { Identity, LiveState, SystemStatus, ToolActionItem } from './types.js';
+import { Identity, LiveState, SystemStatus, ToolActionItem, RuntimeContext } from './types.js';
 import { ExperienceIntro } from './components/ExperienceIntro.js';
 import { HUDHeader } from './components/HUDHeader.js';
 import { VoiceCore } from './components/VoiceCore.js';
@@ -34,7 +34,6 @@ const MemoryViewerModal = lazy(() =>
 );
 
 import { sanitizeAuthToken } from './utils/auth.js';
-import { globalAppCache } from './utils/searchAndCache.js';
 
 interface ChatMessage {
   id: string;
@@ -49,24 +48,32 @@ export default function App() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [liveState, setLiveState] = useState<LiveState>('disconnected');
 
-  // Initial Identity is always UNKNOWN Guest on every page load
+  // Single Authoritative Identity State: Initialized strictly to UNKNOWN Guest
   const [identity, setIdentity] = useState<Identity>({
     id: 'UNKNOWN',
     name: 'Guest',
     role: 'unknown',
   });
 
-  const [authToken, setAuthToken] = useState<string | undefined>(() => {
-    try {
-      return sanitizeAuthToken(localStorage.getItem('madhurita_auth_token') || sessionStorage.getItem('madhurita_auth_token')) || undefined;
-    } catch {
-      return undefined;
-    }
-  });
+  // Authoritative Backend Runtime Context
+  const [runtimeContext, setRuntimeContext] = useState<RuntimeContext | null>(null);
 
-  // Ensure clean lifecycle: purge any legacy localStorage identity/entered flags
+  // In-memory Auth Token only (never restored from persistent storage on fresh boot)
+  const [authToken, setAuthToken] = useState<string | undefined>(undefined);
+
+  // State synchronization refs and monotonic version counter to prevent async race conditions
+  const identityRef = useRef<Identity>(identity);
+  const authTokenRef = useRef<string | undefined>(authToken);
+  const stateSeqRef = useRef<number>(0);
+
+  identityRef.current = identity;
+  authTokenRef.current = authToken;
+
+  // On initial mount: purge any stale legacy tokens from storage so fresh boot is guaranteed
   useEffect(() => {
     try {
+      localStorage.removeItem('madhurita_auth_token');
+      sessionStorage.removeItem('madhurita_auth_token');
       localStorage.removeItem('madhurita_entered');
       localStorage.removeItem('madhurita_active_identity');
     } catch {
@@ -74,27 +81,22 @@ export default function App() {
     }
   }, []);
 
-  const updateIdentity = useCallback((newIdentity: Identity) => {
-    setIdentity(newIdentity);
-  }, []);
+  // Central Single Identity State Applier
+  const applyAuthoritativeState = useCallback((state: RuntimeContext, tokenOverride?: string) => {
+    if (!state || !state.activeIdentity) return;
+    const resolvedIdentity = state.activeIdentity;
+    setIdentity((prev) => {
+      if (prev.id === resolvedIdentity.id && prev.name === resolvedIdentity.name && prev.role === resolvedIdentity.role) {
+        return prev;
+      }
+      return resolvedIdentity;
+    });
+    identityRef.current = resolvedIdentity;
+    setRuntimeContext(state);
 
-  const updateAuthToken = useCallback((token?: string) => {
-    const cleanToken = sanitizeAuthToken(token);
-    setAuthToken(cleanToken);
-    if (cleanToken) {
-      try {
-        localStorage.setItem('madhurita_auth_token', cleanToken);
-        sessionStorage.setItem('madhurita_auth_token', cleanToken);
-      } catch (e) {
-        // ignore
-      }
-    } else {
-      try {
-        localStorage.removeItem('madhurita_auth_token');
-        sessionStorage.removeItem('madhurita_auth_token');
-      } catch (e) {
-        // ignore
-      }
+    if (tokenOverride !== undefined) {
+      setAuthToken(tokenOverride);
+      authTokenRef.current = tokenOverride;
     }
   }, []);
 
@@ -121,42 +123,67 @@ export default function App() {
   // Generate a temporary session ID for text chat continuity
   const [chatSessionId] = useState(() => `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
 
-  // Fetch status from backend with SWR caching
+  // Fetch status from backend without caching
   const fetchStatus = useCallback(async () => {
-    const cacheKey = `status_${identity?.id || 'anon'}_${authToken ? 'auth' : 'unauth'}`;
-    const cached = globalAppCache.get(cacheKey, 15000); // 15s SWR cache
-    if (cached.data) {
-      setSystemStatus(cached.data);
-      if (!cached.isStale) return cached.data;
-    }
-
     try {
       const headers: Record<string, string> = {};
-      const rawToken = authToken || localStorage.getItem('madhurita_auth_token') || sessionStorage.getItem('madhurita_auth_token');
-      const cleanToken = sanitizeAuthToken(rawToken);
-      if (cleanToken) {
-        headers['Authorization'] = `Bearer ${cleanToken}`;
+      const token = authTokenRef.current;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
-      if (identity?.id) {
-        headers['X-User-Id'] = identity.id;
+      const activeId = identityRef.current.id;
+      if (activeId && activeId !== 'UNKNOWN') {
+        headers['X-User-Id'] = activeId;
       }
-      const res = await fetch('/api/status', { headers });
+      const res = await fetch('/api/status', { headers, cache: 'no-store' });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
       const data = await res.json();
-      globalAppCache.set(cacheKey, data);
       setSystemStatus(data);
       return data;
     } catch (err: any) {
       console.warn('Status fetch info:', err?.message || err);
       return null;
     }
-  }, [authToken, identity.id]);
+  }, []);
 
+  // Fetch Authoritative RuntimeContext from Backend with monotonic sequence validation
+  const fetchRuntimeState = useCallback(async (overrideToken?: string, overrideUserId?: string) => {
+    const currentSeq = ++stateSeqRef.current;
+    const token = overrideToken !== undefined ? overrideToken : authTokenRef.current;
+    const userId = overrideUserId !== undefined ? overrideUserId : identityRef.current.id;
+
+    try {
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      if (userId && userId !== 'UNKNOWN') {
+        headers['X-User-Id'] = userId;
+      }
+      const res = await fetch('/api/runtime-state', { headers, cache: 'no-store' });
+      if (!res.ok) return null;
+      const data: RuntimeContext = await res.json();
+
+      // Discard stale in-flight response if a newer action occurred
+      if (currentSeq !== stateSeqRef.current) {
+        return null;
+      }
+
+      applyAuthoritativeState(data);
+      return data;
+    } catch (err) {
+      console.warn('Runtime state fetch info:', err);
+      return null;
+    }
+  }, [applyAuthoritativeState]);
+
+  // Initial single boot fetch
   useEffect(() => {
     fetchStatus();
-  }, [fetchStatus]);
+    fetchRuntimeState();
+  }, [fetchStatus, fetchRuntimeState]);
 
   // Initialize LiveClient
   useEffect(() => {
@@ -168,14 +195,33 @@ export default function App() {
         }
       },
       onIdentityChange: (newIdentity, token) => {
-        updateIdentity(newIdentity);
+        stateSeqRef.current++;
+        setIdentity(newIdentity);
+        identityRef.current = newIdentity;
+        if (token !== undefined) {
+          setAuthToken(token);
+          authTokenRef.current = token;
+        }
         setChatMessages([]);
-        if (token) {
-          updateAuthToken(token);
+        fetchRuntimeState(token || authTokenRef.current, newIdentity.id);
+      },
+      onRuntimeState: (state) => {
+        if (state && state.activeIdentity) {
+          setRuntimeContext(state);
+          setIdentity((prev) => {
+            if (prev.id !== state.activeIdentity.id || prev.role !== state.activeIdentity.role || prev.name !== state.activeIdentity.name) {
+              identityRef.current = state.activeIdentity;
+              return state.activeIdentity;
+            }
+            return prev;
+          });
+          loadHistory();
         }
       },
       onToolAction: (action) => {
         setToolActions((prev) => [action, ...prev].slice(0, 5));
+        fetchRuntimeState();
+        loadHistory();
       },
       onUserTranscript: (transcript, isFinal) => {
         if (isFinal && transcript) {
@@ -214,7 +260,7 @@ export default function App() {
     return () => {
       client.disconnect();
     };
-  }, [updateIdentity, updateAuthToken]);
+  }, [fetchRuntimeState]);
 
   // Auto-scroll chat console
   useEffect(() => {
@@ -229,7 +275,7 @@ export default function App() {
 
     if (liveClientRef.current) {
       try {
-        await liveClientRef.current.connect(identity, authToken);
+        await liveClientRef.current.connect(identityRef.current, authTokenRef.current);
       } catch (e) {
         // Handled in liveClient callbacks
       }
@@ -238,147 +284,190 @@ export default function App() {
     if (status && !status.hasOwner) {
       setIsOwnerSetupOpen(true);
     }
-  }, [fetchStatus, identity, authToken]);
+  }, [fetchStatus]);
 
   const handleToggleVoice = useCallback(async () => {
     if (!liveClientRef.current) return;
 
     if (liveState === 'disconnected') {
       try {
-        await liveClientRef.current.connect(identity, authToken);
+        await liveClientRef.current.connect(identityRef.current, authTokenRef.current);
       } catch (e) {
         // Handled in liveClient callbacks
       }
     } else {
       liveClientRef.current.disconnect();
     }
-  }, [liveState, identity, authToken]);
+  }, [liveState]);
 
   const handleOwnerSetupSuccess = useCallback((
     owner: { id: string; name: string; role: 'owner' },
     token: string
   ) => {
-    updateIdentity(owner);
-    updateAuthToken(token);
+    stateSeqRef.current++;
+    setIdentity(owner);
+    identityRef.current = owner;
+    setAuthToken(token);
+    authTokenRef.current = token;
     setIsOwnerSetupOpen(false);
+
     fetchStatus();
+    fetchRuntimeState(token, owner.id);
 
     if (liveClientRef.current) {
       liveClientRef.current.updateAuth(token, owner.id);
     }
-  }, [fetchStatus, updateIdentity, updateAuthToken]);
+  }, [fetchStatus, fetchRuntimeState]);
 
   const handleOwnerAuthSuccess = useCallback((
     owner: { id: string; name: string; role: 'owner' },
     token: string
   ) => {
-    updateIdentity(owner);
-    updateAuthToken(token);
+    stateSeqRef.current++;
+    setIdentity(owner);
+    identityRef.current = owner;
+    setAuthToken(token);
+    authTokenRef.current = token;
     setIsOwnerAuthOpen(false);
+
     fetchStatus();
+    fetchRuntimeState(token, owner.id);
 
     setActiveModalMode('database');
 
     if (liveClientRef.current) {
       liveClientRef.current.updateAuth(token, owner.id);
     }
-  }, [fetchStatus, updateIdentity, updateAuthToken]);
+  }, [fetchStatus, fetchRuntimeState]);
 
-  const handleSelectIdentity = useCallback((newIdentity: Identity) => {
-    updateIdentity(newIdentity);
-    let currentToken = authToken;
-    if (newIdentity.role !== 'owner') {
-      currentToken = undefined;
-      updateAuthToken(undefined);
-    } else {
-      currentToken = localStorage.getItem('madhurita_auth_token') || sessionStorage.getItem('madhurita_auth_token') || authToken;
-      if (currentToken) updateAuthToken(currentToken);
-    }
-    setIsIdentitySwitchOpen(false);
+  // Atomic Backend-Driven Profile Switch
+  const handleSelectIdentity = useCallback(async (target: Identity) => {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token = authTokenRef.current;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
-    if (liveClientRef.current) {
-      liveClientRef.current.updateAuth(currentToken, newIdentity.id);
+      const res = await fetch('/api/identity/switch', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ targetId: target.id, targetName: target.name }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Switch failed' }));
+        setErrorMessage(err.message || err.error || 'Failed to switch identity');
+        return;
+      }
+
+      const data = await res.json();
+      if (data.success && data.identity) {
+        stateSeqRef.current++;
+        setIdentity(data.identity);
+        identityRef.current = data.identity;
+        if (data.token !== undefined) {
+          setAuthToken(data.token);
+          authTokenRef.current = data.token;
+        }
+        if (data.runtimeState) {
+          setRuntimeContext(data.runtimeState);
+        }
+        setIsIdentitySwitchOpen(false);
+        setChatMessages([]);
+
+        if (liveClientRef.current) {
+          liveClientRef.current.updateAuth(data.token || token, data.identity.id);
+        }
+      }
+    } catch (err: any) {
+      console.error('Profile switch error:', err);
+      setErrorMessage(err.message || 'Error switching profile');
     }
-  }, [updateIdentity, updateAuthToken, authToken]);
+  }, []);
 
   const handleRegisterUser = useCallback(async (name: string) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = authTokenRef.current;
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     const res = await fetch('/api/users/register', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ name }),
     });
     const data = await res.json();
     if (data.success && data.user) {
-      handleSelectIdentity(data.user);
+      await handleSelectIdentity(data.user);
       fetchStatus();
     }
   }, [handleSelectIdentity, fetchStatus]);
 
   const handleDeleteUser = useCallback(async (userId: string) => {
-    if (!authToken) return;
+    const token = authTokenRef.current;
+    if (!token) return;
     const res = await fetch(`/api/users/${userId}`, {
       method: 'DELETE',
       headers: {
-        Authorization: `Bearer ${authToken}`,
+        Authorization: `Bearer ${token}`,
       },
     });
     const data = await res.json();
     if (data.success) {
-      if (identity.id === userId) {
-        updateIdentity({ id: 'OWNER_001', name: systemStatus?.ownerName || 'Ankit', role: 'owner' });
+      if (identityRef.current.id === userId) {
+        const ownerName = systemStatus?.ownerName || 'Ankit';
+        await handleSelectIdentity({ id: 'OWNER_001', name: ownerName, role: 'owner' });
       }
       fetchStatus();
     } else {
       setErrorMessage(data.error || 'Failed to delete user');
     }
-  }, [authToken, identity.id, systemStatus?.ownerName, fetchStatus, updateIdentity]);
+  }, [systemStatus?.ownerName, fetchStatus, handleSelectIdentity]);
 
   const handleDismissToast = useCallback((id: string) => {
     setToolActions((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
-  // Load existing conversation history for active profile on identity change with SWR caching
-  useEffect(() => {
-    let isMounted = true;
-    async function loadHistory() {
-      if (!identity.id || identity.id === 'UNKNOWN') {
-        setChatMessages([]);
-        return;
-      }
+  // Load existing conversation history for active profile on identity change
+  const loadHistory = useCallback(async () => {
+    try {
+      const headers: Record<string, string> = {};
+      const token = authTokenRef.current;
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (identity?.id) headers['X-User-Id'] = identity.id;
+      const url = identity.id && identity.id !== 'UNKNOWN'
+        ? `/api/conversations?userId=${encodeURIComponent(identity.id)}&limit=500`
+        : `/api/conversations?sessionId=${encodeURIComponent(chatSessionId)}&limit=500`;
 
-      const cacheKey = `history_${identity.id}`;
-      const cached = globalAppCache.get(cacheKey, 30000); // 30s cache
-      if (cached.data && isMounted) {
-        setChatMessages(cached.data);
-        if (!cached.isStale) return;
-      }
-
-      try {
-        const headers: Record<string, string> = {};
-        const cleanToken = sanitizeAuthToken(authToken);
-        if (cleanToken) headers['Authorization'] = `Bearer ${cleanToken}`;
-        if (identity?.id) headers['X-User-Id'] = identity.id;
-        const res = await fetch(`/api/conversations?userId=${encodeURIComponent(identity.id)}&limit=30`, { headers });
-        if (res.ok && isMounted) {
-          const data = await res.json();
-          if (data.turns && Array.isArray(data.turns)) {
-            const formatted: ChatMessage[] = data.turns.map((t: any) => ({
-              id: t.turnId || `turn_${t.timestamp}`,
-              role: t.role === 'assistant' ? 'assistant' : 'user',
-              text: t.content,
-              timestamp: new Date(t.timestamp).getTime() || Date.now(),
-            }));
-            globalAppCache.set(cacheKey, formatted);
-            setChatMessages(formatted);
-          }
+      const res = await fetch(url, { headers, cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.turns && Array.isArray(data.turns)) {
+          const formatted: ChatMessage[] = data.turns.map((t: any) => ({
+            id: t.turnId || `turn_${t.timestamp}`,
+            role: t.role === 'assistant' ? 'assistant' : 'user',
+            text: t.content,
+            timestamp: new Date(t.timestamp).getTime() || Date.now(),
+          }));
+          setChatMessages((prev) => {
+            if (prev.length === formatted.length && prev.every((m, i) => m.id === formatted[i].id && m.text === formatted[i].text)) {
+              return prev;
+            }
+            return formatted;
+          });
+        } else {
+          setChatMessages((prev) => (prev.length === 0 ? prev : []));
         }
-      } catch (e) {
-        console.warn('Could not load conversation history:', e);
       }
+    } catch (e) {
+      console.warn('Could not load conversation history:', e);
     }
+  }, [identity.id, chatSessionId]);
+
+  useEffect(() => {
     loadHistory();
-    return () => { isMounted = false; };
-  }, [identity.id, authToken]);
+  }, [loadHistory]);
 
   // Send Text Message through Cognitive Process Pipeline
   const handleSendChatMessage = async (e?: FormEvent, presetText?: string) => {
@@ -422,6 +511,7 @@ export default function App() {
         } catch {
           // ignore non-json response
         }
+        setChatMessages((prev) => prev.filter((m) => m.id !== userMsgId));
         setErrorMessage(errText);
         return;
       }
@@ -434,16 +524,16 @@ export default function App() {
           text: data.reply,
           timestamp: Date.now(),
         };
-        setChatMessages((prev) => {
-          const updated = [...prev, assistantMsg];
-          globalAppCache.set(`history_${identity.id}`, updated);
-          return updated;
-        });
+        setChatMessages((prev) => [...prev, assistantMsg]);
+        fetchRuntimeState();
+        loadHistory();
       } else if (data.error) {
+        setChatMessages((prev) => prev.filter((m) => m.id !== userMsgId));
         setErrorMessage(data.error);
       }
     } catch (err: any) {
       console.error('Chat error:', err);
+      setChatMessages((prev) => prev.filter((m) => m.id !== userMsgId));
       setErrorMessage(err.message || 'Failed to send message to cognitive engine');
     } finally {
       setIsProcessingChat(false);
@@ -702,7 +792,7 @@ export default function App() {
           <IdentitySwitchModal
             isOpen={isIdentitySwitchOpen}
             currentIdentity={identity}
-            users={systemStatus?.users || []}
+            authToken={authToken}
             onSelectIdentity={handleSelectIdentity}
             onRegisterUser={handleRegisterUser}
             onDeleteUser={identity.role === 'owner' ? handleDeleteUser : undefined}
