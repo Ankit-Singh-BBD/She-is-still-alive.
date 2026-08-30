@@ -91,100 +91,124 @@ export interface StartupEvaluationResult {
 
 export class CognitionEngine {
   /**
-   * Evaluates whether Madhurita should proactively speak.
-   * State-driven, deterministic calculation based on actual database facts.
-   * Default: action = 'SILENT' (remain silent unless explicit meaningful reason exists).
+   * Assembles factual startup context for the LLM to reason over.
+   * Does NOT decide whether to speak — returns facts, the LLM decides.
+   * Returns null only for very short absences with zero new information.
    */
-  public evaluateProactiveState(ctx: CognitiveContextPayload): ProactiveEvaluationResult {
-    const evidence: string[] = [];
+  public buildStartupFacts(ctx: CognitiveContextPayload): string | null {
+    const facts: string[] = [];
 
-    // 0. Guest Boot Behavior (Priority: 110)
-    // For UNKNOWN / GUEST, Madhurita MUST initiate the first interaction.
+    // Identity facts
     if (ctx.role === 'unknown' || ctx.identityId === 'UNKNOWN') {
-      evidence.push('Unknown or Guest visitor detected on boot');
-      return {
-        action: 'SPEAK',
-        priority: 110,
-        reason: 'guest_boot',
-        evidence,
-        responseContext: 'Current identity is UNKNOWN/GUEST. No identity has been verified.',
-      };
+      facts.push('Identity: UNKNOWN/GUEST. No verified identity established.');
+      facts.push('This is the first interaction in this session.');
+    } else {
+      facts.push(`Identity: ${ctx.name} (${ctx.role.toUpperCase()}, ID: ${ctx.identityId}).`);
+      if (ctx.isOwner) facts.push('Authenticated as System Owner.');
     }
 
-    // 1. Pending unread cross-user messages specifically for this person (Priority: 100)
+    // Temporal facts
+    facts.push(`Current time: ${ctx.temporal.timeIST} (${ctx.temporal.dayOfWeek}, ${ctx.temporal.dateIST}).`);
+    if (ctx.temporal.lastTurnTime) {
+      facts.push(`Last interaction: ${ctx.temporal.elapsedHuman}.`);
+    } else {
+      facts.push('No previous interaction recorded for this identity.');
+    }
+
+    // Pending messages
     if (ctx.pendingNotes && ctx.pendingNotes.length > 0) {
-      evidence.push(`Found ${ctx.pendingNotes.length} unread pending cross-user message(s)`);
-      return {
-        action: 'SPEAK',
-        priority: 100,
-        reason: 'pending_message',
-        evidence,
-        payload: { notes: ctx.pendingNotes },
-        responseContext: `Pending notes: ${ctx.pendingNotes.length} message(s) from ${ctx.pendingNotes.map(n => n.senderName).join(', ')}`,
-      };
+      facts.push(`Pending unread messages: ${ctx.pendingNotes.length} message(s) from ${ctx.pendingNotes.map(n => `${n.senderName}: "${n.content}"`).join('; ')}.`);
     }
 
-    // 2. Undelivered Proactive Events in DB for this identity (Priority: 90)
+    // Undelivered proactive events
     const undeliveredEvents = db.getUndeliveredProactiveEvents(ctx.identityId);
     if (undeliveredEvents.length > 0) {
-      evidence.push(`Found ${undeliveredEvents.length} undelivered proactive event(s)`);
-      return {
-        action: 'SPEAK',
-        priority: 90,
-        reason: 'important_event',
-        evidence,
-        payload: { events: undeliveredEvents },
-        responseContext: undeliveredEvents[0].summary,
-      };
+      facts.push(`Undelivered events: ${undeliveredEvents.map(e => e.summary).join('; ')}.`);
     }
 
-    // 3. Owner Return Operational Briefing (Priority: 80)
-    // Only if: Caller is authenticated Owner, not a short interruption (< 5 mins), and meaningful new info exists
-    if (ctx.isOwner) {
-      const briefing = db.getSystemAwarenessBriefingForOwner();
-      const hasMeaningfulNewInfo =
-        (briefing.recentVisitors && briefing.recentVisitors.length > 0) ||
-        (briefing.pendingNotes && briefing.pendingNotes.length > 0) ||
-        (briefing.openLoops && briefing.openLoops.length > 0);
+    // Unfinished tasks
+    if (ctx.tasks && ctx.tasks.length > 0) {
+      facts.push(`Active tasks: ${ctx.tasks.map(t => `"${t.title}" (${t.status})`).join(', ')}.`);
+    }
 
-      if (hasMeaningfulNewInfo && !ctx.temporal.isShortAbsence) {
-        evidence.push('Owner return after absence with new visitors, pending notes, or open loops');
-        return {
-          action: 'SPEAK',
-          priority: 80,
-          reason: 'owner_briefing',
-          evidence,
-          payload: { briefing },
-          responseContext: `Briefing facts: ${briefing.recentVisitors.length} visitors, ${briefing.pendingNotesCount} pending notes`,
-        };
+    // Open loops
+    if (ctx.openLoops && ctx.openLoops.length > 0) {
+      facts.push(`Open loops: ${ctx.openLoops.map(l => `"${l.name}"`).join(', ')}.`);
+    }
+
+    // Owner-specific: recent visitors and system state
+    if (ctx.isOwner && ctx.worldAwarenessBriefing) {
+      const briefing = ctx.worldAwarenessBriefing;
+      if (briefing.recentVisitors && briefing.recentVisitors.length > 0) {
+        facts.push(`Since last interaction: ${briefing.recentVisitors.length} visitor(s) — ${briefing.recentVisitors.map((v: any) => `${v.name} (last seen ${v.lastSeenIST})`).join(', ')}.`);
+      }
+      if (briefing.pendingNotesCount > 0) {
+        facts.push(`Pending cross-user notes in system: ${briefing.pendingNotesCount}.`);
       }
     }
 
-    // 4. Authoritative Unfinished Task / Active Open Loop for this identity (Priority: 70)
-    // Only if not a short absence (< 5 mins)
-    const unfinishedTask = db.getActiveUnfinishedTaskForIdentity(ctx.identityId);
-    if (unfinishedTask && !ctx.temporal.isShortAbsence) {
-      evidence.push(`Active unfinished task detected: "${unfinishedTask.title}" (${unfinishedTask.status})`);
-      return {
-        action: 'SPEAK',
-        priority: 70,
-        reason: 'unfinished_task',
-        evidence,
-        payload: { task: unfinishedTask },
-        responseContext: `Active unfinished task: ${unfinishedTask.title}`,
-      };
+    // Last conversation context
+    if (ctx.recentTurns && ctx.recentTurns.length > 0) {
+      const lastUserTurn = ctx.recentTurns.filter(t => t.role === 'user').slice(-1)[0];
+      const lastAssistantTurn = ctx.recentTurns.filter(t => t.role === 'assistant').slice(-1)[0];
+      if (lastUserTurn) {
+        facts.push(`Last user message (${lastUserTurn.relativeTime}): "${lastUserTurn.content.slice(0, 120)}"`);
+      }
+      if (lastAssistantTurn) {
+        facts.push(`Last Madhurita response (${lastAssistantTurn.relativeTime}): "${lastAssistantTurn.content.slice(0, 120)}"`);
+      }
     }
 
-    // 5. Default: SILENT (Remain silent when nothing meaningful demands speech)
-    evidence.push('No urgent pending messages, new visitors, or unresolved tasks');
-    if (ctx.temporal.isShortAbsence) {
-      evidence.push('Short absence (< 5 minutes), maintaining conversational flow');
+    // For very short absences with nothing new, return null
+    // (let the system prompt's cognitive instructions handle silence)
+    const hasNewInformation = (ctx.pendingNotes && ctx.pendingNotes.length > 0) ||
+      undeliveredEvents.length > 0 ||
+      (ctx.role === 'unknown') ||
+      (!ctx.temporal.isShortAbsence && ctx.temporal.lastTurnTime !== null);
+
+    if (!hasNewInformation && ctx.temporal.isShortAbsence) {
+      return null;
     }
+
+    return `[STARTUP CONTEXT — FACTS FOR COGNITIVE EVALUATION]\n${facts.map(f => `• ${f}`).join('\n')}`;
+  }
+
+  /**
+   * Evaluates proactive state by assembling facts.
+   * Preserved for backward compatibility — callers that need the structured result.
+   * The actual decision of whether to speak is now made by the LLM, not this method.
+   */
+  public evaluateProactiveState(ctx: CognitiveContextPayload): ProactiveEvaluationResult {
+    const startupFacts = this.buildStartupFacts(ctx);
+    const hasContent = startupFacts !== null;
+    const evidence: string[] = [];
+
+    if (ctx.role === 'unknown' || ctx.identityId === 'UNKNOWN') {
+      evidence.push('Guest/unknown identity — startup facts assembled for LLM evaluation');
+    }
+    if (ctx.pendingNotes && ctx.pendingNotes.length > 0) {
+      evidence.push(`${ctx.pendingNotes.length} pending message(s)`);
+    }
+    const undeliveredEvents = db.getUndeliveredProactiveEvents(ctx.identityId);
+    if (undeliveredEvents.length > 0) {
+      evidence.push(`${undeliveredEvents.length} undelivered event(s)`);
+    }
+    if (ctx.tasks && ctx.tasks.length > 0) {
+      evidence.push(`${ctx.tasks.length} active task(s)`);
+    }
+    if (!hasContent) {
+      evidence.push('Short absence with no new information');
+    }
+
     return {
-      action: 'SILENT',
-      priority: 0,
-      reason: 'nothing_relevant',
+      action: hasContent ? 'SPEAK' : 'SILENT',
+      priority: hasContent ? 50 : 0,
+      reason: !hasContent ? 'nothing_relevant' :
+        ctx.role === 'unknown' ? 'guest_boot' :
+        ctx.pendingNotes && ctx.pendingNotes.length > 0 ? 'pending_message' :
+        'nothing_relevant',
       evidence,
+      responseContext: startupFacts || undefined,
     };
   }
 
@@ -598,19 +622,19 @@ export class CognitionEngine {
   }
 
   /**
-   * Builds context payload and factual instructions for Madhurita.
-   * Integrates single persistent entity identity, authoritative DB state,
-   * relational history, temporal data, and tool usage rules.
+   * Builds the system prompt: pure factual state + system invariants.
+   * NO behavioral directives, NO scripted responses, NO boot behaviors.
+   * The LLM receives facts and decides meaning, relevance, response, and action.
    */
   public buildReasoningPromptFromContext(ctx: CognitiveContextPayload): string {
     const location = db.getLocationConfig();
 
     const memoryLines = ctx.memories.length > 0
-      ? ctx.memories.map((m) => `- [${m.category.toUpperCase()}] ${m.content} (Recorded: ${this.formatRelativeTime(m.createdAt)})`).join('\n')
+      ? ctx.memories.map((m) => `- [${m.category.toUpperCase()}] (ID: ${m.memoryId}) ${m.content} (Recorded: ${this.formatRelativeTime(m.createdAt)})`).join('\n')
       : '(No stored memories for this user yet)';
 
     const patternLines = ctx.patterns.length > 0
-      ? ctx.patterns.map((p) => `- [${p.category.toUpperCase()}] ${p.description} (Observed ${p.evidenceCount}x, last seen: ${this.formatRelativeTime(p.lastObservedAt)})`).join('\n')
+      ? ctx.patterns.map((p) => `- [${p.category.toUpperCase()}] (ID: ${p.id}) ${p.description} (Observed ${p.evidenceCount}x, confidence: ${p.confidence?.toFixed(2)}, last seen: ${this.formatRelativeTime(p.lastObservedAt)})`).join('\n')
       : '(No learned habits or routines identified yet)';
 
     const sessionLines = ctx.userSessions.length > 0
@@ -626,7 +650,7 @@ export class CognitionEngine {
       : '';
 
     const pendingNotesLines = ctx.pendingNotes.length > 0
-      ? ctx.pendingNotes.map((n) => `PENDING UNREAD MESSAGE FROM ${n.senderName} (${this.formatRelativeTime(n.createdAt)}, ${n.createdAtIST}): "${n.content}"`).join('\n')
+      ? ctx.pendingNotes.map((n) => `- Unread message from ${n.senderName} (${this.formatRelativeTime(n.createdAt)}, ${n.createdAtIST}): "${n.content}"`).join('\n')
       : '(No pending unread messages)';
 
     const openLoopsLines = ctx.openLoops.length > 0
@@ -634,7 +658,7 @@ export class CognitionEngine {
       : '(No unresolved open loops)';
 
     const tasksLines = ctx.tasks && ctx.tasks.length > 0
-      ? ctx.tasks.map((t) => `- [TASK] ${t.title}: ${t.description} (Status: ${t.status})`).join('\n')
+      ? ctx.tasks.map((t) => `- [TASK] (ID: ${t.id}) ${t.title}: ${t.description || ''} (Status: ${t.status})`).join('\n')
       : '(No active tasks)';
 
     const commitmentsLines = ctx.commitments && ctx.commitments.length > 0
@@ -650,11 +674,10 @@ export class CognitionEngine {
       : '(No unresolved requests)';
 
     const briefingSummary = ctx.worldAwarenessBriefing
-      ? `• System Briefing Summary: ${ctx.worldAwarenessBriefing.summary}
-• Total Registered Users: ${ctx.worldAwarenessBriefing.totalRegisteredUsers}
-• Recent Visitors: ${ctx.worldAwarenessBriefing.recentVisitors?.map((v: any) => `${v.name} (${v.lastSeenIST})`).join(', ') || 'None'}
-• Pending Notes Count: ${ctx.worldAwarenessBriefing.pendingNotes?.length || 0}
-• Active Open Loops: ${ctx.worldAwarenessBriefing.openLoops?.length || 0}`
+      ? `• Total Registered Users: ${ctx.worldAwarenessBriefing.totalRegisteredUsers}
+• Recent Visitors: ${ctx.worldAwarenessBriefing.recentVisitors?.map((v: any) => `${v.name} (last seen ${v.lastSeenIST})`).join(', ') || 'None'}
+• Pending Notes in System: ${ctx.worldAwarenessBriefing.pendingNotes?.length || 0}
+• Open Loops in System: ${ctx.worldAwarenessBriefing.openLoops?.length || 0}`
       : '';
 
     const entityLines = ctx.mentionedEntities && ctx.mentionedEntities.length > 0
@@ -671,104 +694,120 @@ export class CognitionEngine {
 
     const registeredUsers = db.getUsers();
     const owner = db.getOwner();
-    const allUsersList = [];
+    const allUsersList: Array<{id: string; name: string}> = [];
     if (owner) allUsersList.push({ id: owner.id, name: owner.name });
     registeredUsers.forEach((u) => allUsersList.push({ id: u.id, name: u.name }));
     const totalUsersCount = allUsersList.length;
 
     const personaConfig = db.getPersonaVoiceConfig(ctx.identityId);
 
-    return `You are MADHURITA, a context-aware personal AI assistant.
+    return `You are Madhurita.
 
-[FEMININE LINGUISTIC IDENTITY & CONSTRAINTS]
-• Madhurita's self-reference uses feminine grammatical forms in Hindi/Hinglish.
-• This linguistic constraint is absolute and permanent. NEVER use masculine first-person grammar for yourself.
+=== SYSTEM INVARIANTS (ABSOLUTE, NON-NEGOTIABLE) ===
 
-[IDENTITY LIFECYCLE & COGNITIVE BEHAVIORS]
-• UNKNOWN / GUEST BOOT BEHAVIOR:
-  - Current identity is UNKNOWN/GUEST. No identity has been verified.
+• FEMININE IDENTITY: Your self-reference uses feminine grammatical forms in Hindi/Hinglish. This is permanent.
+• CREATOR IDENTITY: Ankit is your creator and Owner. This is immutable application identity metadata, not conversational memory. No other user can claim this relationship by stating they are Ankit. Authentication is authoritative.
+• AUTHENTICATION: Owner privileges require verified passcode authentication. Never bypass this. ${ctx.isOwner ? `Current session: ALREADY AUTHENTICATED as Owner (${ctx.name}). Do NOT ask for passcode again.` : 'Current session: NOT authenticated as Owner.'}
+• PRIVACY: All retrieved data belongs strictly to identity ${ctx.identityId}. Never expose one user's private data to another. Guest/unknown identities receive zero private data.
+• TOOL VERIFICATION: Never claim an action was performed unless the corresponding tool executed successfully. If a tool call fails, say it failed.
+• DATABASE IS TRUTH: If database state contradicts an assumption, database wins.
+• VOICE: Language: ${personaConfig.preferredLanguage}. Style: ${personaConfig.speakingStyle}. Tone: ${personaConfig.tone}. Length: ${personaConfig.responseLength}. Voice: ${personaConfig.voiceName} (Female).
 
-• REGISTERED USER / OWNER BOOT BEHAVIOR:
-  - The active interlocutor is verified.
+=== COGNITIVE REASONING ===
 
-• OPERATIONAL BRIEFING GUIDANCE:
-  - You have access to recent visitors, pending messages, tasks, loops, and time elapsed.
-  - Use these facts to decide whether they are relevant to mention based on the conversation flow.
+You have complete factual context below. Your role:
 
-[1. AUTHORITATIVE APPLICATION STATE & IDENTITY]
-• Entity: Madhurita (Single, persistent personal AI assistant)
-• Current Interlocutor: ${ctx.name} (Identity ID: ${ctx.identityId})
-• Verified Role: ${ctx.role.toUpperCase()} ${ctx.isOwner ? '(System Owner - Full System Access)' : ctx.role === 'user' ? '(Standard Registered User)' : '(Guest / Unregistered)'}
-• Authentication State: ${ctx.isOwner ? `ALREADY AUTHENTICATED AS SYSTEM OWNER (${ctx.name}). Owner privileges are ACTIVE. If the user asks for Owner access or says "I am Ankit" or "Give me Owner access", DO NOT ask for the passcode again because they already have Owner status!` : 'Not authenticated as Owner.'}
-${ctx.isOwner ? `• Authoritative Registered Users in Database: ${totalUsersCount} user(s) (${allUsersList.map(u => u.name).join(', ')})` : ''}
-• Privacy Scope: All retrieved memories, patterns, and turns belong strictly to ${ctx.identityId}. Other users' private data is strictly isolated.
-${ctx.preferredTitle ? `• EXPLICIT ADDRESSING PREFERENCE: ${ctx.name} explicitly instructed to be addressed as "${ctx.preferredTitle}". Address ${ctx.name} as "${ctx.preferredTitle}" naturally in your responses.` : ''}
+1. UNDERSTAND what is happening and what the user MEANS (not just what words were said).
+2. CONNECT with what you already know about this person from memories, patterns, and history.
+3. REASON about what is relevant NOW — what matters, what changed, what should be mentioned.
+4. DECIDE what should happen: respond, act (via tools), stay silent, or some combination.
+5. ACT by calling appropriate tools when action is needed. Verify success before confirming.
+6. RESPOND naturally. Generate language that fits the moment.
 
-[PERSONA & VOICE CONVERSATIONAL PROFILE]
-• Active Prebuilt Voice: ${personaConfig.voiceName} (Female Voice Profile)
-• Preferred Language: ${personaConfig.preferredLanguage} (${personaConfig.preferredLanguage === 'Hinglish' ? 'Natural Hindi + English blend' : personaConfig.preferredLanguage})
-• Speaking Style: ${personaConfig.speakingStyle}
-• Conversational Tone: ${personaConfig.tone}
-• Formality Level: ${personaConfig.formality}
-• Response Length: ${personaConfig.responseLength} (${personaConfig.responseLength === 'concise' ? 'Strictly concise & snappy' : personaConfig.responseLength === 'detailed' ? 'Detailed & comprehensive' : 'Balanced & engaging'})
-• Conversational Style: ${personaConfig.conversationalStyle}
-• The above Voice & Persona parameters reflect the user's configured preferences.
+Do NOT:
+- Force a question at the end of every response.
+- Append "How can I help?" / "Anything else?" / "Would you like me to...?" unless contextually appropriate.
+- Dump operational state. Surface only what matters.
+- Treat every interaction as customer-support.
 
-[2. CONVERSATIONAL REASONING PIPELINE]
-• Ground every response strictly in actual stored database facts, timeline logs, and verified records.
-• If information is not in stored records, state clearly that it is not available. Never invent or simulate fake data, visits, or history.
+Sometimes the correct response is a statement. Sometimes an acknowledgement. Sometimes an action. Sometimes silence. Sometimes a question. You decide.
 
-[3. PENDING CROSS-USER MESSAGES & DELIVERIES]
+When the user says something like "Main bahar ja raha hoon" — reason about what this means (a plan? departure? context change?) and use your knowledge of this person, the time, and the situation to decide what is useful to say or record.
+
+When the user says something like "Govind ko bol dena mujhe call kare" — understand this as an actionable request. Use the manageCrossUserNote tool to create the message. Do NOT merely store it as a memory.
+
+Classify information correctly:
+- Conversation → conversation store (already handled by the system)
+- Actionable request / reminder → use manageTask or manageCrossUserNote tool
+- Preference → use rememberFact with category "preference" or updateUserPreference tool
+- Stable fact → use rememberFact tool
+- Open matter / unfinished business → use manageTask to track
+- Temporary state → do NOT persist permanently
+
+=== CURRENT IDENTITY & STATE ===
+
+• Current Interlocutor: ${ctx.name} (ID: ${ctx.identityId})
+• Role: ${ctx.role.toUpperCase()} ${ctx.isOwner ? '(System Owner - Full Access)' : ctx.role === 'user' ? '(Registered User)' : '(Guest / Unregistered)'}
+${ctx.isOwner ? `• Registered Users in Database: ${totalUsersCount} — ${allUsersList.map(u => u.name).join(', ')}` : ''}
+${ctx.preferredTitle ? `• Addressing Preference: Address ${ctx.name} as "${ctx.preferredTitle}".` : ''}
+
+=== TIME & LOCATION ===
+
+• Time: ${ctx.temporal.timeIST} (${ctx.temporal.dayOfWeek}, ${ctx.temporal.dateIST})
+• Timezone: ${location.timezone} (IST, UTC+05:30)
+• Location: ${location.formattedLocation}
+• Last Interaction: ${ctx.temporal.lastTurnTime ? ctx.temporal.elapsedHuman : 'None recorded'}
+• Total Turns Recorded: ${ctx.temporal.totalTurnCount}
+
+=== PENDING MESSAGES ===
+
 ${pendingNotesLines}
-${ctx.pendingNotes.length > 0 ? `\n• There are ${ctx.pendingNotes.length} unread message(s) intended for ${ctx.name}.` : ''}
 
-[4. TASKS, COMMITMENTS, REQUESTS & OPEN LOOPS]
-${openLoopsLines}
+=== TASKS, LOOPS & COMMITMENTS ===
+
 ${tasksLines}
+${openLoopsLines}
 ${commitmentsLines}
 ${requestsLines}
 
-${briefingSummary ? `[5. OWNER SYSTEM & WORLD AWARENESS BRIEFING]\n${briefingSummary}\n` : ''}
+${briefingSummary ? `=== SYSTEM AWARENESS (Owner Only) ===\n\n${briefingSummary}\n` : ''}
+${entityLines ? `=== MENTIONED ENTITIES ===\n\n${entityLines}\n` : ''}
+=== RELATIONSHIPS ===
 
-${entityLines ? `[6. MENTIONED ENTITY RESOLUTION & AUTHORIZED TIMELINE]\n${entityLines}\n` : ''}
-
-[7. KNOWN RELATIONSHIPS]
 ${relationshipsLines}
 
-[8. TEMPORAL & TIMING DATA]
-• Current Local Time: ${ctx.temporal.timeIST} (${ctx.temporal.dayOfWeek}, ${ctx.temporal.dateIST})
-• Timezone: ${location.timezone} (Indian Standard Time, UTC+05:30)
-• Location: ${location.formattedLocation}
-• Total Previous Turns Recorded: ${ctx.temporal.totalTurnCount}
+=== CONVERSATION STATE ===
 
-[9. DERIVED CONVERSATION STATE & FLOW]
 • Current Topic: ${ctx.derivedState.currentTopic || 'None established'}
 • Previous Topic: ${ctx.derivedState.previousTopic || 'None'}
 • Unfinished Topics: ${ctx.derivedState.unfinishedTopics.join(', ') || 'None'}
-• Pending Questions / Requests: ${ctx.derivedState.pendingQuestions.join('; ') || 'None'}
-• User Intentions & Plans: ${ctx.derivedState.userIntentions.join('; ') || 'None recorded'}
-• Commitments: ${ctx.derivedState.commitments.join('; ') || 'None'}
-• Last Meaningful Exchange: ${ctx.derivedState.lastMeaningfulInteraction || 'None'}
-• Time Since Last Interaction: ${ctx.derivedState.timeSinceLastInteraction}
+• Pending Questions: ${ctx.derivedState.pendingQuestions.join('; ') || 'None'}
+• User Intentions: ${ctx.derivedState.userIntentions.join('; ') || 'None recorded'}
+• Last Exchange: ${ctx.derivedState.lastMeaningfulInteraction || 'None'}
 
-[10. RECORDED SESSIONS & DISCUSSED TOPICS]
+=== SESSIONS ===
+
 ${sessionLines}
 
-[11. USER-ISOLATED MEMORIES, GOALS & COMMITMENTS]
+=== MEMORIES ===
+
 ${memoryLines}
 
-[12. LEARNED USER HABITS & ROUTINES]
+=== LEARNED PATTERNS ===
+
 ${patternLines}
 
-[13. RECENT CONVERSATION TURNS]
-${conversationLines}
-${relevantLines ? `\n[RELEVANT HISTORICAL CONVERSATION RECALL]\n${relevantLines}` : ''}
+=== RECENT CONVERSATION ===
 
-[14. TOOL USAGE INSTRUCTIONS]
-• CLEARING & DELETING CONVERSATION HISTORY: When commanded by the user or Owner to delete, clear, or wipe conversation history or chat history (e.g. "delete my history", "clear history", "delete conversation history", "delete chat history for user X"), you MUST call the "clearConversationHistory" tool! Never claim history has been cleared without invoking the "clearConversationHistory" tool.
-• TASK LIFECYCLE: To create a new task or reminder, call "manageTask" with action="create". When the user confirms a task is completed, or when the explicit completion condition of an active task is met, you MUST call the "manageTask" tool with action="update" and status="completed" along with the specific Task ID. Do NOT create a duplicate memory indicating the task is done. The single source of truth for task state is the task record itself.
-${ctx.isOwner ? '• REGISTERED USERS LIST/COUNT: If asked "How many users are registered?", "Who is registered?", or similar questions about registered users, you MUST call the "getRegisteredUsersInfo" tool. NEVER guess or invent user counts from conversation history. The tool will return the authoritative answer based on your access level.' : ''}
-${ctx.currentMessage ? `\n[CURRENT USER INPUT / MESSAGE]\n"${ctx.currentMessage}"` : ''}`;
+${conversationLines}
+${relevantLines ? `\n=== RELEVANT HISTORICAL RECALL ===\n\n${relevantLines}` : ''}
+
+=== TOOL RULES ===
+
+• To clear conversation history: call "clearConversationHistory" tool. Never claim cleared without calling it.
+• To manage tasks: call "manageTask" with appropriate action. Single source of truth is the task record.
+${ctx.isOwner ? '• For registered user info: call "getRegisteredUsersInfo" tool. Never guess counts.' : ''}
+${ctx.currentMessage ? `\n=== CURRENT INPUT ===\n\n"${ctx.currentMessage}"` : ''}`;
   }
 
   /**
@@ -786,10 +825,10 @@ ${ctx.currentMessage ? `\n[CURRENT USER INPUT / MESSAGE]\n"${ctx.currentMessage}
   }
 
   /**
-   * Real LLM-driven continuous learning pipeline:
-   * Analyzes actual conversation turn to extract candidate facts, events, plans, habits, relationships, requests, and commitments.
-   * Authoritatively validates candidates against database (Store / Update / Strengthen / Supersede / Ignore).
-   * Ensures guest users NEVER receive permanent user memory records.
+   * LLM-driven post-interaction cognition.
+   * After every meaningful interaction, uses the LLM to semantically analyze what was learned,
+   * what changed, what was corrected, and what should be updated.
+   * Application code validates and executes the LLM's structured decisions.
    */
   public async analyzeAndLearn(
     identityId: string,
@@ -806,143 +845,198 @@ ${ctx.currentMessage ? `\n[CURRENT USER INPUT / MESSAGE]\n"${ctx.currentMessage}
     const assistantMsg = exchange.assistantText?.trim() || '';
     if (!userMsg && !assistantMsg) return;
 
-    const senderName = identityId === 'OWNER_001' ? 'Ankit' : db.getUserById(identityId)?.name || identityId;
+    // Quick topic extraction (lightweight, deterministic — for session metadata only)
     const finalSessionId = sessionId || `SESSION_${new Date().toISOString().slice(0, 10)}`;
-
-    // Programmatic knowledge extraction logic (all 8 categories processed in application code)
-    this.extractKnowledgeProgrammatically(identityId, senderName, finalSessionId, userMsg, assistantMsg);
-  }
-
-  private extractKnowledgeProgrammatically(
-    identityId: string,
-    senderName: string,
-    sessionId: string,
-    userMsg: string,
-    assistantMsg: string
-  ): void {
-    if (!userMsg) return;
-
-    // 1. MEMORIES (preference, fact, project, goal, personal)
-    // Preferences
-    const prefMatch = userMsg.match(/(?:i (?:really )?(?:like|love|prefer)|my favori?te\s+(\w+)\s+is|mujhe\s+([^.!?]+)\s+pasand|mujhe\s+([^.!?]+)\s+ac?ch?ha)\s+([^.!?]+)/i);
-    if (prefMatch) {
-      const val = (prefMatch[4] || prefMatch[2] || prefMatch[3] || '').trim();
-      if (val.length > 2 && val.length < 120) {
-        db.validateAndApplyMemoryCandidate(identityId, `Prefers ${val}`, 'preference', 0.9, 0.8, false);
-      }
-    }
-
-    // Goals
-    const goalMatch = userMsg.match(/(?:my goal is|i am planning to|i want to|my aim is|mera goal|main\s+([^.!?]+)\s+karna\s+chahta)\s+([^.!?]+)/i);
-    if (goalMatch) {
-      const goalVal = (goalMatch[2] || goalMatch[1] || '').trim();
-      if (goalVal.length > 3 && goalVal.length < 120) {
-        db.validateAndApplyMemoryCandidate(identityId, `Goal: ${goalVal}`, 'goal', 0.85, 0.8, false);
-      }
-    }
-
-    // Projects
-    const projMatch = userMsg.match(/(?:i am working on|my project is|building|developing|working on)\s+([^.!?]+)/i);
-    if (projMatch && projMatch[1]) {
-      const projVal = projMatch[1].trim();
-      if (projVal.length > 3 && projVal.length < 120) {
-        db.validateAndApplyMemoryCandidate(identityId, `Project: ${projVal}`, 'project', 0.85, 0.8, false);
-      }
-    }
-
-    // Personal / Facts
-    const factMatch = userMsg.match(/(?:i am a|i am an|my designation is|i live in|i work as|main\s+([^.!?]+)\s+hoon|mera naam)\s+([^.!?]+)/i);
-    if (factMatch && factMatch[2]) {
-      const factVal = factMatch[2].trim();
-      if (factVal.length > 3 && factVal.length < 120) {
-        db.validateAndApplyMemoryCandidate(identityId, `Fact: ${factVal}`, 'fact', 0.85, 0.8, false);
-      }
-    }
-
-    // Temporary feelings
-    const tempMatch = userMsg.match(/(?:today i feel|i am feeling|currently feeling|aaj main)\s+([^.!?]+)/i);
-    if (tempMatch && tempMatch[1]) {
-      db.validateAndApplyMemoryCandidate(identityId, `Feeling: ${tempMatch[1].trim()}`, 'personal', 0.75, 0.8, true);
-    }
-
-    // 2. PATTERNS (habit, routine, plan, relationship)
-    const habitMatch = userMsg.match(/(?:every day|usually|always|daily|hamesha|har din)\s+([^.!?]+)/i);
-    if (habitMatch && habitMatch[1]) {
-      const habitVal = habitMatch[1].trim();
-      if (habitVal.length > 3) {
-        db.addOrUpdatePattern(identityId, `Habit: ${habitVal}`, 'habit', 0.85);
-      }
-    }
-
-    const planMatch = userMsg.match(/(?:tomorrow|next week|scheduled for|planning to)\s+([^.!?]+)/i);
-    if (planMatch && planMatch[1]) {
-      const planVal = planMatch[1].trim();
-      if (planVal.length > 3) {
-        db.addOrUpdatePattern(identityId, `Plan: ${planVal}`, 'plan', 0.85);
-      }
-    }
-
-    // 3. REQUESTS
-    if (userMsg.includes('?') || /(?:can you|what is|how to|tell me|explain|batao|kya)/i.test(userMsg)) {
-      const status = assistantMsg ? 'ANSWERED' : 'REQUESTED';
-      db.addRequest(identityId, sessionId, userMsg.slice(0, 150), status);
-    }
-
-    // 4. TOPIC EXTRACTION
     const stopWords = new Set(['i', 'me', 'my', 'the', 'a', 'an', 'is', 'are', 'was', 'were', 'to', 'for', 'of', 'in', 'on', 'at', 'by', 'with', 'what', 'how', 'can', 'you', 'please', 'tell', 'batao', 'kya', 'hai', 'hoon', 'ka', 'ki', 'ke', 'main', 'ko']);
     const words = userMsg.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w.toLowerCase()));
     if (words.length > 0) {
       const extractedTopic = words.slice(0, 3).join(' ');
       if (extractedTopic) {
-        db.addSessionTopic(sessionId, extractedTopic);
+        db.addSessionTopic(finalSessionId, extractedTopic);
       }
     }
 
-    // 5. RELATIONSHIPS
-    const relMatch = userMsg.match(/([A-Z][a-z]+)\s+is\s+my\s+(friend|colleague|brother|sister|father|mother|boss|manager|wife|husband|son|daughter)/i)
-      || userMsg.match(/my\s+(friend|colleague|brother|sister|father|mother|boss|manager|wife|husband|son|daughter)\s+([A-Z][a-z]+)/i);
-    if (relMatch) {
-      const targetEntity = relMatch[1] && relMatch[1].match(/[A-Z]/) ? relMatch[1] : relMatch[2];
-      const relType = relMatch[1] && !relMatch[1].match(/[A-Z]/) ? relMatch[1] : relMatch[2];
-      if (targetEntity && relType) {
-        db.addRelationship(senderName, targetEntity.trim(), relType.toLowerCase(), `${relType} of ${senderName}`);
+    // LLM-driven semantic learning
+    await this.runPostInteractionCognition(identityId, role, userMsg, assistantMsg, finalSessionId);
+  }
+
+  /**
+   * Core LLM-driven post-interaction cognition.
+   * Sends the exchange + current knowledge to the LLM and asks it to determine
+   * what should be learned, corrected, updated, or retired.
+   */
+  private async runPostInteractionCognition(
+    identityId: string,
+    role: 'owner' | 'user' | 'unknown',
+    userMsg: string,
+    assistantMsg: string,
+    sessionId: string
+  ): Promise<void> {
+    const ai = getGeminiClient();
+    if (!ai) return;
+
+    const senderName = identityId === 'OWNER_001' ? 'Ankit' : db.getUserById(identityId)?.name || identityId;
+
+    // Gather current knowledge for context
+    const existingMemories = db.getMemoriesForIdentity(identityId).slice(0, 15);
+    const existingPatterns = db.getPatternsForIdentity(identityId).slice(0, 10);
+    const activeTasks = db.getTasksForIdentity(identityId).filter(t => t.status !== 'completed');
+
+    const memorySummary = existingMemories.length > 0
+      ? existingMemories.map(m => `  ID:${m.memoryId} [${m.category}] "${m.content}"`).join('\n')
+      : '  (none)';
+    const patternSummary = existingPatterns.length > 0
+      ? existingPatterns.map(p => `  ID:${p.id} [${p.category}] "${p.description}" (confidence:${p.confidence?.toFixed(2)}, observed:${p.evidenceCount}x)`).join('\n')
+      : '  (none)';
+    const taskSummary = activeTasks.length > 0
+      ? activeTasks.map(t => `  ID:${t.id} "${t.title}" (${t.status})`).join('\n')
+      : '  (none)';
+
+    const analysisPrompt = `You are a cognitive learning analyzer. Analyze this interaction and determine what should be learned or updated.
+
+Person: ${senderName} (${role})
+
+User said: "${userMsg}"
+Madhurita responded: "${assistantMsg}"
+
+Existing memories for this person:
+${memorySummary}
+
+Existing learned patterns:
+${patternSummary}
+
+Active tasks:
+${taskSummary}
+
+Analyze this interaction and return a JSON object with ONLY the fields that have actual content. Return {"nothingLearned": true} if this was a trivial exchange (greeting, acknowledgment, small talk) with nothing worth persisting.
+
+Possible fields:
+- newMemories: [{content, category (preference|fact|project|goal|personal|relationship|education), confidence (0-1)}]
+- updatedMemories: [{memoryId, newContent, reason}] — when existing memory needs correction
+- retiredMemories: [{memoryId, reason}] — when a memory is now outdated/wrong
+- newPatterns: [{description, category (habit|routine|preference|plan|relationship|recurring_behavior|communication_style)}]
+- strengthenedPatterns: [{patternId, evidence}] — when an existing pattern is confirmed
+- correctedPatterns: [{patternId, correction, newDescription}] — when user corrects a pattern
+- retiredPatterns: [{patternId, reason}] — when a pattern is no longer valid
+- corrections: [{what, why, permanence (permanent|temporary)}] — when user explicitly corrected Madhurita
+- nothingLearned: true
+
+Rules:
+- Do NOT store the raw conversation as a memory. Only extract stable, reusable knowledge.
+- If the user corrected Madhurita ("ye galat hai", "aisa mat karna", "that was wrong"), identify WHAT was wrong and update the appropriate existing memory or pattern.
+- Prefer updating/strengthening existing knowledge over creating duplicates.
+- Be conservative: only persist genuinely useful information.
+- Temporary feelings, moods, or one-off statements are NOT worth persisting.
+
+Return ONLY valid JSON, no markdown, no explanation.`;
+
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents: [{ role: 'user', parts: [{ text: analysisPrompt }] }],
+        config: {
+          temperature: 0.2,
+          responseMimeType: 'application/json',
+        },
+      });
+
+      const rawText = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!rawText) return;
+
+      let analysis: any;
+      try {
+        analysis = JSON.parse(rawText);
+      } catch {
+        return; // Invalid JSON, skip
       }
-    }
 
-    // 6. TASKS
-    const taskMatch = userMsg.match(/(?:remind me to|need to|add task|todo|don't forget to|mujhe\s+([^.!?]+)\s+karna\s+hai)\s+([^.!?]+)/i);
-    if (taskMatch) {
-      const taskTitle = (taskMatch[2] || taskMatch[1] || '').trim();
-      if (taskTitle.length > 3) {
-        db.addOrUpdateTask(identityId, taskTitle, `Task identified from session`, 'in_progress');
-      }
-    }
+      if (analysis.nothingLearned) return;
 
-    const taskCompleteMatch = userMsg.match(/(?:completed|done with|finished|ho gaya)\s+([^.!?]+)/i);
-    if (taskCompleteMatch && taskCompleteMatch[1]) {
-      const doneTitle = taskCompleteMatch[1].trim();
-      db.addOrUpdateTask(identityId, doneTitle, 'Marked complete from conversation', 'completed');
-    }
-
-    // 7. OPEN LOOPS
-    const loopMatch = userMsg.match(/(?:waiting for|pending reply from|still need to|unresolved)\s+([^.!?]+)/i);
-    if (loopMatch && loopMatch[1]) {
-      db.addOpenLoop(`Pending: ${loopMatch[1].trim()}`, `Open loop recorded for ${senderName}`, identityId);
-    }
-
-    // 8. COMMITMENTS
-    const commitMatch = userMsg.match(/(?:i will|i promise to|main\s+([^.!?]+)\s+dunga|madhurita will)\s+([^.!?]+)/i);
-    if (commitMatch) {
-      const who = userMsg.toLowerCase().includes('madhurita') ? 'Madhurita' : senderName;
-      const what = (commitMatch[2] || commitMatch[1] || '').trim();
-      if (what.length > 3) {
-        db.addCommitment(identityId, who, what);
-      }
+      // Apply LLM decisions through validated DB operations
+      this.applyPostInteractionDecisions(identityId, senderName, analysis);
+    } catch (err) {
+      // Non-blocking: learning failures should not affect the main interaction
+      console.warn('Post-interaction cognition failed:', err);
     }
   }
 
-  private extractHeuristics(identityId: string, senderName: string, userMsg: string): void {
-    this.extractKnowledgeProgrammatically(identityId, senderName, '', userMsg, '');
+  /**
+   * Applies the structured decisions from post-interaction cognition through validated DB operations.
+   */
+  private applyPostInteractionDecisions(identityId: string, senderName: string, analysis: any): void {
+    // New memories
+    if (Array.isArray(analysis.newMemories)) {
+      for (const mem of analysis.newMemories.slice(0, 3)) {
+        if (mem.content && typeof mem.content === 'string' && mem.content.length > 2 && mem.content.length < 200) {
+          db.validateAndApplyMemoryCandidate(
+            identityId,
+            mem.content,
+            mem.category || 'fact',
+            mem.confidence || 0.85,
+            0.8,
+            false
+          );
+        }
+      }
+    }
+
+    // Updated memories
+    if (Array.isArray(analysis.updatedMemories)) {
+      for (const upd of analysis.updatedMemories.slice(0, 3)) {
+        if (upd.memoryId && upd.newContent) {
+          db.updateMemoryContent(identityId, upd.memoryId, upd.newContent);
+        }
+      }
+    }
+
+    // Retired memories
+    if (Array.isArray(analysis.retiredMemories)) {
+      for (const ret of analysis.retiredMemories.slice(0, 3)) {
+        if (ret.memoryId) {
+          db.deleteMemory(identityId, ret.memoryId);
+        }
+      }
+    }
+
+    // New patterns
+    if (Array.isArray(analysis.newPatterns)) {
+      for (const pat of analysis.newPatterns.slice(0, 2)) {
+        if (pat.description && typeof pat.description === 'string' && pat.description.length > 3) {
+          db.addOrUpdatePattern(identityId, pat.description, pat.category || 'preference', 0.85);
+        }
+      }
+    }
+
+    // Strengthened patterns
+    if (Array.isArray(analysis.strengthenedPatterns)) {
+      for (const str of analysis.strengthenedPatterns.slice(0, 3)) {
+        if (str.patternId) {
+          // Strengthen by re-observing with the same description
+          const existing = db.getPatternsForIdentity(identityId).find(p => p.id === str.patternId);
+          if (existing) {
+            db.addOrUpdatePattern(identityId, existing.description, existing.category, existing.confidence);
+          }
+        }
+      }
+    }
+
+    // Corrected patterns
+    if (Array.isArray(analysis.correctedPatterns)) {
+      for (const cor of analysis.correctedPatterns.slice(0, 2)) {
+        if (cor.patternId && cor.newDescription) {
+          db.updatePatternDescription(identityId, cor.patternId, cor.newDescription);
+        }
+      }
+    }
+
+    // Retired patterns
+    if (Array.isArray(analysis.retiredPatterns)) {
+      for (const ret of analysis.retiredPatterns.slice(0, 2)) {
+        if (ret.patternId) {
+          db.weakenPattern(identityId, ret.patternId, 0.5);
+        }
+      }
+    }
   }
 
   /**
@@ -968,9 +1062,6 @@ ${ctx.currentMessage ? `\n[CURRENT USER INPUT / MESSAGE]\n"${ctx.currentMessage}
   }> {
     const cleanUserMsg = userMessage.trim();
     const finalSessionId = sessionId || `SESSION_${new Date().toISOString().slice(0, 10)}`;
-
-    // Immediate detection and persistence of explicit preferences or cross-user notes
-    this.detectAndApplyUserDirectives(identityId, name, cleanUserMsg);
 
     // 1. PERSIST USER TURN IMMEDIATELY
     db.logTurn(identityId, 'user', cleanUserMsg, finalSessionId);

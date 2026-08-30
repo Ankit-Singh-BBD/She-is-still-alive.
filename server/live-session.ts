@@ -1,6 +1,6 @@
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { WebSocket } from 'ws';
-import { db, PersonaAndVoiceConfig, FemaleVoiceName, VALID_FEMALE_VOICES } from './db.js';
+import { db, PersonaAndVoiceConfig, FemaleVoiceName } from './db.js';
 import { auth, AuthContext } from './auth.js';
 import { cognition } from './cognition.js';
 import { buildRuntimeContext } from './runtime-state.js';
@@ -309,9 +309,9 @@ export class LiveSessionManager {
 
       this.broadcastRuntimeState();
 
-      // Deterministic startup cognition evaluation:
-      // Only speak when authoritative application state contains an explicit reason or meaningful return.
-      // If shouldSpeak === false: DO NOT send anything to Gemini Live realtime input.
+      // Cognitive startup: assemble factual context for the LLM to reason over.
+      // The LLM decides whether to speak and what to say based on facts.
+      // NO [SYSTEM TRIGGER] injection, NO forced behavioral commands.
       if (!this.hasRunStartupCognition) {
         this.hasRunStartupCognition = true;
         const cognitiveContext = cognition.assembleCognitiveContext(
@@ -319,29 +319,14 @@ export class LiveSessionManager {
           this.currentContext.role,
           this.currentContext.name
         );
-        const startupEval = cognition.evaluateStartupState(cognitiveContext);
-        if (startupEval.shouldSpeak) {
-          let triggerText = '';
-          if (startupEval.reason === 'guest_boot') {
-            triggerText = '[SYSTEM TRIGGER: New Guest connected. Current identity is UNKNOWN/GUEST. No identity has been verified.]';
-          } else if (startupEval.reason === 'owner_briefing') {
-            triggerText = '[SYSTEM TRIGGER: Owner returned. New information, pending items, or elapsed absence detected.]';
-          } else if (startupEval.reason === 'pending_message') {
-            triggerText = '[SYSTEM TRIGGER: Pending unread messages detected.]';
-          } else if (startupEval.reason === 'unfinished_task') {
-            triggerText = '[SYSTEM TRIGGER: Active unfinished task detected.]';
-          } else if (startupEval.reason === 'important_event') {
-            triggerText = '[SYSTEM TRIGGER: Important proactive event detected.]';
-          }
-
-          if (triggerText) {
-            try {
-              await this.session.sendRealtimeInput({
-                text: triggerText,
-              });
-            } catch (err) {
-              console.error('Failed to send startup trigger to Gemini Live:', err);
-            }
+        const startupFacts = cognition.buildStartupFacts(cognitiveContext);
+        if (startupFacts) {
+          try {
+            await this.session.sendRealtimeInput({
+              text: startupFacts,
+            });
+          } catch (err) {
+            console.error('Failed to send startup context to Gemini Live:', err);
           }
         }
       }
@@ -422,71 +407,16 @@ export class LiveSessionManager {
     }
   }
 
-  private detectAndApplyUserDirectives(cleanText: string) {
+  private detectAndApplyAddressingDirective(cleanText: string) {
     if (!cleanText) return;
 
     // Detect addressing title directives: "ab se mujhe Sir keh kar bulana", "call me Boss from now on"
+    // This is kept as a deterministic fast-path for addressing preferences only.
     const addressingMatch = cleanText.match(/(?:ab\s+se\s+)?mujhe\s+(.+?)\s+(?:keh\s*ke|keh\s*kar|bolo|bulana)/i) ||
                             cleanText.match(/call\s+me\s+(.+?)(?:\s+from\s+now\s+on)?$/i);
     if (addressingMatch && addressingMatch[1]) {
       const preferredTitle = addressingMatch[1].trim();
       db.setAddressingPreference(this.currentContext.id, preferredTitle);
-    }
-
-    const lower = cleanText.toLowerCase();
-
-    // 1. Detect Natural Voice Control
-    let detectedVoice: FemaleVoiceName | null = null;
-    if (lower.includes('callirrhoe')) detectedVoice = 'Callirrhoe';
-    else if (lower.includes('aoede')) detectedVoice = 'Aoede';
-    else if (lower.includes('kore')) detectedVoice = 'Kore';
-    else if (lower.includes('leda')) detectedVoice = 'Leda';
-    else if (lower.includes('despina')) detectedVoice = 'Despina';
-
-    // 2. Detect Language directives
-    let detectedLanguage: 'Hinglish' | 'English' | 'Hindi' | null = null;
-    if (lower.includes('speak in hindi') || lower.includes('hindi me bolo') || lower.includes('hindi me baat') || lower.includes('use hindi')) {
-      detectedLanguage = 'Hindi';
-    } else if (lower.includes('speak in english') || lower.includes('english me bolo') || lower.includes('use english')) {
-      detectedLanguage = 'English';
-    } else if (lower.includes('speak in hinglish') || lower.includes('hinglish me bolo') || lower.includes('use hinglish')) {
-      detectedLanguage = 'Hinglish';
-    }
-
-    // 3. Detect Response Length directives
-    let detectedLength: 'concise' | 'balanced' | 'detailed' | null = null;
-    if (lower.includes('keep responses short') || lower.includes('chote javab') || lower.includes('short response') || lower.includes('be concise') || lower.includes('brief me bolo')) {
-      detectedLength = 'concise';
-    } else if (lower.includes('detailed response') || lower.includes('detailed answer') || lower.includes('bada javab') || lower.includes('explain in detail')) {
-      detectedLength = 'detailed';
-    } else if (lower.includes('balanced response') || lower.includes('normal length')) {
-      detectedLength = 'balanced';
-    }
-
-    // 4. Detect Speaking Style directives
-    let detectedStyle: 'warm_conversational' | 'expressive_witty' | 'calm_thoughtful' | 'concise_direct' | null = null;
-    if (lower.includes('speak casually') || lower.includes('be casual') || lower.includes('witty style') || lower.includes('expressive style')) {
-      detectedStyle = 'expressive_witty';
-    } else if (lower.includes('be warm') || lower.includes('warm style')) {
-      detectedStyle = 'warm_conversational';
-    } else if (lower.includes('be calm') || lower.includes('thoughtful style')) {
-      detectedStyle = 'calm_thoughtful';
-    }
-
-    const updates: Partial<PersonaAndVoiceConfig> = {};
-    if (detectedVoice) updates.voiceName = detectedVoice;
-    if (detectedLanguage) updates.preferredLanguage = detectedLanguage;
-    if (detectedLength) updates.responseLength = detectedLength;
-    if (detectedStyle) updates.speakingStyle = detectedStyle;
-
-    if (Object.keys(updates).length > 0) {
-      try {
-        const updated = db.updatePersonaVoiceConfig(this.currentContext.id, updates);
-        broadcastVoiceConfigUpdate(updated, this.currentContext.id);
-        broadcastRuntimeStateToAllSessions();
-      } catch (e) {
-        console.warn('Failed to apply detected voice/style directive:', e);
-      }
     }
   }
 
@@ -501,7 +431,9 @@ export class LiveSessionManager {
     this.lastProcessedUserTranscript = finalCleanText;
     this.lastUserTurnContent = finalCleanText;
 
-    this.detectAndApplyUserDirectives(finalCleanText);
+    // Only addressing preference detection is kept as a deterministic fast-path.
+    // Voice, language, style directives are handled by the LLM through tool calls.
+    this.detectAndApplyAddressingDirective(finalCleanText);
 
     const canonicalUserMessage = {
       identityId: this.currentContext.id,
@@ -527,7 +459,8 @@ export class LiveSessionManager {
     this.lastProcessedUserTranscript = clean;
     this.lastUserTurnContent = clean;
 
-    this.detectAndApplyUserDirectives(clean);
+    // Only addressing preference detection is kept as a deterministic fast-path.
+    this.detectAndApplyAddressingDirective(clean);
 
     const canonicalUserMessage = {
       identityId: this.currentContext.id,

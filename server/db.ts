@@ -974,6 +974,68 @@ class DatabaseEngine {
     return false;
   }
 
+  /**
+   * Updates the description or category of an existing pattern (correction/evolution).
+   */
+  public updatePatternDescription(
+    identityId: string,
+    patternId: string,
+    newDescription: string,
+    newCategory?: LearnedPattern['category']
+  ): boolean {
+    if (!this.data.patterns) return false;
+    const pattern = this.data.patterns.find(
+      (p) => p.id === patternId && (p.identityId === identityId || identityId === 'OWNER_001')
+    );
+    if (!pattern) return false;
+    const nowIst = getISTDateTime();
+    pattern.description = newDescription.trim();
+    if (newCategory) pattern.category = newCategory;
+    pattern.lastObservedAt = nowIst.iso;
+    pattern.lastObservedAtIST = nowIst.istFull;
+    pattern.updatedAt = nowIst.iso;
+    return this.save();
+  }
+
+  /**
+   * Weakens a pattern's confidence. If confidence drops below threshold, removes it.
+   */
+  public weakenPattern(identityId: string, patternId: string, amount = 0.2): boolean {
+    if (!this.data.patterns) return false;
+    const pattern = this.data.patterns.find(
+      (p) => p.id === patternId && (p.identityId === identityId || identityId === 'OWNER_001')
+    );
+    if (!pattern) return false;
+    pattern.confidence = Math.max(0, (pattern.confidence || 0.8) - amount);
+    pattern.updatedAt = getISTDateTime().iso;
+    if (pattern.confidence < 0.15) {
+      return this.deletePattern(identityId, patternId);
+    }
+    return this.save();
+  }
+
+  /**
+   * Updates the content of an existing memory record (for cognitive correction/evolution).
+   */
+  public updateMemoryContent(
+    identityId: string,
+    memoryId: string,
+    newContent: string,
+    newCategory?: MemoryRecord['category']
+  ): boolean {
+    if (!this.data.memories) return false;
+    const memory = this.data.memories.find(
+      (m) => m.memoryId === memoryId && (m.ownerId === identityId || identityId === 'OWNER_001')
+    );
+    if (!memory) return false;
+    const nowIst = getISTDateTime();
+    memory.content = newContent.trim();
+    if (newCategory) memory.category = newCategory;
+    memory.updatedAt = nowIst.iso;
+    memory.updatedAtIST = nowIst.istFull;
+    return this.save();
+  }
+
   // --- Interaction / Session Metadata & World Awareness ---
   public touchSession(identityId: string, sessionId?: string, userName?: string): SessionMetadata {
     if (!this.data.sessions) this.data.sessions = [];
