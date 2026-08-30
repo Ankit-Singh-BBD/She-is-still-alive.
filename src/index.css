@@ -1,19 +1,111 @@
 @import "tailwindcss";
 
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display",
+    "Segoe UI", sans-serif;
+
+  /* Liquid Glass design tokens */
+  --color-glass-line: rgba(255, 255, 255, 0.14);
+  --color-glass-line-strong: rgba(255, 255, 255, 0.24);
+  --radius-glass: 1.75rem;
+}
+
+@layer base {
+  html {
+    background-color: #0b1224;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    /* Twilight wallpaper behind the frosted app frame */
+    background-image:
+      radial-gradient(120% 90% at 78% 8%, rgba(88, 120, 220, 0.28), transparent 55%),
+      radial-gradient(100% 70% at 50% 100%, rgba(240, 170, 120, 0.14), transparent 60%),
+      url("/wallpaper.png");
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
 @layer utilities {
+  /* Frosted translucent glass surface */
+  .glass {
+    background: linear-gradient(
+      160deg,
+      rgba(255, 255, 255, 0.12),
+      rgba(255, 255, 255, 0.04)
+    );
+    backdrop-filter: blur(28px) saturate(160%);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
+    border: 1px solid var(--color-glass-line);
+  }
+
+  .glass-panel {
+    background: linear-gradient(
+      160deg,
+      rgba(30, 41, 74, 0.55),
+      rgba(15, 23, 42, 0.4)
+    );
+    backdrop-filter: blur(40px) saturate(160%);
+    -webkit-backdrop-filter: blur(40px) saturate(160%);
+    border: 1px solid var(--color-glass-line);
+  }
+
+  .glass-hover {
+    transition: background-color 200ms ease, border-color 200ms ease,
+      box-shadow 200ms ease, transform 200ms ease;
+  }
+  .glass-hover:hover {
+    background: linear-gradient(
+      160deg,
+      rgba(255, 255, 255, 0.18),
+      rgba(255, 255, 255, 0.07)
+    );
+    border-color: var(--color-glass-line-strong);
+  }
+
+  .glass-inset {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+  }
+
+  .text-gradient {
+    background: linear-gradient(100deg, #a5c8ff 0%, #c4b5fd 45%, #f0abfc 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
   .custom-scrollbar::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 9999px;
+    background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.18);
     border-radius: 9999px;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.32);
+  }
+
+  @keyframes glass-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+  }
+  .animate-glass-float {
+    animation: glass-float 6s ease-in-out infinite;
+  }
+
+  @keyframes soft-glow {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+  .animate-soft-glow {
+    animation: soft-glow 3.2s ease-in-out infinite;
   }
 }

@@ -6,15 +6,15 @@ import { ExperienceIntro } from './components/ExperienceIntro.js';
 import { HUDHeader } from './components/HUDHeader.js';
 import { VoiceCore } from './components/VoiceCore.js';
 import { ToolActionToast } from './components/ToolActionToast.js';
+import { Sidebar, NavKey } from './components/Sidebar.js';
+import { GreetingHero } from './components/GreetingHero.js';
+import { Composer } from './components/Composer.js';
 import {
   Shield,
   AlertTriangle,
-  Send,
-  Sparkles,
-  MessageSquare,
-  ChevronUp,
-  ChevronDown,
-  BrainCircuit,
+  Lock,
+  AudioLines,
+  X,
   Bot,
   User,
 } from 'lucide-react';
@@ -112,6 +112,7 @@ export default function App() {
 
   // Text Chat & Cognitive Interaction Console State
   const [isChatConsoleOpen, setIsChatConsoleOpen] = useState(false);
+  const [activeNav, setActiveNav] = useState<NavKey>('chat');
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isProcessingChat, setIsProcessingChat] = useState(false);
@@ -268,6 +269,37 @@ export default function App() {
       chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [chatMessages, isChatConsoleOpen]);
+
+  const handleSidebarNavigate = useCallback(
+    (key: NavKey) => {
+      setActiveNav(key);
+      switch (key) {
+        case 'chat':
+          setIsChatConsoleOpen(true);
+          break;
+        case 'memory':
+        case 'knowledge':
+          setActiveModalMode('database');
+          break;
+        case 'recall':
+          setIsChatConsoleOpen(true);
+          setChatInput('What did we talk about?');
+          break;
+        case 'tasks':
+          setActiveModalMode('tasks');
+          break;
+        case 'devices':
+          setActiveModalMode('iot');
+          break;
+        case 'settings':
+          setActiveModalMode('voice');
+          break;
+        default:
+          break;
+      }
+    },
+    [],
+  );
 
   const handleEnterExperience = useCallback(async () => {
     const status = await fetchStatus();
@@ -541,14 +573,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#030712] text-white flex flex-col justify-between font-sans select-none">
-      {/* Background Ambient Lights */}
-      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[120px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-blue-600/20 rounded-full blur-[150px]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.05)_0%,transparent_70%)]" />
-      </div>
-
+    <div className="relative w-screen h-screen overflow-hidden text-white font-sans select-none">
       {/* Intro Experience Splash */}
       <AnimatePresence>
         {!hasEnteredExperience && (
@@ -560,10 +585,10 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Main Experience Layout */}
+      {/* Main Experience Layout — macOS Liquid Glass window */}
       {hasEnteredExperience && (
-        <>
-          {/* Top HUD Header */}
+        <div className="w-full h-full overflow-hidden flex flex-col">
+          {/* Top toolbar */}
           <HUDHeader
             identity={identity}
             state={liveState}
@@ -577,197 +602,201 @@ export default function App() {
             onOpenIoT={() => setActiveModalMode('iot')}
           />
 
-          {/* Error Banner */}
-          <AnimatePresence>
-            {errorMessage && (
-              <motion.div
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="absolute top-16 left-1/2 -translate-x-1/2 z-40 max-w-lg w-[90%] p-3.5 rounded-2xl bg-rose-950/80 border border-rose-500/40 text-rose-200 text-xs backdrop-blur-xl flex items-center justify-between gap-3 shadow-xl"
-              >
-                <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
-                  <span className="leading-tight">{errorMessage}</span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleToggleVoice}
-                    className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 font-medium text-[11px] transition-colors border border-rose-500/30 cursor-pointer"
+          {/* Body: sidebar + content */}
+          <div className="flex-1 flex min-h-0">
+            <Sidebar
+              identity={identity}
+              state={liveState}
+              activeNav={activeNav}
+              onNavigate={handleSidebarNavigate}
+              onOpenIdentitySwitch={() => setIsIdentitySwitchOpen(true)}
+            />
+
+            {/* Main content column */}
+            <div className="flex-1 flex flex-col min-w-0 relative">
+              {/* Error Banner */}
+              <AnimatePresence>
+                {errorMessage && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="absolute top-4 left-1/2 -translate-x-1/2 z-40 max-w-lg w-[90%] p-3.5 rounded-2xl glass-panel border border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-3 shadow-xl"
                   >
-                    Retry
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setErrorMessage(null)}
-                    className="px-2 py-1 rounded-lg text-rose-300 hover:text-white text-[11px] transition-colors cursor-pointer"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                      <span className="leading-tight">{errorMessage}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleToggleVoice}
+                        className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 font-medium text-[11px] transition-colors border border-rose-500/30 cursor-pointer"
+                      >
+                        Retry
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setErrorMessage(null)}
+                        className="w-6 h-6 rounded-lg text-rose-300 hover:text-white hover:bg-white/10 flex items-center justify-center transition-colors cursor-pointer"
+                        aria-label="Dismiss error"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-          {/* Central Voice Core Interaction */}
-          <main className="flex-1 flex items-center justify-center p-4 relative z-10">
-            {liveClientRef.current && (
-              <VoiceCore
-                state={liveState}
-                onToggle={handleToggleVoice}
-                streamer={liveClientRef.current.getStreamer()}
-                player={liveClientRef.current.getPlayer()}
-                activeIdentityName={identity.name}
-                isOwner={identity.role === 'owner'}
-              />
-            )}
-          </main>
-
-          {/* Collapsible Cognitive Text Chat Drawer */}
-          <div className="z-30 w-full max-w-xl mx-auto px-4 pb-2">
-            <div className="rounded-2xl bg-[#030712]/90 border border-white/15 backdrop-blur-xl shadow-2xl overflow-hidden transition-all">
-              {/* Drawer Toggle Header */}
-              <div
-                onClick={() => setIsChatConsoleOpen(!isChatConsoleOpen)}
-                className="px-4 py-2 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors"
-              >
-                <div className="flex items-center gap-2 text-xs text-white/80 font-medium">
-                  <BrainCircuit className="w-3.5 h-3.5 text-pink-400" />
-                  <span>Cognitive Chat Console & Recall</span>
-                  {chatMessages.length > 0 && (
-                    <span className="px-1.5 py-0.2 rounded bg-pink-500/20 text-pink-300 text-[10px]">
-                      {chatMessages.length}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px] text-white/40">
-                  <span>{isChatConsoleOpen ? 'Minimize' : 'Type to Chat'}</span>
-                  {isChatConsoleOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
-                </div>
-              </div>
-
-              {/* Chat Expanded Area */}
-              {isChatConsoleOpen && (
-                <div className="p-3 border-t border-white/10 space-y-3">
-                  {/* Messages Feed */}
-                  <div className="max-h-48 overflow-y-auto space-y-2 pr-1 text-xs">
-                    {chatMessages.length === 0 ? (
-                      <div className="text-center py-4 text-white/40 text-[11px]">
-                        Send a message or test recall questions like <span className="text-pink-300 font-medium">"What did we talk about?"</span>
-                      </div>
-                    ) : (
-                      chatMessages.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className={`flex items-start gap-2 ${
-                            msg.role === 'user' ? 'justify-end' : 'justify-start'
-                          }`}
-                        >
-                          {msg.role === 'assistant' && (
-                            <div className="w-5 h-5 rounded-full bg-pink-500/20 text-pink-300 flex items-center justify-center shrink-0 mt-0.5">
-                              <Bot className="w-3 h-3" />
-                            </div>
-                          )}
+              {/* Center stage */}
+              <main className="flex-1 flex items-stretch justify-center min-h-0 overflow-hidden">
+                {/* Conversation-first hero / chat area */}
+                <div className="flex-1 flex flex-col min-w-0 px-4 sm:px-8 pt-6 pb-4">
+                  {chatMessages.length === 0 && !isChatConsoleOpen ? (
+                    <div className="flex-1 flex items-center justify-center">
+                      <GreetingHero
+                        identityName={identity.name}
+                        onQuickAction={(text) => handleSendChatMessage(undefined, text)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 pr-1">
+                      <div className="max-w-2xl mx-auto w-full space-y-3 py-2">
+                        {chatMessages.length === 0 && (
+                          <div className="text-center py-10 text-white/45 text-sm">
+                            Send a message or try recall questions like{' '}
+                            <span className="text-indigo-200 font-medium">"What did we talk about?"</span>
+                          </div>
+                        )}
+                        {chatMessages.map((msg) => (
                           <div
-                            className={`p-2.5 rounded-2xl max-w-[85%] leading-relaxed ${
-                              msg.role === 'user'
-                                ? 'bg-blue-600/30 border border-blue-500/30 text-blue-100'
-                                : 'bg-white/10 border border-white/15 text-white/90'
+                            key={msg.id}
+                            className={`flex items-start gap-2.5 ${
+                              msg.role === 'user' ? 'justify-end' : 'justify-start'
                             }`}
                           >
-                            <p className="whitespace-pre-wrap">{msg.text}</p>
-                          </div>
-                          {msg.role === 'user' && (
-                            <div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-300 flex items-center justify-center shrink-0 mt-0.5">
-                              <User className="w-3 h-3" />
+                            {msg.role === 'assistant' && (
+                              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-400/40 to-fuchsia-400/40 border border-white/15 text-indigo-100 flex items-center justify-center shrink-0 mt-0.5">
+                                <Bot className="w-4 h-4" />
+                              </div>
+                            )}
+                            <div
+                              className={`px-4 py-2.5 rounded-2xl max-w-[80%] text-sm leading-relaxed ${
+                                msg.role === 'user'
+                                  ? 'glass text-white'
+                                  : 'bg-white/[0.06] border border-white/10 text-white/90'
+                              }`}
+                            >
+                              <p className="whitespace-pre-wrap">{msg.text}</p>
                             </div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                    {isProcessingChat && (
-                      <div className="flex items-center gap-2 text-xs text-white/50 py-1">
-                        <div className="w-2 h-2 rounded-full bg-pink-400 animate-ping" />
-                        <span>Madhurita is analyzing context and generating response...</span>
+                            {msg.role === 'user' && (
+                              <div className="w-7 h-7 rounded-full bg-white/10 border border-white/15 text-white/80 flex items-center justify-center shrink-0 mt-0.5">
+                                <User className="w-4 h-4" />
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {isProcessingChat && (
+                          <div className="flex items-center gap-2 text-sm text-white/50 py-1 pl-1">
+                            <span className="w-2 h-2 rounded-full bg-indigo-300 animate-ping" />
+                            <span>Madhurita is thinking…</span>
+                          </div>
+                        )}
+                        <div ref={chatBottomRef} />
                       </div>
-                    )}
-                    <div ref={chatBottomRef} />
-                  </div>
+                    </div>
+                  )}
 
-                  {/* Suggestion Chips */}
-                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px]">
-                    <button
-                      type="button"
-                      onClick={() => handleSendChatMessage(undefined, 'What did we talk about?')}
-                      className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-white/70 hover:text-white cursor-pointer shrink-0 transition-colors"
-                    >
-                      "What did we talk about?"
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSendChatMessage(undefined, 'What do you remember about me?')}
-                      className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-white/70 hover:text-white cursor-pointer shrink-0 transition-colors"
-                    >
-                      "What do you remember about me?"
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSendChatMessage(undefined, 'My project deadline is this Friday')}
-                      className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-white/70 hover:text-white cursor-pointer shrink-0 transition-colors"
-                    >
-                      "Project deadline is Friday"
-                    </button>
-                  </div>
+                  {/* Recall suggestion chips (only when in conversation view) */}
+                  {(chatMessages.length > 0 || isChatConsoleOpen) && (
+                    <div className="max-w-2xl mx-auto w-full flex items-center gap-2 overflow-x-auto pb-2 pt-1 custom-scrollbar text-[11px]">
+                      {[
+                        'What did we talk about?',
+                        'What do you remember about me?',
+                        'My project deadline is this Friday',
+                      ].map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => handleSendChatMessage(undefined, s)}
+                          className="px-3 py-1.5 rounded-full glass glass-hover text-white/70 hover:text-white cursor-pointer shrink-0"
+                        >
+                          {`"${s}"`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-                  {/* Input form */}
-                  <form onSubmit={(e) => handleSendChatMessage(e)} className="flex items-center gap-2">
-                    <input
-                      type="text"
+                  {/* Floating glass composer */}
+                  <div className="max-w-2xl mx-auto w-full mt-2">
+                    <Composer
                       value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      placeholder={`Message Madhurita as ${identity.name}...`}
-                      className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-pink-500/50"
+                      onChange={setChatInput}
+                      onSubmit={(e) => handleSendChatMessage(e)}
+                      onToggleVoice={handleToggleVoice}
+                      onToggleConsole={() => setIsChatConsoleOpen(!isChatConsoleOpen)}
+                      isProcessing={isProcessingChat}
+                      liveState={liveState}
+                      identityName={identity.name}
                     />
-                    <button
-                      type="submit"
-                      disabled={!chatInput.trim() || isProcessingChat}
-                      className="p-2 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white disabled:opacity-40 hover:shadow-lg hover:shadow-pink-500/20 cursor-pointer shrink-0"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                    </button>
-                  </form>
+                  </div>
                 </div>
-              )}
+
+                {/* Right voice panel */}
+                <div className="hidden lg:flex items-center pr-6 pl-2 shrink-0">
+                  {liveClientRef.current && (
+                    <VoiceCore
+                      state={liveState}
+                      onToggle={handleToggleVoice}
+                      streamer={liveClientRef.current.getStreamer()}
+                      player={liveClientRef.current.getPlayer()}
+                      activeIdentityName={identity.name}
+                      isOwner={identity.role === 'owner'}
+                    />
+                  )}
+                </div>
+              </main>
+
+              {/* Bottom status bar */}
+              <footer className="w-full px-6 py-2.5 flex items-center justify-between gap-3 border-t border-white/10">
+                <div className="text-[12px] text-white/50 truncate">
+                  {identity.role === 'owner' ? (
+                    <span className="text-amber-200/90 flex items-center gap-1.5 font-medium">
+                      <Shield className="w-3.5 h-3.5" /> Owner Mode • Authoritative access
+                    </span>
+                  ) : identity.role === 'user' ? (
+                    <span className="text-white/60">
+                      Personal Mode • Context isolated to{' '}
+                      <strong className="text-white/85 font-medium">{identity.name}</strong>
+                    </span>
+                  ) : (
+                    <span className="text-white/55">Guest Mode • Introduce yourself or switch identity</span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <Lock className="w-3.5 h-3.5 text-white/35" />
+                  <span className="flex items-center gap-1.5">
+                    <AudioLines
+                      className={`w-3.5 h-3.5 ${
+                        liveState === 'listening' || liveState === 'speaking'
+                          ? 'text-indigo-200'
+                          : 'text-white/35'
+                      }`}
+                    />
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        liveState === 'idle'
+                          ? 'bg-slate-400'
+                          : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]'
+                      }`}
+                    />
+                  </span>
+                </div>
+              </footer>
             </div>
           </div>
-
-          {/* Bottom Status & Info Bar */}
-          <footer className="w-full px-6 py-3 z-20 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-white/5 bg-[#030712]/40 backdrop-blur-xl">
-            <div className="flex items-center gap-2.5 text-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
-              <span className="text-white/60">Active Identity: <strong className="text-white font-medium">{identity.name}</strong> <span className="uppercase text-[10px] tracking-wider text-blue-300 font-semibold px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20">{identity.role}</span></span>
-            </div>
-
-            <div className="text-[11px] text-white/50 tracking-wider">
-              {identity.role === 'owner' ? (
-                <span className="text-amber-300 flex items-center gap-1.5 justify-center font-medium">
-                  <Shield className="w-3.5 h-3.5 text-amber-400" /> Authoritative Owner Access
-                </span>
-              ) : identity.role === 'user' ? (
-                <span className="text-purple-300">Memory & Context Isolated to {identity.name}</span>
-              ) : (
-                <span className="text-slate-400">Guest Mode • Introduce yourself or switch identity</span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-4 text-[10px] text-white/30 uppercase tracking-[0.2em]">
-              <span>Logic-Driven Intelligence</span>
-              <span className="hidden md:inline">•</span>
-              <span className="hidden md:inline text-emerald-400/70">Persistent Storage</span>
-            </div>
-          </footer>
-        </>
+        </div>
       )}
 
       {/* Lazy Loaded Modals wrapped in Suspense for minimum initial bundle size */}
