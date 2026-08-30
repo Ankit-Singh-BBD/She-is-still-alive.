@@ -105,9 +105,9 @@ export function AudioVisualizer({ state, streamer, player }: AudioVisualizerProp
   return (
     <canvas
       ref={canvasRef}
-      width={360}
-      height={360}
-      className="absolute inset-0 m-auto pointer-events-none w-full h-full max-w-[360px] max-h-[360px]"
+      width={300}
+      height={300}
+      className="absolute inset-0 m-auto pointer-events-none w-[150px] h-[150px]"
     />
   );
 }
