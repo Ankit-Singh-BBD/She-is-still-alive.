@@ -20,6 +20,7 @@ import { loopManager } from './server/loop-manager.js';
 import { proactiveEngine } from './server/proactive-engine.js';
 import { startEventCognitionDrain } from './server/event-cognition.js';
 import { eventBus, emitUserArrival, emitUserDeparture, emitEnvironmentChange } from './server/event-system.js';
+import { weatherService } from './server/weather-service.js';
 
 dotenv.config();
 
@@ -264,6 +265,115 @@ async function startServer() {
     const limit = parseInt(req.query.limit as string) || 50;
     const events = db.getRecentSystemEvents(limit);
     res.json({ success: true, events });
+  });
+
+  // Proactive Opportunities Endpoint: GET (Owner-only)
+  app.get('/api/proactive/opportunities', async (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Owner-only' });
+    }
+    const opportunities = await proactiveEngine.getOpportunities();
+    res.json({ success: true, opportunities });
+  });
+
+  // Cognitive Stats Endpoint: GET (Owner-only)
+  app.get('/api/cognitive/stats', (req, res) => {
+    const callerContext = getCallerContext(req);
+    if (callerContext.role !== 'owner') {
+      return res.status(403).json({ error: 'PERMISSION_DENIED: Owner-only' });
+    }
+    res.json({
+      success: true,
+      stats: {
+        learning: learningPipeline.getStats(),
+        proactiveLastTick: proactiveEngine.getLastTickAt(),
+        taskLastTick: taskExecutor.getLastEvaluation(),
+        loopLastTick: loopManager.getLastEvaluation(),
+        awarenessLastSnapshot: awarenessEngine.getLastSnapshot()?.generatedAt || null,
+      },
+    });
+  });
+
+  // Emotions Endpoint: GET - Current system mood/cognitive state
+  app.get('/api/emotions', async (req, res) => {
+    try {
+      const snapshot = awarenessEngine.snapshot();
+      const recentEvents = snapshot.recentEvents.unprocessed.slice(0, 10);
+      const unprocessedCount = snapshot.recentEvents.unprocessed.length;
+
+      // Calculate cognitive engagement based on recent activity
+      const tasksPending = snapshot.pendingAttention.pendingTasks.length;
+      const loopsOpen = snapshot.pendingAttention.openLoops.length;
+      const failedOps = snapshot.pendingAttention.failedOperations.length;
+
+      // Engagement: 0-100 based on pending work
+      const engagement = Math.min(100, (tasksPending * 10) + (loopsOpen * 15) + (unprocessedCount * 5));
+
+      // Focus: high when few things pending, low when overwhelmed
+      const totalPending = tasksPending + loopsOpen + failedOps;
+      const focus = totalPending === 0 ? 100 : Math.max(20, 100 - (totalPending * 8));
+
+      // Confidence: inverse of failed operations
+      const confidence = Math.max(30, 100 - (failedOps * 20));
+
+      res.json({
+        success: true,
+        emotions: {
+          engagement,
+          focus,
+          confidence,
+          state: engagement > 70 ? 'active' : engagement > 30 ? 'attentive' : 'calm',
+          recentActivity: recentEvents.map(e => e.eventType),
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // World State Endpoint: GET - Time of day + weather + season
+  app.get('/api/world-state', async (req, res) => {
+    try {
+      const now = new Date();
+      const istHour = parseInt(
+        now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false }),
+        10
+      );
+
+      // Time of day
+      let timeOfDay: 'morning' | 'afternoon' | 'evening' | 'night';
+      if (istHour >= 5 && istHour < 9) timeOfDay = 'morning';
+      else if (istHour >= 9 && istHour < 17) timeOfDay = 'afternoon';
+      else if (istHour >= 17 && istHour < 20) timeOfDay = 'evening';
+      else timeOfDay = 'night';
+
+      // Weather (cached for 30 min)
+      const weather = await weatherService.getWeather();
+      const weatherExpression = await weatherService.getWeatherExpression();
+      const season = weatherService.getSeason();
+
+      res.json({
+        success: true,
+        world: {
+          timeOfDay,
+          istHour,
+          season,
+          weather: weather ? {
+            temperature: weather.temperature,
+            feelsLike: weather.feelsLike,
+            condition: weather.condition,
+            description: weather.description,
+            humidity: weather.humidity,
+          } : null,
+          expression: weatherExpression,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // User Registration / Identification

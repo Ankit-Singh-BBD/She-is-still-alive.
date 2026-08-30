@@ -596,14 +596,14 @@
       "ownerId": "TEST_USER",
       "content": "Test user likes testing",
       "category": "fact",
-      "confidence": 0.9500000000000001,
+      "confidence": 1,
       "importance": 0.8,
-      "evidenceCount": 2,
+      "evidenceCount": 3,
       "novelty": 1,
       "createdAt": "2026-08-30T20:36:57.849Z",
       "createdAtIST": "31 August 2026, 02:06:57 am",
-      "updatedAt": "2026-08-30T20:37:23.300Z",
-      "updatedAtIST": "31 August 2026, 02:07:23 am"
+      "updatedAt": "2026-08-30T21:17:29.234Z",
+      "updatedAtIST": "31 August 2026, 02:47:29 am"
     }
   ],
   "conversations": [
@@ -4805,11 +4805,45 @@
       "referencedPeople": [],
       "importantEvents": [],
       "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788124649227_c222",
+      "speaker": "User",
+      "identityId": "UNKNOWN",
+      "role": "user",
+      "content": "Hello, this is a test message",
+      "timestamp": "2026-08-30T21:17:29.227Z",
+      "istDate": "31 August 2026",
+      "istTime": "02:47:29 am",
+      "timestampIST": "31 August 2026, 02:47:29 am",
+      "sessionId": "TEST_SESSION",
+      "turnOrder": 5,
+      "sessionDuration": "41 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788124649230_5fve",
+      "speaker": "Madhurita",
+      "identityId": "UNKNOWN",
+      "role": "assistant",
+      "content": "Unable to perform full semantic reasoning. Treating as general conversational input.",
+      "timestamp": "2026-08-30T21:17:29.230Z",
+      "istDate": "31 August 2026",
+      "istTime": "02:47:29 am",
+      "timestampIST": "31 August 2026, 02:47:29 am",
+      "sessionId": "TEST_SESSION",
+      "turnOrder": 6,
+      "sessionDuration": "41 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
     }
   ],
   "worldAwareness": {
-    "lastSystemStartup": "2026-08-30T20:42:37.536Z",
-    "lastSystemStartupIST": "31 August 2026, 02:12:37 am",
+    "lastSystemStartup": "2026-08-30T21:17:29.159Z",
+    "lastSystemStartupIST": "31 August 2026, 02:47:29 am",
     "recentVisitors": [
       {
         "identityId": "USER_006",
@@ -4835,9 +4869,9 @@
       {
         "identityId": "UNKNOWN",
         "name": "User",
-        "lastSeenISO": "2026-08-30T20:37:23.295Z",
-        "lastSeenIST": "31 August 2026, 02:07:23 am",
-        "sessionCount": 16
+        "lastSeenISO": "2026-08-30T21:17:29.230Z",
+        "lastSeenIST": "31 August 2026, 02:47:29 am",
+        "sessionCount": 18
       },
       {
         "identityId": "USER_001",
@@ -4856,6 +4890,15 @@
     ],
     "recentInteractions": [],
     "openLoops": [
+      {
+        "id": "LOOP_1788124649224_5rno",
+        "identityId": "TEST_USER",
+        "name": "Test loop",
+        "description": "This is a test open loop",
+        "createdAtIST": "31 August 2026, 02:47:29 am",
+        "createdAtISO": "2026-08-30T21:17:29.224Z",
+        "status": "open"
+      },
       {
         "id": "LOOP_1788122243286_15zr",
         "identityId": "TEST_USER",
@@ -5135,12 +5178,12 @@
       "userName": "User",
       "startedAt": "2026-08-30T20:36:57.838Z",
       "startedAtIST": "31 August 2026, 02:06:57 am",
-      "lastActiveAt": "2026-08-30T20:37:23.295Z",
-      "lastActiveAtIST": "31 August 2026, 02:07:23 am",
-      "durationMs": 25457,
-      "durationHuman": "< 1 min",
+      "lastActiveAt": "2026-08-30T21:17:29.230Z",
+      "lastActiveAtIST": "31 August 2026, 02:47:29 am",
+      "durationMs": 2431392,
+      "durationHuman": "41 min",
       "topicsDiscussed": [],
-      "turnCount": 4,
+      "turnCount": 6,
       "referencedEntities": [],
       "unresolvedTopics": []
     }
@@ -5166,11 +5209,11 @@
       "updatedAt": "2026-08-30T20:36:57.832Z",
       "dueAt": "2026-08-30T20:35:57.832Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-30T20:36:57.835Z",
-      "executionCount": 1,
+      "lastEvaluatedAt": "2026-08-30T21:07:37.640Z",
+      "executionCount": 2,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
-      "lastTriggeredAt": "2026-08-30T20:36:57.835Z"
+      "lastTriggeredAt": "2026-08-30T21:07:37.640Z"
     },
     {
       "id": "TASK_1788122243282_rp5k",
@@ -5181,11 +5224,26 @@
       "updatedAt": "2026-08-30T20:37:23.282Z",
       "dueAt": "2026-08-30T20:36:23.282Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-30T20:37:23.285Z",
+      "lastEvaluatedAt": "2026-08-30T21:07:37.644Z",
+      "executionCount": 2,
+      "lastExecutionResult": "pending",
+      "source": "user_explicit",
+      "lastTriggeredAt": "2026-08-30T21:07:37.644Z"
+    },
+    {
+      "id": "TASK_1788124649221_eq3l",
+      "identityId": "TEST_USER",
+      "title": "Test urgent task",
+      "status": "pending",
+      "createdAt": "2026-08-30T21:17:29.221Z",
+      "updatedAt": "2026-08-30T21:17:29.221Z",
+      "dueAt": "2026-08-30T21:16:29.221Z",
+      "priority": "high",
+      "lastEvaluatedAt": "2026-08-30T21:17:29.224Z",
       "executionCount": 1,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
-      "lastTriggeredAt": "2026-08-30T20:37:23.285Z"
+      "lastTriggeredAt": "2026-08-30T21:17:29.224Z"
     }
   ],
   "relationships": [],
@@ -5419,6 +5477,116 @@
         "port": 3000
       },
       "importance": 40,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788124057634_2_9omty",
+      "eventType": "task_due",
+      "timestamp": "2026-08-30T21:07:37.633Z",
+      "timestampIST": "31/8/2026, 02:37:37",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788122217832_7s04",
+        "taskTitle": "Test urgent task",
+        "dueAt": "2026-08-30T20:35:57.832Z",
+        "overdue": true
+      },
+      "importance": 95,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788124057641_3_05xm7",
+      "eventType": "task_due",
+      "timestamp": "2026-08-30T21:07:37.641Z",
+      "timestampIST": "31/8/2026, 02:37:37",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788122243282_rp5k",
+        "taskTitle": "Test urgent task",
+        "dueAt": "2026-08-30T20:36:23.282Z",
+        "overdue": true
+      },
+      "importance": 95,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788124649218_1_7mr7b",
+      "eventType": "user_arrival",
+      "timestamp": "2026-08-30T21:17:29.218Z",
+      "timestampIST": "31/8/2026, 02:47:29",
+      "identityId": "TEST_USER",
+      "payload": {
+        "name": "Test User",
+        "channel": "text",
+        "isReturningUser": false
+      },
+      "importance": 75,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788124649223_2_x17ct",
+      "eventType": "task_due",
+      "timestamp": "2026-08-30T21:17:29.223Z",
+      "timestampIST": "31/8/2026, 02:47:29",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788124649221_eq3l",
+        "taskTitle": "Test urgent task",
+        "dueAt": "2026-08-30T21:16:29.221Z",
+        "overdue": true
+      },
+      "importance": 95,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788124649226_3_soce0",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-30T21:17:29.226Z",
+      "timestampIST": "31/8/2026, 02:47:29",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788124649221_eq3l",
+        "previousState": "none",
+        "newState": "pending",
+        "taskTitle": "Test urgent task"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788124649229_4_pkou8",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-30T21:17:29.229Z",
+      "timestampIST": "31/8/2026, 02:47:29",
+      "identityId": "TEST_USER",
+      "payload": {
+        "loopId": "LOOP_1788124649224_5rno",
+        "previousState": "none",
+        "newState": "open",
+        "description": "Test loop"
+      },
+      "importance": 55,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788124649232_5_y9fd5",
+      "eventType": "user_arrival",
+      "timestamp": "2026-08-30T21:17:29.232Z",
+      "timestampIST": "31/8/2026, 02:47:29",
+      "identityId": "PERSIST_TEST",
+      "payload": {
+        "name": "Persist Test",
+        "channel": "text",
+        "isReturningUser": false
+      },
+      "importance": 75,
       "processed": false,
       "cognitionTriggered": false
     }

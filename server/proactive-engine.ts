@@ -155,9 +155,39 @@ class ProactiveReasoningEngine {
    * Used for events that warrant LLM reasoning.
    */
   async actOnOpportunity(opportunity: ProactiveOpportunity): Promise<{ acted: boolean; response: string }> {
-    // For now, just log the decision
     console.log(`[PROACTIVE-ENGINE] Opportunity: ${opportunity.trigger} (priority ${opportunity.priority}) → ${opportunity.decisionRequired}`);
+
+    // Only act on opportunities that require speech or follow-up
+    if (opportunity.decisionRequired === 'silent' || opportunity.decisionRequired === 'wait') {
+      return { acted: false, response: '' };
+    }
+
+    // For task_due with high priority, check if owner is present
+    if (opportunity.trigger === 'task_due' && opportunity.priority >= 70) {
+      const owner = db.getOwner();
+      if (owner) {
+        const activeSessions = db.getActivePresenceSessions(owner.id);
+        if (activeSessions.length === 0) {
+          // Owner not present — store for later delivery
+          console.log(`[PROACTIVE-ENGINE] Task due but owner not present: ${opportunity.context.taskId}`);
+          return { acted: false, response: '' };
+        }
+        // Owner is present — would trigger cognition here
+        // For now, log it
+        console.log(`[PROACTIVE-ENGINE] Task due and owner present: ${opportunity.context.taskId}`);
+        return { acted: true, response: '' };
+      }
+    }
+
     return { acted: false, response: '' };
+  }
+
+  /**
+   * Get all current opportunities without acting.
+   */
+  async getOpportunities(): Promise<ProactiveOpportunity[]> {
+    const result = await this.tick();
+    return result.opportunities;
   }
 
   getLastTickAt(): string | null {

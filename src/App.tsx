@@ -9,6 +9,9 @@ import { ToolActionToast } from './components/ToolActionToast.js';
 import { Sidebar, NavKey } from './components/Sidebar.js';
 import { GreetingHero } from './components/GreetingHero.js';
 import { Composer } from './components/Composer.js';
+import { BackgroundAtmosphere } from './components/BackgroundAtmosphere.js';
+import { MadhuritaOrb } from './components/MadhuritaOrb.js';
+import { UIStateProvider } from './hooks/useUIState.js';
 import {
   Shield,
   AlertTriangle,
@@ -573,9 +576,13 @@ export default function App() {
   };
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden text-white font-sans select-none">
-      {/* Intro Experience Splash */}
-      <AnimatePresence>
+    <UIStateProvider authToken={authToken} userId={identity.id}>
+      <div className="relative w-screen h-screen overflow-hidden text-white font-sans select-none">
+        {/* Immersive atmospheric background - adapts to time + weather */}
+        <BackgroundAtmosphere />
+
+        {/* Intro Experience Splash */}
+        <AnimatePresence>
         {!hasEnteredExperience && (
           <ExperienceIntro
             onEnter={handleEnterExperience}
@@ -841,8 +848,9 @@ export default function App() {
         )}
       </Suspense>
 
-      {/* Tool Action Notifications */}
-      <ToolActionToast actions={toolActions} onDismiss={handleDismissToast} />
-    </div>
+        {/* Tool Action Notifications */}
+        <ToolActionToast actions={toolActions} onDismiss={handleDismissToast} />
+      </div>
+    </UIStateProvider>
   );
 }
