@@ -4726,8 +4726,8 @@
     }
   ],
   "worldAwareness": {
-    "lastSystemStartup": "2026-08-30T10:05:06.558Z",
-    "lastSystemStartupIST": "30 August 2026, 03:35:06 pm",
+    "lastSystemStartup": "2026-08-30T19:46:45.204Z",
+    "lastSystemStartupIST": "31 August 2026, 01:16:45 am",
     "recentVisitors": [
       {
         "identityId": "USER_006",
@@ -5044,5 +5044,21 @@
   "relationships": [],
   "proactiveEvents": [],
   "requests": [],
-  "commitments": []
+  "commitments": [],
+  "madhuritaIdentity": {
+    "identityId": "MADHURITA_CORE",
+    "name": "Madhurita",
+    "gender": "female",
+    "creatorId": "OWNER_001",
+    "creatorName": "Ankit Singh",
+    "voiceIdentity": "Callirrhoe",
+    "systemVersion": "1.0.0",
+    "createdAt": "2026-08-30T19:46:45.204Z",
+    "traits": {
+      "loyal_to_creator": true,
+      "learns_continuously": true,
+      "adapts_naturally": true,
+      "one_consistent_entity": true
+    }
+  }
 }

@@ -46,6 +46,31 @@ export const DEFAULT_PERSONA_VOICE_CONFIG: PersonaAndVoiceConfig = {
   conversationalStyle: 'interactive_engaging',
 };
 
+// ===================================================================
+// MADHURITA CORE IDENTITY (Requirement #1)
+// ===================================================================
+// Madhurita has ONE persistent identity independent of user profiles.
+// She is female. Ankit is her creator (immutable).
+// User profiles are people interacting with her, not defining her identity.
+export interface MadhuritaIdentity {
+  identityId: 'MADHURITA_CORE';
+  name: 'Madhurita';
+  gender: 'female';
+  creatorId: 'OWNER_001'; // immutable reference to Ankit
+  creatorName: string; // Set from owner profile
+  voiceIdentity: FemaleVoiceName;
+  systemVersion: string;
+  createdAt: string;
+  traits: {
+    loyal_to_creator: true;
+    learns_continuously: true;
+    adapts_naturally: true;
+    one_consistent_entity: true;
+  };
+}
+
+export const MADHURITA_SYSTEM_VERSION = '1.0.0';
+
 export interface OwnerProfile {
   id: string;
   name: string;
@@ -253,6 +278,7 @@ export interface ExplicitCommitment {
 }
 
 export interface DatabaseSchema {
+  madhuritaIdentity?: MadhuritaIdentity; // Madhurita's core identity (requirement #1)
   owner: OwnerProfile | null;
   users: UserProfile[];
   memories: MemoryRecord[];
@@ -386,6 +412,32 @@ class DatabaseEngine {
       this.data.worldAwareness.lastSystemStartupIST = nowIst.istFull;
     }
 
+    // ===================================================================
+    // MADHURITA CORE IDENTITY INITIALIZATION (Requirement #1)
+    // ===================================================================
+    // Madhurita has ONE persistent identity independent of user profiles.
+    // She is female. Ankit is her creator (immutable).
+    if (!this.data.madhuritaIdentity) {
+      this.data.madhuritaIdentity = {
+        identityId: 'MADHURITA_CORE',
+        name: 'Madhurita',
+        gender: 'female',
+        creatorId: 'OWNER_001',
+        creatorName: 'Ankit', // Will be updated from owner profile
+        voiceIdentity: 'Callirrhoe',
+        systemVersion: MADHURITA_SYSTEM_VERSION,
+        createdAt: nowIst.iso,
+        traits: {
+          loyal_to_creator: true,
+          learns_continuously: true,
+          adapts_naturally: true,
+          one_consistent_entity: true,
+        },
+      };
+      console.log('[MADHURITA IDENTITY] Core identity created');
+      this.save();
+    }
+
     // Authoritative system configuration: Ankit is the Creator and Owner of Madhurita
     if (!this.data.owner) {
       this.data.owner = {
@@ -421,6 +473,12 @@ class DatabaseEngine {
       }
     }
 
+    // Sync Madhurita identity creator name from owner profile
+    if (this.data.madhuritaIdentity && this.data.owner && this.data.madhuritaIdentity.creatorName !== this.data.owner.name) {
+      this.data.madhuritaIdentity.creatorName = this.data.owner.name;
+      this.save();
+    }
+
     this.isLoaded = true;
     console.log(`[DB AUTHORITATIVE INSTANCE] Initialized Database at absolute path: ${path.resolve(DB_FILE)}`);
   }
@@ -453,6 +511,54 @@ class DatabaseEngine {
       console.error('DATABASE_WRITE_FAILED', err);
       return false;
     }
+  }
+
+  // ===================================================================
+  // MADHURITA CORE IDENTITY OPERATIONS (Requirement #1)
+  // ===================================================================
+  /**
+   * Get Madhurita's core identity.
+   * This is the persistent identity independent of user profiles.
+   */
+  public getMadhuritaIdentity(): MadhuritaIdentity | null {
+    return this.data.madhuritaIdentity || null;
+  }
+
+  /**
+   * Verify Madhurita's identity exists and is properly configured.
+   * Called on system startup to ensure identity integrity.
+   */
+  public verifyMadhuritaIdentity(): { valid: boolean; issues: string[] } {
+    const issues: string[] = [];
+
+    if (!this.data.madhuritaIdentity) {
+      issues.push('Madhurita identity does not exist in database');
+      return { valid: false, issues };
+    }
+
+    const identity = this.data.madhuritaIdentity;
+
+    if (identity.identityId !== 'MADHURITA_CORE') {
+      issues.push(`Invalid identity ID: ${identity.identityId} (expected MADHURITA_CORE)`);
+    }
+
+    if (identity.name !== 'Madhurita') {
+      issues.push(`Invalid name: ${identity.name} (expected Madhurita)`);
+    }
+
+    if (identity.gender !== 'female') {
+      issues.push(`Invalid gender: ${identity.gender} (expected female)`);
+    }
+
+    if (identity.creatorId !== 'OWNER_001') {
+      issues.push(`Invalid creator ID: ${identity.creatorId} (expected OWNER_001)`);
+    }
+
+    if (!VALID_FEMALE_VOICES.includes(identity.voiceIdentity)) {
+      issues.push(`Invalid voice identity: ${identity.voiceIdentity} (must be female voice)`);
+    }
+
+    return { valid: issues.length === 0, issues };
   }
 
   // --- Owner Operations ---

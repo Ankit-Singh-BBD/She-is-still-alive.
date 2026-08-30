@@ -1304,6 +1304,24 @@ async function startServer() {
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`[STARTUP VERIFICATION] Authoritative Database absolute path: ${db.getDatabaseFilePath()}`);
+
+    // ===================================================================
+    // MADHURITA IDENTITY VERIFICATION (Requirement #1)
+    // ===================================================================
+    // Verify Madhurita's core identity exists and is properly configured
+    const identityVerification = db.verifyMadhuritaIdentity();
+    if (!identityVerification.valid) {
+      console.error('[MADHURITA IDENTITY] VERIFICATION FAILED:');
+      identityVerification.issues.forEach((issue) => console.error(`  - ${issue}`));
+      console.error('[MADHURITA IDENTITY] System may not function correctly.');
+    } else {
+      const identity = db.getMadhuritaIdentity();
+      console.log(`[MADHURITA IDENTITY] ✓ Verified: ${identity?.name} (${identity?.gender})`);
+      console.log(`[MADHURITA IDENTITY] ✓ Creator: ${identity?.creatorName} (${identity?.creatorId})`);
+      console.log(`[MADHURITA IDENTITY] ✓ Voice: ${identity?.voiceIdentity}`);
+      console.log(`[MADHURITA IDENTITY] ✓ Version: ${identity?.systemVersion}`);
+    }
+
     console.log(`Madhurita AI Assistant running on http://0.0.0.0:${PORT}`);
   });
 }
