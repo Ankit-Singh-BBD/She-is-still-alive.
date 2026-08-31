@@ -14,6 +14,7 @@ import {
   UserCircle2,
   Settings,
   AudioLines,
+  Trash2,
   Sparkles,
   Mic,
   ChevronRight,
@@ -36,6 +37,7 @@ interface SidebarProps {
 const ICONS: Record<StageKey, typeof Home> = {
   home: Home,
   memory: Brain,
+  bin: Trash2,
   search: Search,
   tasks: CheckSquare,
   calendar: CalendarDays,

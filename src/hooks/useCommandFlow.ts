@@ -122,6 +122,17 @@ const NON_TRANSIENT: ReadonlySet<string> = new Set([
   'continue',
   'repeat',
   'help',
+  // Destructive / sensitive commands also must not auto-return —
+  // the user is looking at a confirmation surface, not a panel.
+  'delete-memory',
+  'delete-conversation',
+  'delete-all-memories',
+  'delete-all-conversations',
+  'show-bin',
+  'restore-from-bin',
+  'permanently-delete',
+  'confirm-destructive',
+  'cancel-destructive',
 ]);
 
 export function useCommandFlow(

@@ -183,16 +183,30 @@ Rules:
       for (const str of analysis.strengthenedPatterns.slice(0, 3)) {
         const existing = db.getPatternsForIdentity(identityId).find(p => p.id === str.patternId);
         if (existing) {
-          db.addOrUpdatePattern(identityId, existing.description, existing.category, Math.min(0.99, existing.confidence + 0.05));
+          db.addOrUpdatePattern(
+            identityId,
+            existing.description,
+            existing.category,
+            Math.min(0.99, existing.confidence + 0.05),
+            { sourceSessionIds: [sessionId], extractedBy: 'learning-pipeline.strengthen' },
+          );
         }
       }
     }
 
-    // New patterns
+    // New patterns — record provenance at write time so the deletion
+    // system can later determine whether the pattern still has
+    // surviving sources.
     if (Array.isArray(analysis.newPatterns)) {
       for (const pat of analysis.newPatterns.slice(0, 3)) {
         if (pat.description && pat.description.length > 5) {
-          db.addOrUpdatePattern(identityId, pat.description, (pat.category as any) || 'preference', 0.75);
+          db.addOrUpdatePattern(
+            identityId,
+            pat.description,
+            (pat.category as any) || 'preference',
+            0.75,
+            { sourceSessionIds: [sessionId], extractedBy: 'learning-pipeline.new' },
+          );
         }
       }
     }

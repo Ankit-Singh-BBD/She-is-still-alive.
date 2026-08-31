@@ -16,6 +16,7 @@ import { CalendarPanel } from './CalendarPanel.js';
 import { DevicesPanel } from './DevicesPanel.js';
 import { IdentityPanel } from './IdentityPanel.js';
 import { SettingsPanel } from './SettingsPanel.js';
+import { BinPanel } from './BinPanel.js';
 
 interface ContextPanelProps {
   identity: any;
@@ -24,6 +25,9 @@ interface ContextPanelProps {
   onRegisterUser: (name: string) => void;
   onDeleteUser?: (id: string) => void;
   onOpenOnboarding?: () => void;
+  /** When the memory panel's delete affordance is clicked, the host
+   * drives the full TARGET → SCOPE → SAFETY → CONFIRMATION → BIN flow. */
+  onRequestDeleteMemory?: (memoryId: string, preview: string) => void;
 }
 
 export function ContextPanel({
@@ -33,6 +37,7 @@ export function ContextPanel({
   onRegisterUser,
   onDeleteUser,
   onOpenOnboarding,
+  onRequestDeleteMemory,
 }: ContextPanelProps) {
   const { activePanel, activeStage, setStage } = useStage();
   const { state } = useUIState();
@@ -62,7 +67,14 @@ export function ContextPanel({
           onClose={handleClose}
           title={TITLE[activePanel]}
         >
-          {activePanel === 'memory' && <MemoryPanel identity={identity} authToken={authToken} />}
+          {activePanel === 'memory' && (
+            <MemoryPanel
+              identity={identity}
+              authToken={authToken}
+              onRequestDelete={onRequestDeleteMemory}
+            />
+          )}
+          {activePanel === 'bin' && <BinPanel identity={identity} authToken={authToken} />}
           {activePanel === 'search' && <SearchPanel identity={identity} authToken={authToken} />}
           {activePanel === 'tasks' && <TasksPanel identity={identity} authToken={authToken} />}
           {activePanel === 'calendar' && <CalendarPanel identity={identity} authToken={authToken} />}
@@ -82,6 +94,7 @@ export function ContextPanel({
 
 const TITLE: Record<string, string> = {
   memory: 'Memory',
+  bin: 'Bin',
   search: 'Search',
   tasks: 'Tasks',
   calendar: 'Calendar',

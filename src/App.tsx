@@ -12,7 +12,10 @@ import { CommandFlowBanner } from './components/state/CommandFlowBanner.js';
 import { UIStateProvider } from './hooks/useUIState.js';
 import { useStage, StageKey } from './hooks/useStage.js';
 import { useCommandFlow } from './hooks/useCommandFlow.js';
-import { routeVoiceCommand, stageForCommand, VoiceCommand } from './utils/voiceCommandRouter.js';
+import { useBin, DeletionPreview, DeletionScope } from './hooks/useBin.js';
+import { routeVoiceCommand, stageForCommand, VoiceCommand, DeletionScope as RouterDeletionScope } from './utils/voiceCommandRouter.js';
+import { ConfirmDeletionSheet } from './components/sheets/ConfirmDeletionSheet.js';
+import { GlassSheet } from './components/sheets/GlassSheet.js';
 import { AlertTriangle, X } from 'lucide-react';
 
 // Lazy-loaded Modal Components for Code-Splitting & Minimal Initial Bundle Size
@@ -24,6 +27,11 @@ const OwnerAuthModal = lazy(() =>
 );
 
 import { sanitizeAuthToken } from './utils/auth.js';
+
+function truncateForLabel(s: string, n = 60): string {
+  const cleaned = (s || '').replace(/\s+/g, ' ').trim();
+  return cleaned.length > n ? cleaned.slice(0, n - 1) + '…' : cleaned;
+}
 
 interface ChatMessage {
   id: string;
@@ -250,6 +258,236 @@ export default function App() {
     }
   }, [chatSessionId]);
 
+  // ----- DELETION FLOW STATE -----
+  // The Bin is the single source of truth for soft-deletes. useBin
+  // exposes the full TARGET → SCOPE → SAFETY → CONFIRMATION → BIN
+  // lifecycle.
+  const bin = useBin(identity, authToken);
+  const [pendingDeletion, setPendingDeletion] = useState<{
+    scope: DeletionScope;
+    target?: string;
+    targetQuery?: string;
+    preview: DeletionPreview;
+    sourceLabel: string;
+  } | null>(null);
+  const [pendingPermanentDeletion, setPendingPermanentDeletion] = useState<{
+    binId: string;
+    preview: DeletionPreview;
+    sourceLabel: string;
+  } | null>(null);
+  const [isDeletionSubmitting, setIsDeletionSubmitting] = useState(false);
+  const [ambiguousCandidates, setAmbiguousCandidates] = useState<{
+    scope: DeletionScope | 'permanent_delete';
+    candidates: { id: string; preview: string; type: string; meta?: string }[];
+    sourceLabel: string;
+  } | null>(null);
+
+  // Driver for the deletion-safety lifecycle. Voice and manual input
+  // both call this. It runs /api/bin/preview, then either:
+  //   - shows a pending confirmation surface (return preview to UI)
+  //   - shows an ambiguous-chooser surface (multiple matches)
+  //   - executes the move (when called with confirmed=true)
+  const beginDeletion = useCallback(
+    async (args: {
+      scope: DeletionScope;
+      target?: string;
+      targetQuery?: string;
+      sourceLabel: string;
+    }) => {
+      const result = await bin.requestDelete({
+        scope: args.scope,
+        target: args.target,
+        targetQuery: args.targetQuery,
+        sourceCommand: args.sourceLabel,
+      });
+      if (result.state === 'pending') {
+        setPendingDeletion({
+          scope: args.scope,
+          target: args.target,
+          targetQuery: args.targetQuery,
+          preview: result.preview,
+          sourceLabel: args.sourceLabel,
+        });
+        setPendingPermanentDeletion(null);
+        setAmbiguousCandidates(null);
+        return result;
+      }
+      if (result.state === 'ambiguous') {
+        setAmbiguousCandidates({
+          scope: args.scope,
+          candidates: result.preview.candidates || [],
+          sourceLabel: args.sourceLabel,
+        });
+        setPendingDeletion(null);
+        setPendingPermanentDeletion(null);
+        return result;
+      }
+      if (result.state === 'error') {
+        setErrorMessage(result.error || 'Could not start deletion');
+        return result;
+      }
+      return result;
+    },
+    [bin],
+  );
+
+  // Permanent-delete voice/manual routing. Never guesses. Resolves
+  // exact Bin item against authoritative server state.
+  const beginPermanentDeletion = useCallback(
+    async (args: { query?: string; binId?: string; sourceLabel: string }) => {
+      try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        const cleanToken = sanitizeAuthToken(authToken);
+        if (cleanToken) headers['Authorization'] = `Bearer ${cleanToken}`;
+        if (identity.id && identity.id !== 'UNKNOWN') headers['X-User-Id'] = identity.id;
+
+        const res = await fetch('/api/bin/permanent-preview', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            identityId: identity.id,
+            query: args.query,
+            binId: args.binId,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          setErrorMessage(err.error || 'Permanent delete preview failed');
+          return;
+        }
+        const data = await res.json();
+        if (data.ambiguous && data.candidates?.length > 1) {
+          setAmbiguousCandidates({
+            scope: 'permanent_delete',
+            candidates: data.candidates,
+            sourceLabel: args.sourceLabel,
+          });
+          setPendingDeletion(null);
+          setPendingPermanentDeletion(null);
+          return;
+        }
+        if (data.resolved && data.candidates?.length > 0) {
+          const targetBinId = data.candidates[0].id;
+          setPendingPermanentDeletion({
+            binId: targetBinId,
+            preview: {
+              resolved: true,
+              candidates: data.candidates,
+              affected: { memories: 0, turns: 0, sessions: 0, tasks: 0, patterns: 0, derivedMemories: 0 },
+              reversibility: 'permanent',
+              safety: 'requires_confirm',
+              message: data.message || 'This Bin item will be permanently deleted. This is irreversible.',
+            },
+            sourceLabel: args.sourceLabel,
+          });
+          setPendingDeletion(null);
+          setAmbiguousCandidates(null);
+          return;
+        }
+        // Not found or blocked
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `ast_perm_notfound_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            role: 'assistant',
+            text: data.message || 'No matching item found in the Bin to permanently delete.',
+            timestamp: Date.now(),
+          },
+        ]);
+      } catch (err: any) {
+        setErrorMessage(err?.message || 'Permanent delete failed');
+      }
+    },
+    [authToken, identity.id],
+  );
+
+  const confirmPermanentDeletion = useCallback(async () => {
+    if (!pendingPermanentDeletion) return;
+    setIsDeletionSubmitting(true);
+    const result = await bin.permanentDelete(pendingPermanentDeletion.binId, { confirmed: true });
+    setIsDeletionSubmitting(false);
+    if (result.success) {
+      setPendingPermanentDeletion(null);
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `ast_perm_done_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          role: 'assistant',
+          text: 'Item has been permanently deleted from the Bin.',
+          timestamp: Date.now(),
+        },
+      ]);
+      fetchRuntimeState();
+      loadHistory();
+      bin.refetch();
+    } else {
+      setErrorMessage(result.error || 'Permanent delete failed');
+    }
+  }, [pendingPermanentDeletion, bin, fetchRuntimeState, loadHistory]);
+
+  const confirmDeletion = useCallback(async () => {
+    if (pendingPermanentDeletion) {
+      return confirmPermanentDeletion();
+    }
+    if (!pendingDeletion) return;
+    setIsDeletionSubmitting(true);
+    const result = await bin.requestDelete({
+      scope: pendingDeletion.scope,
+      target: pendingDeletion.target,
+      targetQuery: pendingDeletion.targetQuery,
+      confirmed: true,
+      sourceCommand: pendingDeletion.sourceLabel,
+    });
+    setIsDeletionSubmitting(false);
+    if (result.state === 'done') {
+      setPendingDeletion(null);
+      // Surface a success message and refresh the world.
+      const removed = (result.result as any)?.removedTurns
+        || (result.result as any)?.removedCount
+        || (result.result as any)?.binIds?.length
+        || 0;
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `ast_del_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          role: 'assistant',
+          text:
+            removed > 0
+              ? `Moved to the Bin. You can restore from there.`
+              : `Moved to the Bin.`,
+          timestamp: Date.now(),
+        },
+      ]);
+      fetchRuntimeState();
+      loadHistory();
+    } else if (result.state === 'error') {
+      setErrorMessage(result.error || 'Move to bin failed');
+    }
+  }, [pendingDeletion, pendingPermanentDeletion, confirmPermanentDeletion, bin, fetchRuntimeState, loadHistory]);
+
+  const cancelDeletion = useCallback(() => {
+    setPendingDeletion(null);
+    setPendingPermanentDeletion(null);
+    setAmbiguousCandidates(null);
+  }, []);
+
+  // Refs to the deletion-flow handlers so the LiveClient callbacks
+  // (which are wired inside a useEffect) always see the latest
+  // versions of these stateful callbacks. The refs are updated
+  // synchronously on every render.
+  const beginDeletionRef = useRef(beginDeletion);
+  beginDeletionRef.current = beginDeletion;
+  const beginPermanentDeletionRef = useRef(beginPermanentDeletion);
+  beginPermanentDeletionRef.current = beginPermanentDeletion;
+  const confirmDeletionRef = useRef(confirmDeletion);
+  confirmDeletionRef.current = confirmDeletion;
+  const cancelDeletionRef = useRef(cancelDeletion);
+  cancelDeletionRef.current = cancelDeletion;
+  const pendingDeletionRef = useRef(pendingDeletion);
+  pendingDeletionRef.current = pendingDeletion;
+  const pendingPermanentDeletionRef = useRef(pendingPermanentDeletion);
+  pendingPermanentDeletionRef.current = pendingPermanentDeletion;
+
   // Initialize LiveClient
   useEffect(() => {
     const client = new LiveClient({
@@ -331,18 +569,20 @@ export default function App() {
                 '• "What\'s the weather?", "Summarize my day"\n' +
                 '• "Add a task to call mom"\n' +
                 '• "Search my past", "What did we talk about?"\n' +
-                '• "Stop", "Continue", "Repeat", "Go back", "Home"',
+                '• "Stop", "Continue", "Repeat", "Go back", "Home"\n' +
+                '• "Delete my last memory" (with confirmation)\n' +
+                '• "Show the Bin", "Restore from the Bin"',
               timestamp: Date.now(),
             },
           ]);
           return;
         }
 
-        // Submit to command flow so voice + manual trigger the SAME
-        // UI lifecycle. We use the ref so the closure always sees the
-        // latest commandFlow (no stale state).
+        // Submission to the flow happens before any destructive
+        // action so the voice command lifecycle is observed.
         const flowCmd = commandFlowRef.current.submit(transcript, activeStage);
-        // Show the user message in the conversation stream
+
+        // Surface the user message in the conversation stream
         setChatMessages((prev) => [
           ...prev,
           {
@@ -352,6 +592,58 @@ export default function App() {
             timestamp: Date.now(),
           },
         ]);
+
+        // ---- DESTRUCTIVE COMMANDS (delete / restore / permanently) ----
+        // These never go through /api/chat. They run the full
+        // TARGET → SCOPE → SAFETY → CONFIRMATION → BIN flow.
+        if (flowCmd.kind === 'confirm-destructive') {
+          if (pendingDeletionRef.current || pendingPermanentDeletionRef.current) {
+            confirmDeletionRef.current?.();
+            commandFlowRef.current.complete();
+            return;
+          }
+          commandFlowRef.current.complete();
+          return;
+        }
+        if (flowCmd.kind === 'cancel-destructive') {
+          cancelDeletionRef.current?.();
+          commandFlowRef.current.complete();
+          return;
+        }
+        if (flowCmd.kind === 'permanently-delete') {
+          beginPermanentDeletionRef.current({
+            query: flowCmd.targetQuery || transcript,
+            sourceLabel: `voice: ${transcript}`,
+          });
+          commandFlowRef.current.complete();
+          return;
+        }
+        if (
+          flowCmd.kind === 'delete-memory' ||
+          flowCmd.kind === 'delete-conversation' ||
+          flowCmd.kind === 'delete-all-memories' ||
+          flowCmd.kind === 'delete-all-conversations' ||
+          flowCmd.kind === 'delete-task' ||
+          flowCmd.kind === 'delete-all-tasks' ||
+          flowCmd.kind === 'delete-pattern' ||
+          flowCmd.kind === 'delete-all-patterns'
+        ) {
+          if (!flowCmd.deletionScope) {
+            commandFlowRef.current.complete();
+            return;
+          }
+          // Use a context-aware target if available: the last
+          // visible memory/conversation in the active panel. For
+          // "this" / "that" references, we send the transcript as
+          // targetQuery so the server can do scope resolution.
+          beginDeletionRef.current({
+            scope: flowCmd.deletionScope as DeletionScope,
+            targetQuery: flowCmd.targetQuery,
+            sourceLabel: `voice: ${transcript}`,
+          });
+          commandFlowRef.current.complete();
+          return;
+        }
 
         if (PURE_NAV.has(flowCmd.kind)) {
           // "go back" needs the actual previous stage which the
@@ -623,7 +915,9 @@ export default function App() {
         '• "What\'s the weather?", "Summarize my day"\n' +
         '• "Add a task to call mom"\n' +
         '• "Search my past", "What did we talk about?"\n' +
-        '• "Stop", "Continue", "Repeat", "Go back", "Home"';
+        '• "Stop", "Continue", "Repeat", "Go back", "Home"\n' +
+        '• "Delete my last memory" (with confirmation)\n' +
+        '• "Show the Bin", "Restore from the Bin"';
       setChatMessages((prev) => [
         ...prev,
         { id: `usr_${Date.now()}`, role: 'user', text: textToSend, timestamp: Date.now() },
@@ -645,6 +939,52 @@ export default function App() {
       timestamp: Date.now(),
     };
     setChatMessages((prev) => [...prev, userMsg]);
+
+    // ---- DESTRUCTIVE COMMANDS (delete / restore / permanently) ----
+    // These never go through /api/chat. They run the full
+    // TARGET → SCOPE → SAFETY → CONFIRMATION → BIN flow.
+    if (cmd.kind === 'confirm-destructive') {
+      if (pendingDeletion || pendingPermanentDeletion) {
+        await confirmDeletion();
+      }
+      commandFlow.complete();
+      return;
+    }
+    if (cmd.kind === 'cancel-destructive') {
+      cancelDeletion();
+      commandFlow.complete();
+      return;
+    }
+    if (cmd.kind === 'permanently-delete') {
+      await beginPermanentDeletion({
+        query: cmd.targetQuery || textToSend,
+        sourceLabel: `text: ${textToSend}`,
+      });
+      commandFlow.complete();
+      return;
+    }
+    if (
+      cmd.kind === 'delete-memory' ||
+      cmd.kind === 'delete-conversation' ||
+      cmd.kind === 'delete-all-memories' ||
+      cmd.kind === 'delete-all-conversations' ||
+      cmd.kind === 'delete-task' ||
+      cmd.kind === 'delete-all-tasks' ||
+      cmd.kind === 'delete-pattern' ||
+      cmd.kind === 'delete-all-patterns'
+    ) {
+      if (!cmd.deletionScope) {
+        commandFlow.complete();
+        return;
+      }
+      await beginDeletion({
+        scope: cmd.deletionScope as DeletionScope,
+        targetQuery: cmd.targetQuery,
+        sourceLabel: `text: ${textToSend}`,
+      });
+      commandFlow.complete();
+      return;
+    }
 
     // For pure navigation commands (e.g. "open my tasks"), the panel
     // IS the action — no chat needed. The destination panel is the
@@ -723,7 +1063,74 @@ export default function App() {
     } finally {
       setIsProcessingChat(false);
     }
-  }, [authToken, identity.id, isProcessingChat, chatSessionId, fetchRuntimeState, loadHistory, commandFlow, activeStage, handleStopVoice]);
+  }, [authToken, identity.id, isProcessingChat, chatSessionId, fetchRuntimeState, loadHistory, commandFlow, activeStage, handleStopVoice, beginDeletion, beginPermanentDeletion, confirmDeletion, cancelDeletion, pendingDeletion, pendingPermanentDeletion, previousStage, setStage]);
+
+  // === AmbiguousCandidateSheet: shown when the server cannot
+  // uniquely resolve a single-target delete (e.g. "delete my
+  // project memory" when 3 memories match). ===
+  function AmbiguousCandidateSheet({
+    scope,
+    candidates,
+    sourceLabel,
+    onPick,
+    onCancel,
+  }: {
+    scope: DeletionScope | 'permanent_delete';
+    candidates: { id: string; preview: string; type: string; meta?: string }[];
+    sourceLabel: string;
+    onPick: (candidate: { id: string; preview: string; type: string; meta?: string }) => void;
+    onCancel: () => void;
+  }) {
+    const isPermanent = scope === 'permanent_delete';
+    return (
+      <GlassSheet
+        isOpen
+        onClose={onCancel}
+        title={isPermanent ? 'Which item to delete forever?' : 'Which one did you mean?'}
+        subtitle={`${candidates.length} matches for ${String(scope).replace(/_/g, ' ')}`}
+        icon={<AlertTriangle className="w-4 h-4" />}
+      >
+        <div className="flex flex-col gap-3">
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.08] px-4 py-3 text-[12.5px] text-amber-100/90 leading-relaxed">
+            {isPermanent
+              ? `I found ${candidates.length} items in the Bin. Pick the exact item you want to permanently delete.`
+              : `I found ${candidates.length} matches. Pick the exact ${scope === 'single_memory' ? 'memory' : scope === 'single_task' ? 'task' : scope === 'single_pattern' ? 'pattern' : 'conversation'} you want to move to the Bin.`}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {candidates.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => onPick(c)}
+                className="text-left rounded-xl border border-white/12 bg-white/[0.05] hover:bg-white/[0.12] p-3 cursor-pointer press-scale transition-colors"
+              >
+                <div className="text-[12.5px] text-white/90 leading-relaxed break-words">
+                  {c.preview}
+                </div>
+                {c.meta && (
+                  <div className="mt-1 text-[10.5px] text-white/45">{c.meta}</div>
+                )}
+              </button>
+            ))}
+          </div>
+          {sourceLabel && (
+            <p className="text-[10.5px] text-white/40">
+              Request source: <span className="text-white/60">{sourceLabel}</span>
+            </p>
+          )}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 rounded-xl text-[12.5px] font-medium bg-white/[0.06] hover:bg-white/[0.12] border border-white/12 text-white/80 hover:text-white flex items-center gap-1.5 cursor-pointer press-scale transition-colors"
+            >
+              <X className="w-3.5 h-3.5" /> Cancel
+            </button>
+          </div>
+        </div>
+      </GlassSheet>
+    );
+  }
 
   return (
     <UIStateProvider authToken={authToken} userId={identity.id}>
@@ -821,6 +1228,13 @@ export default function App() {
               onRegisterUser={handleRegisterUser}
               onDeleteUser={identity.role === 'owner' ? handleDeleteUser : undefined}
               onOpenOnboarding={() => setIsOwnerAuthOpen(true)}
+              onRequestDeleteMemory={(memoryId, preview) =>
+                beginDeletion({
+                  scope: 'single_memory',
+                  target: memoryId,
+                  sourceLabel: `panel: delete "${truncateForLabel(preview)}"`,
+                })
+              }
             />
           </div>
         )}
@@ -846,6 +1260,45 @@ export default function App() {
 
         {/* Tool Action Notifications */}
         <ToolActionToast actions={toolActions} onDismiss={handleDismissToast} />
+
+        {/* DELETION CONFIRMATION SURFACE — single source of truth for
+            any soft-delete or permanent-delete request. Shown when /api/bin/preview
+            or /api/bin/permanent-preview returns a resolved scope. */}
+        <ConfirmDeletionSheet
+          isOpen={!!pendingDeletion || !!pendingPermanentDeletion}
+          preview={pendingPermanentDeletion?.preview || pendingDeletion?.preview || null}
+          scopeLabel={
+            pendingPermanentDeletion
+              ? 'permanent delete'
+              : pendingDeletion?.scope?.replace(/_/g, ' ') || ''
+          }
+          sourceLabel={pendingPermanentDeletion?.sourceLabel || pendingDeletion?.sourceLabel}
+          isSubmitting={isDeletionSubmitting}
+          onConfirm={confirmDeletion}
+          onCancel={cancelDeletion}
+        />
+
+        {/* AMBIGUOUS TARGETS — server returned multiple matches. The
+            user picks which one. Picking re-issues the deletion with
+            a concrete target id (no targetQuery). */}
+        {ambiguousCandidates && (
+          <AmbiguousCandidateSheet
+            scope={ambiguousCandidates.scope}
+            candidates={ambiguousCandidates.candidates}
+            sourceLabel={ambiguousCandidates.sourceLabel}
+            onPick={async (candidate) => {
+              const scope = ambiguousCandidates.scope;
+              const sourceLabel = ambiguousCandidates.sourceLabel;
+              setAmbiguousCandidates(null);
+              if (scope === 'permanent_delete') {
+                await beginPermanentDeletion({ binId: candidate.id, sourceLabel });
+              } else {
+                await beginDeletion({ scope, target: candidate.id, sourceLabel });
+              }
+            }}
+            onCancel={cancelDeletion}
+          />
+        )}
       </div>
     </UIStateProvider>
   );

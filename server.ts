@@ -1017,6 +1017,386 @@ async function startServer() {
     }
   });
 
+  // ===================================================================
+  // BIN / PROVENANCE / DELETION-SAFETY API
+  // -----------------------------------------------------------------
+  // All destructive deletions go through /api/bin/move first. The Bin
+  // preserves the original payload so it can be restored. The
+  // /api/bin/preview endpoint returns the scope resolution, derived
+  // impact, and reversibility — used by the UI to render an honest
+  // confirmation surface before any data is moved.
+  // ===================================================================
+
+  // GET /api/bin/preview — dry-run scope resolution. No data is moved.
+  app.post('/api/bin/preview', express.json(), (req, res) => {
+    try {
+      const callerContext = getCallerContext(req);
+      if (callerContext.role === 'unknown') {
+        return res.status(403).json({ error: 'UNKNOWN_USER: Cannot preview without established identity' });
+      }
+      const { identityId: requestedIdentityId, scope, target, query } = req.body || {};
+      const targetId = (callerContext.role === 'owner' && requestedIdentityId)
+        ? requestedIdentityId
+        : callerContext.id;
+
+      // If the user supplied an ambiguous query (e.g. "delete my project
+      // conversation"), surface candidates so the UI can ask which one.
+      if (query && !target && (scope === 'single_memory' || scope === 'single_conversation' || scope === 'single_task' || scope === 'single_pattern')) {
+        const kind = scope === 'single_memory' ? 'memory'
+          : scope === 'single_conversation' ? 'conversation'
+          : scope === 'single_task' ? 'task'
+          : 'pattern';
+        const candidates = db.findAmbiguousTargets(targetId, kind, query);
+        if (candidates.length === 0) {
+          const label = kind === 'memory' ? 'memories' : kind === 'task' ? 'tasks' : kind === 'pattern' ? 'patterns' : 'conversations';
+          return res.json({
+            resolved: false,
+            ambiguous: false,
+            candidates: [],
+            reversibility: 'n/a',
+            safety: 'blocked',
+            message: `No ${label} match "${query}".`,
+          });
+        }
+        if (candidates.length > 1) {
+          const label = kind === 'memory' ? 'memories' : kind === 'task' ? 'tasks' : kind === 'pattern' ? 'patterns' : 'conversations';
+          return res.json({
+            resolved: false,
+            ambiguous: true,
+            candidates,
+            reversibility: 'n/a',
+            safety: 'blocked',
+            message: `I found ${candidates.length} ${label} that could match "${query}". Which one did you mean?`,
+          });
+        }
+        // Exactly one match — proceed with the actual scope resolution
+        return res.json(db.resolveDeletionScope({
+          identityId: targetId,
+          scope,
+          target: candidates[0].id,
+        }));
+      }
+
+      return res.json(db.resolveDeletionScope({ identityId: targetId, scope, target }));
+    } catch (e: any) {
+      console.error('Error in /api/bin/preview:', e);
+      return res.status(500).json({ error: e.message || 'Preview failed' });
+    }
+  });
+
+  // POST /api/bin/move — the ONLY entry point for soft-delete.
+  // Body: { scope, target?, confirm: true, reason?, sourceCommand? }
+  app.post('/api/bin/move', express.json(), (req, res) => {
+    try {
+      const callerContext = getCallerContext(req);
+      if (callerContext.role === 'unknown') {
+        return res.status(403).json({ error: 'UNKNOWN_USER: Cannot delete without established identity' });
+      }
+      const { identityId: requestedIdentityId, scope, target, confirm, reason, sourceCommand } = req.body || {};
+      if (!confirm) {
+        return res.status(400).json({
+          error: 'CONFIRMATION_REQUIRED: Destructive operations require explicit confirm=true. Use /api/bin/preview first to show the user what will be affected.',
+        });
+      }
+      const targetId = (callerContext.role === 'owner' && requestedIdentityId)
+        ? requestedIdentityId
+        : callerContext.id;
+      const actorId = callerContext.id;
+
+      // Re-resolve scope at execution time. The UI may be stale.
+      const resolved = db.resolveDeletionScope({ identityId: targetId, scope, target });
+      if (!resolved.resolved || resolved.safety === 'blocked') {
+        return res.status(400).json({ error: resolved.message || 'Scope not resolved' });
+      }
+
+      // Defense-in-depth: never silently convert to permanent. The Bin
+      // is the destination. Permanent is a separate endpoint.
+      let result: any = { success: false };
+      if (scope === 'single_memory') {
+        const r = db.moveMemoryToBin(target, { deletedBy: actorId, reason, sourceCommand, targetOwnerId: targetId });
+        if (!r.success) return res.status(400).json({ error: r.error || 'Move failed' });
+        result = { success: true, binId: r.binId, memory: r.memory, derivedMemoryBinIds: [] };
+      } else if (scope === 'single_conversation') {
+        const r = db.moveSessionToBin(targetId, target, { deletedBy: actorId, reason, sourceCommand });
+        if (!r.success) return res.status(400).json({ error: r.error || 'Move failed' });
+        result = {
+          success: true,
+          binIds: r.binIds,
+          derivedMemoryBinIds: r.derivedMemoryBinIds,
+          removedTurns: r.removedTurns,
+        };
+      } else if (scope === 'all_memories') {
+        const r = db.moveAllMemoriesToBin(targetId, { deletedBy: actorId, reason, sourceCommand });
+        if (!r.success) return res.status(400).json({ error: r.error || 'Move failed' });
+        result = { success: true, binIds: r.binIds, removedCount: r.removedCount };
+      } else if (scope === 'all_conversations') {
+        const r = db.moveAllConversationsToBin(targetId, { deletedBy: actorId, reason, sourceCommand });
+        if (!r.success) return res.status(400).json({ error: r.error || 'Move failed' });
+        result = {
+          success: true,
+          binIds: r.binIds,
+          derivedMemoryBinIds: r.derivedMemoryBinIds,
+          removedTurns: r.removedTurns,
+        };
+      } else if (scope === 'single_task') {
+        const r = db.moveTaskToBin(target, { deletedBy: actorId, reason, sourceCommand, targetOwnerId: targetId });
+        if (!r.success) return res.status(400).json({ error: r.error || 'Move failed' });
+        result = { success: true, binId: r.binId, task: r.task };
+      } else if (scope === 'all_tasks') {
+        const r = db.moveAllTasksToBin(targetId, { deletedBy: actorId, reason, sourceCommand });
+        if (!r.success) return res.status(400).json({ error: r.error || 'Move failed' });
+        result = { success: true, binIds: r.binIds, removedCount: r.removedCount };
+      } else if (scope === 'single_pattern') {
+        const r = db.movePatternToBin(target, { deletedBy: actorId, reason, sourceCommand, targetOwnerId: targetId });
+        if (!r.success) return res.status(400).json({ error: r.error || 'Move failed' });
+        result = { success: true, binId: r.binId, pattern: r.pattern };
+      } else if (scope === 'all_patterns') {
+        const r = db.moveAllPatternsToBin(targetId, { deletedBy: actorId, reason, sourceCommand });
+        if (!r.success) return res.status(400).json({ error: r.error || 'Move failed' });
+        result = { success: true, binIds: r.binIds, removedCount: r.removedCount };
+      } else {
+        return res.status(400).json({ error: 'UNSUPPORTED_SCOPE' });
+      }
+
+      broadcastRuntimeStateToAllSessions();
+      return res.json(result);
+    } catch (e: any) {
+      console.error('Error in /api/bin/move:', e);
+      return res.status(500).json({ error: e.message || 'Move to bin failed' });
+    }
+  });
+
+  // GET /api/bin/list — list Bin entries
+  app.get('/api/bin/list', (req, res) => {
+    try {
+      const callerContext = getCallerContext(req);
+      if (callerContext.role === 'unknown') {
+        return res.status(403).json({ error: 'UNKNOWN_USER: Cannot list bin without established identity' });
+      }
+      const requestedUserId = req.query.userId as string | undefined;
+      const targetId = (callerContext.role === 'owner' && requestedUserId) ? requestedUserId : callerContext.id;
+      const viewerIsOwner = callerContext.role === 'owner';
+      const entries = db.listBin(targetId, viewerIsOwner);
+      return res.json({ entries, count: entries.length });
+    } catch (e: any) {
+      console.error('Error in /api/bin/list:', e);
+      return res.status(500).json({ error: e.message || 'List bin failed' });
+    }
+  });
+
+  // POST /api/bin/restore — restore a single Bin entry
+  app.post('/api/bin/restore', express.json(), (req, res) => {
+    try {
+      const callerContext = getCallerContext(req);
+      if (callerContext.role === 'unknown') {
+        return res.status(403).json({ error: 'UNKNOWN_USER: Cannot restore without established identity' });
+      }
+      const { binId } = req.body || {};
+      if (!binId) return res.status(400).json({ error: 'binId required' });
+      const r = db.restoreFromBin(binId, { restoredBy: callerContext.id });
+      if (!r.success) return res.status(400).json({ error: r.error || 'Restore failed' });
+      broadcastRuntimeStateToAllSessions();
+      return res.json({ success: true, restored: r.restored });
+    } catch (e: any) {
+      console.error('Error in /api/bin/restore:', e);
+      return res.status(500).json({ error: e.message || 'Restore failed' });
+    }
+  });
+
+  // DELETE /api/bin/permanent — the ONLY path to permanent delete.
+  // This is destructive and irreversible. The UI must surface an
+  // additional explicit confirmation before calling this.
+  app.delete('/api/bin/permanent', express.json(), (req, res) => {
+    try {
+      const callerContext = getCallerContext(req);
+      if (callerContext.role === 'unknown') {
+        return res.status(403).json({ error: 'UNKNOWN_USER: Cannot permanently delete without established identity' });
+      }
+      const { binId, confirm } = req.body || {};
+      if (!binId) return res.status(400).json({ error: 'binId required' });
+      if (!confirm) {
+        return res.status(400).json({
+          error: 'CONFIRMATION_REQUIRED: Permanent delete requires explicit confirm=true. This operation is irreversible.',
+        });
+      }
+      const r = db.permanentDeleteFromBin(binId, { deletedBy: callerContext.id });
+      if (!r.success) return res.status(400).json({ error: r.error || 'Permanent delete failed' });
+      broadcastRuntimeStateToAllSessions();
+      return res.json({ success: true });
+    } catch (e: any) {
+      console.error('Error in /api/bin/permanent:', e);
+      return res.status(500).json({ error: e.message || 'Permanent delete failed' });
+    }
+  });
+
+  // DELETE /api/bin/empty — empty the entire Bin for an identity
+  app.delete('/api/bin/empty', express.json(), (req, res) => {
+    try {
+      const callerContext = getCallerContext(req);
+      if (callerContext.role === 'unknown') {
+        return res.status(403).json({ error: 'UNKNOWN_USER: Cannot empty bin without established identity' });
+      }
+      const { identityId: requestedIdentityId, confirm } = req.body || {};
+      if (!confirm) {
+        return res.status(400).json({ error: 'CONFIRMATION_REQUIRED: confirm=true required' });
+      }
+      const targetId = (callerContext.role === 'owner' && requestedIdentityId) ? requestedIdentityId : callerContext.id;
+      const r = db.emptyBin(targetId, { deletedBy: callerContext.id });
+      if (!r.success) return res.status(400).json({ error: r.error || 'Empty bin failed' });
+      broadcastRuntimeStateToAllSessions();
+      return res.json({ success: true, removed: r.removed });
+    } catch (e: any) {
+      console.error('Error in /api/bin/empty:', e);
+      return res.status(500).json({ error: e.message || 'Empty bin failed' });
+    }
+  });
+
+  // POST /api/bin/permanent-preview — resolve a voice/manual "permanently
+  // delete" request against authoritative Bin data. Never guesses. If
+  // more than one Bin item could match, the UI must choose.
+  // Body: { kind: 'memory'|'conversation'|'task'|'pattern'|'note'|'any', query?, binId? }
+  app.post('/api/bin/permanent-preview', express.json(), (req, res) => {
+    try {
+      const callerContext = getCallerContext(req);
+      if (callerContext.role === 'unknown') {
+        return res.status(403).json({ error: 'UNKNOWN_USER: Cannot preview without established identity' });
+      }
+      const { identityId: requestedIdentityId, kind = 'any', query, binId } = req.body || {};
+      const targetId = (callerContext.role === 'owner' && requestedIdentityId)
+        ? requestedIdentityId
+        : callerContext.id;
+      const viewerIsOwner = callerContext.role === 'owner';
+      const allEntries = db.listBin(targetId, viewerIsOwner);
+      const scoped = kind === 'any' ? allEntries : allEntries.filter((e) => e.type === kind);
+
+      // Exact binId short-circuit: caller knows which entry they mean.
+      if (binId) {
+        const exact = scoped.find((e) => e.binId === binId);
+        if (!exact) {
+          return res.json({
+            resolved: false,
+            ambiguous: false,
+            candidates: [],
+            reversibility: 'permanent',
+            safety: 'blocked',
+            message: 'No Bin entry matches that id. The item may have been restored or already permanently deleted.',
+          });
+        }
+        return res.json({
+          resolved: true,
+          ambiguous: false,
+          candidates: [{ id: exact.binId, preview: (exact.preview || '').slice(0, 140), type: exact.type }],
+          reversibility: 'permanent',
+          safety: 'requires_confirm',
+          message: 'This Bin entry will be permanently deleted. This is irreversible.',
+        });
+      }
+
+      if (!query) {
+        return res.json({
+          resolved: false,
+          ambiguous: false,
+          candidates: [],
+          reversibility: 'permanent',
+          safety: 'blocked',
+          message: 'Either a binId or a query string is required to resolve a permanent-delete target.',
+        });
+      }
+
+      const q = query.toLowerCase();
+      const candidates = scoped
+        .filter((e) => {
+          const blob = (e.preview || '').toLowerCase();
+          if (blob.includes(q)) return true;
+          // For conversation bins, also match the original session id
+          if ((e.type === 'conversation_turn' || e.type === 'session') && e.originalId && e.originalId.toLowerCase().includes(q)) return true;
+          return false;
+        })
+        .slice(0, 8)
+        .map((e) => ({
+          id: e.binId,
+          preview: (e.preview || '').slice(0, 140),
+          meta: e.type,
+        }));
+
+      if (candidates.length === 0) {
+        return res.json({
+          resolved: false,
+          ambiguous: false,
+          candidates: [],
+          reversibility: 'permanent',
+          safety: 'blocked',
+          message: 'No Bin item matches that description. Nothing was deleted.',
+        });
+      }
+      if (candidates.length > 1) {
+        return res.json({
+          resolved: false,
+          ambiguous: true,
+          candidates,
+          reversibility: 'permanent',
+          safety: 'blocked',
+          message: `I found ${candidates.length} Bin items that could match. Which one do you want permanently deleted?`,
+        });
+      }
+      return res.json({
+        resolved: true,
+        ambiguous: false,
+        candidates,
+        reversibility: 'permanent',
+        safety: 'requires_confirm',
+        message: 'This Bin entry will be permanently deleted. This is irreversible.',
+      });
+    } catch (e: any) {
+      console.error('Error in /api/bin/permanent-preview:', e);
+      return res.status(500).json({ error: e.message || 'Permanent preview failed' });
+    }
+  });
+
+  // GET /api/bin/policy — current retention policy
+  app.get('/api/bin/policy', (req, res) => {
+    try {
+      const policy = db.getBinRetentionPolicy();
+      return res.json({ policy });
+    } catch (e: any) {
+      console.error('Error in /api/bin/policy:', e);
+      return res.status(500).json({ error: e.message || 'Get policy failed' });
+    }
+  });
+
+  // PUT /api/bin/policy — owner-only. Update retention policy.
+  app.put('/api/bin/policy', express.json(), (req, res) => {
+    try {
+      const callerContext = getCallerContext(req);
+      if (callerContext.role !== 'owner') {
+        return res.status(403).json({ error: 'PERMISSION_DENIED: only owner may change retention policy' });
+      }
+      const { retentionDays, sweepIntervalMinutes } = req.body || {};
+      const policy = db.setBinRetentionPolicy({ retentionDays, sweepIntervalMinutes });
+      return res.json({ policy });
+    } catch (e: any) {
+      console.error('Error in /api/bin/policy (PUT):', e);
+      return res.status(400).json({ error: e.message || 'Update policy failed' });
+    }
+  });
+
+  // POST /api/bin/sweep — manually trigger sweep of expired entries.
+  // Owner-only because the cleanup is system-wide.
+  app.post('/api/bin/sweep', express.json(), (req, res) => {
+    try {
+      const callerContext = getCallerContext(req);
+      if (callerContext.role !== 'owner') {
+        return res.status(403).json({ error: 'PERMISSION_DENIED: only owner may trigger sweep' });
+      }
+      const r = db.sweepExpiredBin();
+      broadcastRuntimeStateToAllSessions();
+      return res.json({ success: true, removed: r.removed, sweptAt: r.sweptAt, sweptAtIST: r.sweptAtIST });
+    } catch (e: any) {
+      console.error('Error in /api/bin/sweep:', e);
+      return res.status(500).json({ error: e.message || 'Sweep failed' });
+    }
+  });
+
   // Learned Patterns & Habits API: GET (Identity-Scoped)
   app.get('/api/patterns', (req, res) => {
     setCacheControl(res, 5, 30);
@@ -1515,6 +1895,22 @@ async function startServer() {
     loopManager.start(5 * 60_000);
     // Proactive reasoning: decide when to initiate
     proactiveEngine.start(2 * 60_000);
+    // Bin retention sweep — runs at the policy's sweep interval (default hourly)
+    const policy = db.getBinRetentionPolicy();
+    const sweepMs = Math.max(60_000, (policy.sweepIntervalMinutes || 60) * 60_000);
+    const binSweepTimer = setInterval(() => {
+      try {
+        const r = db.sweepExpiredBin();
+        if (r.removed > 0) {
+          console.log(`[BIN-SWEEP] Removed ${r.removed} expired entries at ${r.sweptAtIST}`);
+          broadcastRuntimeStateToAllSessions();
+        }
+      } catch (err: any) {
+        console.warn('[BIN-SWEEP] failed:', err.message);
+      }
+    }, sweepMs);
+    // Don't keep the event loop alive solely for the sweep timer
+    binSweepTimer.unref?.();
     // Drain any events recorded but not processed
     startEventCognitionDrain().catch(err => console.error('[STARTUP] event drain failed:', err.message));
     // Record system startup event
@@ -1523,7 +1919,7 @@ async function startServer() {
       port: PORT,
     }).catch(err => console.error('[STARTUP] emit failed:', err.message));
 
-    console.log(`[COGNITIVE] ✓ All subsystems online (awareness, tasks, loops, proactive, events)`);
+    console.log(`[COGNITIVE] ✓ All subsystems online (awareness, tasks, loops, proactive, events, bin-sweep)`);
     console.log(`Madhurita AI Assistant running on http://0.0.0.0:${PORT}`);
   });
 }

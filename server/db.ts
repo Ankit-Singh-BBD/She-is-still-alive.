@@ -114,6 +114,61 @@ export interface MemoryRecord {
   createdAtIST?: string;
   updatedAt: string;
   updatedAtIST?: string;
+  // ============================================================
+  // PROVENANCE — where this memory was derived from. Critical for
+  // the deletion-safety system: when a source (turn/session) is
+  // deleted, only invalidate memories whose remaining source set
+  // becomes empty.
+  // ============================================================
+  provenance?: {
+    /** Turn IDs that contributed evidence to this memory */
+    sourceTurnIds?: string[];
+    /** Session IDs that contributed evidence to this memory */
+    sourceSessionIds?: string[];
+    /** How the memory was originally derived */
+    derivedFrom?:
+      | 'user_explicit_statement'
+      | 'observed_pattern'
+      | 'cognition_synthesis'
+      | 'manual_entry'
+      | 'unknown';
+    /** First/last time provenance was updated */
+    firstDerivedAtISO?: string;
+    lastDerivedAtISO?: string;
+  };
+  // ============================================================
+  // SOFT DELETE — populated when this memory is in the Bin.
+  // `deletedAt` is the authoritative marker; a non-null value
+  // means the record is NOT active and must be excluded from
+  // retrieval, summarisation, and search.
+  // ============================================================
+  deletedAt?: string;
+  deletedAtIST?: string;
+  deletedBy?: string;
+  deleteReason?: string;
+}
+
+/**
+ * Provenance for a learned Pattern — the set of source turns and
+ * sessions the pattern was observed against. Populated at write
+ * time so that, when a source conversation is moved to the Bin, the
+ * system can determine whether the pattern still has at least one
+ * surviving source. Patterns that lose their last source are
+ * themselves moved to the Bin as derived entries; patterns that
+ * still have surviving sources remain in place and provenance is
+ * rewritten to drop only the dead sources.
+ */
+export interface PatternProvenance {
+  /** Turn IDs from which this pattern was observed. */
+  sourceTurnIds: string[];
+  /** Session IDs from which this pattern was observed. */
+  sourceSessionIds: string[];
+  /** Optional memory IDs the pattern was inferred from. */
+  sourceMemoryIds?: string[];
+  /** Free-form label for the extractor (e.g. 'cognition-2.infer'). */
+  extractedBy: string;
+  /** ISO timestamp of the most recent derivation. */
+  lastDerivedAtISO: string;
 }
 
 export interface LearnedPattern {
@@ -129,6 +184,18 @@ export interface LearnedPattern {
   lastObservedAtIST?: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Provenance — where this pattern came from. Empty for legacy
+   * patterns written before provenance was introduced; the deletion
+   * system treats such patterns as "no known sources" so they can
+   * still be binned explicitly but are NOT auto-removed by source
+   * cascade.
+   */
+  provenance?: PatternProvenance;
+  deletedAt?: string;
+  deletedAtIST?: string;
+  deletedBy?: string;
+  deleteReason?: string;
 }
 
 export interface ConversationTurn {
@@ -148,6 +215,12 @@ export interface ConversationTurn {
   referencedPeople?: string[];
   importantEvents?: string[];
   isResolved?: boolean;
+  // Soft delete — when set, the turn is in the Bin and excluded
+  // from retrieval, summarisation, and search results.
+  deletedAt?: string;
+  deletedAtIST?: string;
+  deletedBy?: string;
+  deleteReason?: string;
 }
 
 export interface CrossUserNote {
@@ -308,6 +381,73 @@ export interface DatabaseSchema {
   failedOperations?: FailedOperation[]; // Failed operation log
   behaviorEvaluations?: BehaviorEvaluation[]; // Self-improvement evaluations
   presenceSessions?: PresenceSession[]; // Active presence tracking
+  /** Recoverable Bin for soft-deleted memories/conversations. */
+  bin?: BinEntry[];
+  /**
+   * Single configurable retention policy for the Bin. Lives on the
+   * schema so it persists across restarts and is the authoritative
+   * source of how long deleted items remain recoverable before
+   * automatic permanent cleanup. There is no other place that
+   * hard-codes a retention duration.
+   */
+  binPolicy?: BinRetentionPolicy;
+}
+
+/**
+ * Configurable retention policy for the Bin. Drives the automatic
+ * sweep that permanently removes expired Bin entries and any
+ * derived data that depended exclusively on them.
+ *
+ *  - `retentionDays`           how long a moved-to-Bin item stays
+ *                              recoverable. Required.
+ *  - `sweepIntervalMinutes`    how often the in-process sweeper runs.
+ *  - `lastSweepAt`             last sweep timestamp (ISO + IST).
+ *  - `lastSweepRemoved`        how many entries were removed at the
+ *                              last sweep (for observability).
+ */
+export interface BinRetentionPolicy {
+  retentionDays: number;
+  sweepIntervalMinutes: number;
+  lastSweepAt?: string;
+  lastSweepAtIST?: string;
+  lastSweepRemoved?: number;
+}
+
+/** The default policy applied at first boot when none is stored. */
+export const DEFAULT_BIN_RETENTION: BinRetentionPolicy = {
+  retentionDays: 30,
+  sweepIntervalMinutes: 60,
+};
+
+// ===================================================================
+// BIN / TRASH — Authoritative soft-delete store
+// ===================================================================
+// When a memory or conversation is "deleted" via the standard flow,
+// it is moved here (the original record is also marked deletedAt so
+// it cannot surface in retrieval/search/summaries — the Bin entry
+// is the only place the payload is preserved for restore).
+//
+// Permanent delete is a separate explicit operation that REMOVES the
+// Bin entry. There is no other path to permanent delete.
+export interface BinEntry {
+  binId: string;
+  ownerId: string; // identityId that owned the item
+  type: 'memory' | 'conversation_turn' | 'session' | 'task' | 'note' | 'pattern';
+  /** The actual payload, deep-cloned at time of deletion. */
+  payload: any;
+  /** Free-form preview snippet for UI display */
+  preview: string;
+  /** When this item was moved to the Bin (ISO + IST) */
+  deletedAt: string;
+  deletedAtIST: string;
+  deletedBy: string; // identityId of the actor (owner / user)
+  deleteReason?: string;
+  /** Optional natural-language context for the deletion (e.g. "user said: 'forget my project conversation'") */
+  sourceCommand?: string;
+  /** ID of the original record (memoryId, turnId, etc.) — for traceability */
+  originalId: string;
+  /** When this entry will be eligible for permanent cleanup (optional future use) */
+  expiresAt?: string;
 }
 
 // ===================================================================
@@ -445,6 +585,7 @@ class DatabaseEngine {
     failedOperations: [],
     behaviorEvaluations: [],
     presenceSessions: [],
+    bin: [],
   };
   private isLoaded = false;
 
@@ -952,6 +1093,8 @@ class DatabaseEngine {
     return this.data.memories
       .filter((m) => {
         if (m.ownerId !== identityId || m.supersededBy) return false;
+        // Soft-deleted memories are excluded from every retrieval path.
+        if (m.deletedAt) return false;
         if (includeCandidates) return true;
         // Strict threshold for permanent memory
         return (m.evidenceCount && m.evidenceCount > 1) || (m.confidence >= 0.95);
@@ -1006,22 +1149,33 @@ class DatabaseEngine {
    * - If an existing memory contradicts the new info (or is an update of previous state):
    *   updates the record or marks superseded.
    * - Otherwise, creates a new persistent record with IST timestamps.
+   *
+   * Optional `provenance` records which turn/session this memory was
+   * derived from. When a source turn is later moved to the Bin, the
+   * provenance-aware cleanup in `moveSessionToBin` decides whether
+   * the memory must also be binned (if it loses its last source) or
+   * survives (because other independent sources still validate it).
    */
   public addMemory(
     identityId: string,
     content: string,
     category: MemoryRecord['category'] = 'fact',
     confidence = 1.0,
-    importance = 0.8
+    importance = 0.8,
+    provenance?: {
+      sourceTurnId?: string;
+      sourceSessionId?: string;
+      derivedFrom?: MemoryRecord['provenance'] extends infer P ? P extends { derivedFrom?: infer D } ? D : never : never;
+    }
   ): MemoryRecord | null {
     if (!identityId || !content.trim()) return null;
     const cleanContent = content.trim();
     const nowIst = getISTDateTime();
     const newTokens = this.tokenizeText(cleanContent);
 
-    // 1. Exact match check
+    // 1. Exact match check (only against active, non-deleted memories)
     const exactMatch = this.data.memories.find(
-      (m) => m.ownerId === identityId && m.content.toLowerCase() === cleanContent.toLowerCase()
+      (m) => m.ownerId === identityId && !m.deletedAt && m.content.toLowerCase() === cleanContent.toLowerCase()
     );
     if (exactMatch) {
       exactMatch.evidenceCount = (exactMatch.evidenceCount || 1) + 1;
@@ -1029,12 +1183,14 @@ class DatabaseEngine {
       exactMatch.importance = Math.max(exactMatch.importance || 0.7, importance);
       exactMatch.updatedAt = nowIst.iso;
       exactMatch.updatedAtIST = nowIst.istFull;
+      // Merge provenance — add the new source if we have one
+      this.mergeProvenance(exactMatch, provenance, nowIst.iso);
       this.save();
       return exactMatch;
     }
 
-    // 2. High semantic / keyword similarity check (Consolidation)
-    const userMemories = this.data.memories.filter((m) => m.ownerId === identityId && !m.supersededBy);
+    // 2. High semantic / keyword similarity check (Consolidation against active memories)
+    const userMemories = this.data.memories.filter((m) => m.ownerId === identityId && !m.supersededBy && !m.deletedAt);
     let bestMatch: MemoryRecord | null = null;
     let highestSim = 0;
 
@@ -1059,6 +1215,7 @@ class DatabaseEngine {
       bestMatch.category = category || bestMatch.category;
       bestMatch.updatedAt = nowIst.iso;
       bestMatch.updatedAtIST = nowIst.istFull;
+      this.mergeProvenance(bestMatch, provenance, nowIst.iso);
       this.save();
       return bestMatch;
     }
@@ -1078,6 +1235,15 @@ class DatabaseEngine {
       createdAtIST: nowIst.istFull,
       updatedAt: nowIst.iso,
       updatedAtIST: nowIst.istFull,
+      provenance: provenance
+        ? {
+            sourceTurnIds: provenance.sourceTurnId ? [provenance.sourceTurnId] : undefined,
+            sourceSessionIds: provenance.sourceSessionId ? [provenance.sourceSessionId] : undefined,
+            derivedFrom: provenance.derivedFrom || 'user_explicit_statement',
+            firstDerivedAtISO: nowIst.iso,
+            lastDerivedAtISO: nowIst.iso,
+          }
+        : undefined,
     };
 
     this.data.memories.push(record);
@@ -1086,9 +1252,54 @@ class DatabaseEngine {
   }
 
   /**
+   * Merge a new provenance event into an existing memory without
+   * duplicating source turn/session IDs. Idempotent.
+   */
+  private mergeProvenance(
+    mem: MemoryRecord,
+    provenance: {
+      sourceTurnId?: string;
+      sourceSessionId?: string;
+      derivedFrom?: NonNullable<MemoryRecord['provenance']>['derivedFrom'];
+    } | undefined,
+    nowIso: string
+  ): void {
+    if (!provenance) return;
+    if (!mem.provenance) {
+      mem.provenance = {
+        sourceTurnIds: provenance.sourceTurnId ? [provenance.sourceTurnId] : undefined,
+        sourceSessionIds: provenance.sourceSessionId ? [provenance.sourceSessionId] : undefined,
+        derivedFrom: provenance.derivedFrom || 'user_explicit_statement',
+        firstDerivedAtISO: nowIso,
+        lastDerivedAtISO: nowIso,
+      };
+      return;
+    }
+    if (provenance.sourceTurnId) {
+      if (!mem.provenance.sourceTurnIds) mem.provenance.sourceTurnIds = [];
+      if (!mem.provenance.sourceTurnIds.includes(provenance.sourceTurnId)) {
+        mem.provenance.sourceTurnIds.push(provenance.sourceTurnId);
+      }
+    }
+    if (provenance.sourceSessionId) {
+      if (!mem.provenance.sourceSessionIds) mem.provenance.sourceSessionIds = [];
+      if (!mem.provenance.sourceSessionIds.includes(provenance.sourceSessionId)) {
+        mem.provenance.sourceSessionIds.push(provenance.sourceSessionId);
+      }
+    }
+    mem.provenance.lastDerivedAtISO = nowIso;
+    if (provenance.derivedFrom) {
+      mem.provenance.derivedFrom = provenance.derivedFrom;
+    }
+  }
+
+  /**
    * Authoritative candidate knowledge validation:
    * Decides IGNORE, TEMPORARY, STORE, UPDATE, STRENGTHEN, SUPERSEDE, or CONFLICT.
    * Ensures guest users do NOT receive permanent personal memory records.
+   *
+   * Optional `provenance` is threaded through to addMemory so the
+   * resulting record records which turn/session it was derived from.
    */
   public validateAndApplyMemoryCandidate(
     identityId: string,
@@ -1096,7 +1307,12 @@ class DatabaseEngine {
     category: MemoryRecord['category'] = 'fact',
     confidence = 0.85,
     importance = 0.75,
-    isTemporary = false
+    isTemporary = false,
+    provenance?: {
+      sourceTurnId?: string;
+      sourceSessionId?: string;
+      derivedFrom?: NonNullable<MemoryRecord['provenance']>['derivedFrom'];
+    }
   ): { decision: 'IGNORE' | 'TEMPORARY' | 'STORE' | 'UPDATE' | 'STRENGTHEN' | 'SUPERSEDE' | 'CONFLICT'; memory: MemoryRecord | null } {
     if (!identityId || identityId === 'UNKNOWN' || identityId === 'GUEST' || !content.trim()) {
       return { decision: 'IGNORE', memory: null };
@@ -1110,7 +1326,7 @@ class DatabaseEngine {
       return { decision: 'TEMPORARY', memory: null };
     }
 
-    const userMemories = this.data.memories.filter((m) => m.ownerId === identityId && !m.supersededBy);
+    const userMemories = this.data.memories.filter((m) => m.ownerId === identityId && !m.supersededBy && !m.deletedAt);
     const newTokens = this.tokenizeText(cleanContent);
 
     // 1. Contradiction / Conflict check
@@ -1139,6 +1355,15 @@ class DatabaseEngine {
           createdAtIST: nowIst.istFull,
           updatedAt: nowIst.iso,
           updatedAtIST: nowIst.istFull,
+          provenance: provenance
+            ? {
+                sourceTurnIds: provenance.sourceTurnId ? [provenance.sourceTurnId] : undefined,
+                sourceSessionIds: provenance.sourceSessionId ? [provenance.sourceSessionId] : undefined,
+                derivedFrom: provenance.derivedFrom || 'user_explicit_statement',
+                firstDerivedAtISO: nowIst.iso,
+                lastDerivedAtISO: nowIst.iso,
+              }
+            : undefined,
         };
         this.data.memories.push(newRec);
         this.save();
@@ -1170,12 +1395,13 @@ class DatabaseEngine {
       }
       bestMatch.updatedAt = nowIst.iso;
       bestMatch.updatedAtIST = nowIst.istFull;
+      this.mergeProvenance(bestMatch, provenance, nowIst.iso);
       this.save();
       return { decision, memory: bestMatch };
     }
 
     // 3. New memory creation
-    const stored = this.addMemory(identityId, cleanContent, category, confidence, importance);
+    const stored = this.addMemory(identityId, cleanContent, category, confidence, importance, provenance);
     return { decision: stored ? 'STORE' : 'IGNORE', memory: stored };
   }
 
@@ -1255,12 +1481,1294 @@ class DatabaseEngine {
     return { success: false, deletedCount: 0, deleted: [] };
   }
 
+  // =================================================================
+  // BIN / PROVENANCE SYSTEM
+  // -----------------------------------------------------------------
+  // All destructive deletions go through the Bin by default. The
+  // Bin preserves the original payload and provenance so it can be
+  // restored or permanently deleted as a separate explicit action.
+  //
+  // Provenance: every memory records the source turns/sessions it
+  // was derived from. When a source is binned, the provenance is
+  // examined: if a memory loses its LAST source, it too is binned
+  // (and added to the "derived impact" report so the user can see
+  // what was affected). If it still has surviving sources, it is
+  // left intact (the surviving evidence keeps the memory valid).
+  // =================================================================
+
+  /**
+   * Move an existing memory to the Bin. Sets `deletedAt` on the
+   * memory record so it is excluded from retrieval, search, and
+   * summaries going forward. The original payload is preserved
+   * inside the Bin entry for restore.
+   */
+  public moveMemoryToBin(
+    memoryId: string,
+    options: { deletedBy: string; reason?: string; sourceCommand?: string; targetOwnerId?: string }
+  ): { success: boolean; binId?: string; memory?: MemoryRecord; error?: string } {
+    if (!memoryId) return { success: false, error: 'memoryId required' };
+
+    const idx = this.data.memories.findIndex((m) => m.memoryId === memoryId);
+    if (idx === -1) {
+      return { success: false, error: 'MEMORY_NOT_FOUND' };
+    }
+    const mem = this.data.memories[idx];
+
+    // Permission check: caller can only bin their own memory unless
+    // they are the owner. Caller identity is provided via options.
+    if (
+      options.targetOwnerId &&
+      mem.ownerId !== options.targetOwnerId &&
+      options.deletedBy !== this.data.owner?.id
+    ) {
+      return { success: false, error: 'PERMISSION_DENIED' };
+    }
+
+    // Idempotency: already in Bin?
+    if (mem.deletedAt) {
+      return { success: false, error: 'ALREADY_IN_BIN' };
+    }
+
+    const nowIst = getISTDateTime();
+    if (!this.data.bin) this.data.bin = [];
+
+    const binEntry = this.pushBinEntry({
+      ownerId: mem.ownerId,
+      type: 'memory',
+      payload: JSON.parse(JSON.stringify(mem)),
+      preview: (mem.content || '').slice(0, 140),
+      deletedAt: nowIst.iso,
+      deletedAtIST: nowIst.istFull,
+      deletedBy: options.deletedBy,
+      deleteReason: options.reason,
+      sourceCommand: options.sourceCommand,
+      originalId: mem.memoryId,
+    });
+    const binId = binEntry.binId;
+
+    // Mark the in-place record as soft-deleted so retrieval excludes it
+    mem.deletedAt = nowIst.iso;
+    mem.deletedAtIST = nowIst.istFull;
+    mem.deletedBy = options.deletedBy;
+    mem.deleteReason = options.reason;
+
+    this.logMutation(mem.ownerId, 'moveToBin:memory', true, `memoryId: ${mem.memoryId}`);
+    this.save();
+    return { success: true, binId, memory: mem };
+  }
+
+  /**
+   * Move an entire session (and all of its turns) to the Bin.
+   * Also invalidates provenance: any memory whose entire source-set
+   * was inside this session is moved to the Bin as well. Memories
+   * that still have surviving sources are left intact.
+   */
+  public moveSessionToBin(
+    identityId: string,
+    sessionId: string,
+    options: { deletedBy: string; reason?: string; sourceCommand?: string }
+  ): { success: boolean; binIds: string[]; derivedMemoryBinIds: string[]; removedTurns: number; error?: string } {
+    if (!identityId || !sessionId) {
+      return { success: false, binIds: [], derivedMemoryBinIds: [], removedTurns: 0, error: 'identityId and sessionId required' };
+    }
+
+    const nowIst = getISTDateTime();
+    if (!this.data.bin) this.data.bin = [];
+
+    const binIds: string[] = [];
+    const derivedMemoryBinIds: string[] = [];
+
+    // 1. Bin each turn in this session
+    const turnsInSession = (this.data.conversations || []).filter(
+      (c) => c.identityId === identityId && c.sessionId === sessionId && !c.deletedAt
+    );
+    for (const turn of turnsInSession) {
+      const binEntry = this.pushBinEntry({
+        ownerId: turn.identityId,
+        type: 'conversation_turn',
+        payload: JSON.parse(JSON.stringify(turn)),
+        preview: (turn.content || '').slice(0, 140),
+        deletedAt: nowIst.iso,
+        deletedAtIST: nowIst.istFull,
+        deletedBy: options.deletedBy,
+        deleteReason: options.reason,
+        sourceCommand: options.sourceCommand,
+        originalId: turn.turnId,
+      });
+      turn.deletedAt = nowIst.iso;
+      turn.deletedAtIST = nowIst.istFull;
+      turn.deletedBy = options.deletedBy;
+      turn.deleteReason = options.reason;
+      binIds.push(binEntry.binId);
+    }
+
+    // 2. Bin the session metadata if present
+    if (this.data.sessions) {
+      const sessionMeta = this.data.sessions.find(
+        (s) => s.identityId === identityId && s.sessionId === sessionId
+      );
+      if (sessionMeta) {
+        const binEntry = this.pushBinEntry({
+          ownerId: sessionMeta.identityId,
+          type: 'session',
+          payload: JSON.parse(JSON.stringify(sessionMeta)),
+          preview: `Session: ${(sessionMeta.topicsDiscussed || []).join(', ') || sessionMeta.sessionId}`,
+          deletedAt: nowIst.iso,
+          deletedAtIST: nowIst.istFull,
+          deletedBy: options.deletedBy,
+          deleteReason: options.reason,
+          sourceCommand: options.sourceCommand,
+          originalId: sessionMeta.sessionId,
+        });
+        this.data.sessions = this.data.sessions.filter(
+          (s) => !(s.identityId === identityId && s.sessionId === sessionId)
+        );
+        binIds.push(binEntry.binId);
+      }
+    }
+
+    // 3. PROVENANCE CLEANUP: any memory whose source-session set
+    //    contains this sessionId — and which has NO surviving
+    //    sources — must also be binned. If a memory still has at
+    //    least one valid (non-binned) source, it survives.
+    const survivingTurnIds = new Set(
+      (this.data.conversations || [])
+        .filter((c) => c.identityId === identityId && c.sessionId === sessionId && !c.deletedAt)
+        .map((c) => c.turnId)
+    );
+
+    const affectedMemories = (this.data.memories || []).filter(
+      (m) => m.ownerId === identityId && !m.deletedAt && m.provenance?.sourceSessionIds?.includes(sessionId)
+    );
+
+    for (const mem of affectedMemories) {
+      // For each memory, compute the set of source turn IDs that
+      // are STILL alive (not soft-deleted).
+      const aliveTurnSources = (mem.provenance?.sourceTurnIds || []).filter((tid) => {
+        const t = (this.data.conversations || []).find((c) => c.turnId === tid);
+        return !!t && !t.deletedAt;
+      });
+      const aliveSessionSources = (mem.provenance?.sourceSessionIds || []).filter((sid) => {
+        // Survive if the session has at least one non-deleted turn
+        if (sid === sessionId) {
+          // The session we just binned — only "alive" if survivingTurnIds is non-empty
+          return survivingTurnIds.size > 0;
+        }
+        const sessionTurns = (this.data.conversations || []).filter(
+          (c) => c.sessionId === sid && !c.deletedAt
+        );
+        return sessionTurns.length > 0;
+      });
+
+      if (aliveTurnSources.length === 0 && aliveSessionSources.length === 0) {
+        // No surviving source — bin the memory too
+        const binEntry = this.pushBinEntry({
+          ownerId: mem.ownerId,
+          type: 'memory',
+          payload: JSON.parse(JSON.stringify(mem)),
+          preview: (mem.content || '').slice(0, 140),
+          deletedAt: nowIst.iso,
+          deletedAtIST: nowIst.istFull,
+          deletedBy: options.deletedBy,
+          deleteReason: `derived-from-deleted-session:${sessionId}`,
+          sourceCommand: options.sourceCommand,
+          originalId: mem.memoryId,
+        });
+        mem.deletedAt = nowIst.iso;
+        mem.deletedAtIST = nowIst.istFull;
+        mem.deletedBy = options.deletedBy;
+        mem.deleteReason = `derived-from-deleted-session:${sessionId}`;
+        derivedMemoryBinIds.push(binEntry.binId);
+      } else {
+        // Update provenance to drop the dead source(s)
+        if (mem.provenance) {
+          mem.provenance.sourceTurnIds = aliveTurnSources;
+          mem.provenance.sourceSessionIds = aliveSessionSources;
+          mem.provenance.lastDerivedAtISO = nowIst.iso;
+        }
+      }
+    }
+
+    // 4. PATTERN PROVENANCE CLEANUP: any pattern whose source-session
+    //    set contains this sessionId — and which has NO surviving
+    //    sources — must also be binned. If a pattern still has at
+    //    least one valid (non-binned) source, it survives and
+    //    provenance is rewritten to drop only the dead source.
+    const affectedPatterns = (this.data.patterns || []).filter(
+      (p) => p.identityId === identityId && p.provenance?.sourceSessionIds?.includes(sessionId),
+    );
+    for (const pat of affectedPatterns) {
+      const aliveSessionSources = (pat.provenance?.sourceSessionIds || []).filter((sid) => {
+        if (sid === sessionId) {
+          // The session we just binned — only "alive" if survivingTurnIds is non-empty
+          return survivingTurnIds.size > 0;
+        }
+        const sessionTurns = (this.data.conversations || []).filter(
+          (c) => c.sessionId === sid && !c.deletedAt,
+        );
+        return sessionTurns.length > 0;
+      });
+      const aliveTurnSources = (pat.provenance?.sourceTurnIds || []).filter((tid) => {
+        const t = (this.data.conversations || []).find((c) => c.turnId === tid);
+        return !!t && !t.deletedAt;
+      });
+      if (aliveSessionSources.length === 0 && aliveTurnSources.length === 0) {
+        const binEntry = this.pushBinEntry({
+          ownerId: pat.identityId,
+          type: 'pattern',
+          payload: JSON.parse(JSON.stringify(pat)),
+          preview: (pat.description || '').slice(0, 140),
+          deletedAt: nowIst.iso,
+          deletedAtIST: nowIst.istFull,
+          deletedBy: options.deletedBy,
+          deleteReason: `derived-from-deleted-session:${sessionId}`,
+          sourceCommand: options.sourceCommand,
+          originalId: pat.id,
+        });
+        // Patterns are hard-removed (no in-place deletedAt on patterns)
+        this.data.patterns = (this.data.patterns || []).filter((p) => p.id !== pat.id);
+        derivedMemoryBinIds.push(binEntry.binId);
+      } else if (pat.provenance) {
+        pat.provenance.sourceTurnIds = aliveTurnSources;
+        pat.provenance.sourceSessionIds = aliveSessionSources;
+        pat.provenance.lastDerivedAtISO = nowIst.iso;
+      }
+    }
+
+    this.logMutation(identityId, 'moveToBin:session', true, `sessionId: ${sessionId} (${turnsInSession.length} turns)`);
+    this.save();
+    return {
+      success: true,
+      binIds,
+      derivedMemoryBinIds,
+      removedTurns: turnsInSession.length,
+    };
+  }
+
+  /**
+   * Clear all conversations/sessions for an identity — every turn
+   * and session metadata is moved to the Bin. Provenance cleanup
+   * cascades the same way as `moveSessionToBin`.
+   */
+  public moveAllConversationsToBin(
+    identityId: string,
+    options: { deletedBy: string; reason?: string; sourceCommand?: string }
+  ): { success: boolean; binIds: string[]; derivedMemoryBinIds: string[]; removedTurns: number; error?: string } {
+    if (!identityId) {
+      return { success: false, binIds: [], derivedMemoryBinIds: [], removedTurns: 0, error: 'identityId required' };
+    }
+    const nowIst = getISTDateTime();
+    if (!this.data.bin) this.data.bin = [];
+    const binIds: string[] = [];
+    const derivedMemoryBinIds: string[] = [];
+
+    const allTurns = (this.data.conversations || []).filter(
+      (c) => c.identityId === identityId && !c.deletedAt
+    );
+    for (const turn of allTurns) {
+      const binEntry = this.pushBinEntry({
+        ownerId: turn.identityId,
+        type: 'conversation_turn',
+        payload: JSON.parse(JSON.stringify(turn)),
+        preview: (turn.content || '').slice(0, 140),
+        deletedAt: nowIst.iso,
+        deletedAtIST: nowIst.istFull,
+        deletedBy: options.deletedBy,
+        deleteReason: options.reason,
+        sourceCommand: options.sourceCommand,
+        originalId: turn.turnId,
+      });
+      turn.deletedAt = nowIst.iso;
+      turn.deletedAtIST = nowIst.istFull;
+      turn.deletedBy = options.deletedBy;
+      turn.deleteReason = options.reason;
+      binIds.push(binEntry.binId);
+    }
+
+    if (this.data.sessions) {
+      const ownerSessions = this.data.sessions.filter((s) => s.identityId === identityId);
+      for (const sess of ownerSessions) {
+        const binEntry = this.pushBinEntry({
+          ownerId: sess.identityId,
+          type: 'session',
+          payload: JSON.parse(JSON.stringify(sess)),
+          preview: `Session: ${(sess.topicsDiscussed || []).join(', ') || sess.sessionId}`,
+          deletedAt: nowIst.iso,
+          deletedAtIST: nowIst.istFull,
+          deletedBy: options.deletedBy,
+          deleteReason: options.reason,
+          sourceCommand: options.sourceCommand,
+          originalId: sess.sessionId,
+        });
+        binIds.push(binEntry.binId);
+      }
+      this.data.sessions = this.data.sessions.filter((s) => s.identityId !== identityId);
+    }
+
+    if (this.data.requests) {
+      this.data.requests = this.data.requests.filter((r) => r.identityId !== identityId);
+    }
+    if (this.data.worldAwareness && this.data.worldAwareness.recentInteractions) {
+      this.data.worldAwareness.recentInteractions = this.data.worldAwareness.recentInteractions.filter(
+        (i) => i.identityId !== identityId
+      );
+    }
+
+    // Provenance cleanup — same logic as session-level
+    const affectedMemories = (this.data.memories || []).filter(
+      (m) => m.ownerId === identityId && !m.deletedAt && m.provenance
+    );
+    for (const mem of affectedMemories) {
+      const aliveTurnSources = (mem.provenance?.sourceTurnIds || []).filter((tid) => {
+        const t = (this.data.conversations || []).find((c) => c.turnId === tid);
+        return !!t && !t.deletedAt;
+      });
+      const aliveSessionSources = (mem.provenance?.sourceSessionIds || []).filter((sid) => {
+        const sessionTurns = (this.data.conversations || []).filter(
+          (c) => c.sessionId === sid && !c.deletedAt
+        );
+        return sessionTurns.length > 0;
+      });
+      if (aliveTurnSources.length === 0 && aliveSessionSources.length === 0) {
+        const binEntry = this.pushBinEntry({
+          ownerId: mem.ownerId,
+          type: 'memory',
+          payload: JSON.parse(JSON.stringify(mem)),
+          preview: (mem.content || '').slice(0, 140),
+          deletedAt: nowIst.iso,
+          deletedAtIST: nowIst.istFull,
+          deletedBy: options.deletedBy,
+          deleteReason: 'derived-from-deleted-all-conversations',
+          sourceCommand: options.sourceCommand,
+          originalId: mem.memoryId,
+        });
+        mem.deletedAt = nowIst.iso;
+        mem.deletedAtIST = nowIst.istFull;
+        mem.deletedBy = options.deletedBy;
+        mem.deleteReason = 'derived-from-deleted-all-conversations';
+        derivedMemoryBinIds.push(binEntry.binId);
+      } else if (mem.provenance) {
+        mem.provenance.sourceTurnIds = aliveTurnSources;
+        mem.provenance.sourceSessionIds = aliveSessionSources;
+        mem.provenance.lastDerivedAtISO = nowIst.iso;
+      }
+    }
+
+    // Pattern provenance cleanup — every pattern with any source-session
+    // for this identity is now sourced against empty sessions, so all
+    // such patterns are binned as derived.
+    const affectedPatterns = (this.data.patterns || []).filter(
+      (p) => p.identityId === identityId && p.provenance,
+    );
+    for (const pat of affectedPatterns) {
+      const aliveSessionSources = (pat.provenance?.sourceSessionIds || []).filter((sid) => {
+        const sessionTurns = (this.data.conversations || []).filter(
+          (c) => c.sessionId === sid && !c.deletedAt,
+        );
+        return sessionTurns.length > 0;
+      });
+      const aliveTurnSources = (pat.provenance?.sourceTurnIds || []).filter((tid) => {
+        const t = (this.data.conversations || []).find((c) => c.turnId === tid);
+        return !!t && !t.deletedAt;
+      });
+      if (aliveSessionSources.length === 0 && aliveTurnSources.length === 0) {
+        const binEntry = this.pushBinEntry({
+          ownerId: pat.identityId,
+          type: 'pattern',
+          payload: JSON.parse(JSON.stringify(pat)),
+          preview: (pat.description || '').slice(0, 140),
+          deletedAt: nowIst.iso,
+          deletedAtIST: nowIst.istFull,
+          deletedBy: options.deletedBy,
+          deleteReason: 'derived-from-deleted-all-conversations',
+          sourceCommand: options.sourceCommand,
+          originalId: pat.id,
+        });
+        this.data.patterns = (this.data.patterns || []).filter((p) => p.id !== pat.id);
+        derivedMemoryBinIds.push(binEntry.binId);
+      } else if (pat.provenance) {
+        pat.provenance.sourceTurnIds = aliveTurnSources;
+        pat.provenance.sourceSessionIds = aliveSessionSources;
+        pat.provenance.lastDerivedAtISO = nowIst.iso;
+      }
+    }
+
+    this.logMutation(identityId, 'moveToBin:all-conversations', true, `${allTurns.length} turns`);
+    this.save();
+    return { success: true, binIds, derivedMemoryBinIds, removedTurns: allTurns.length };
+  }
+
+  /**
+   * Move ALL memories for an identity to the Bin. Conversations
+   * are NOT touched by this operation (separate explicit action).
+   */
+  public moveAllMemoriesToBin(
+    identityId: string,
+    options: { deletedBy: string; reason?: string; sourceCommand?: string }
+  ): { success: boolean; binIds: string[]; removedCount: number; error?: string } {
+    if (!identityId) {
+      return { success: false, binIds: [], removedCount: 0, error: 'identityId required' };
+    }
+    const nowIst = getISTDateTime();
+    if (!this.data.bin) this.data.bin = [];
+    const binIds: string[] = [];
+
+    const ownerMemories = (this.data.memories || []).filter(
+      (m) => m.ownerId === identityId && !m.deletedAt
+    );
+    for (const mem of ownerMemories) {
+      const binEntry = this.pushBinEntry({
+        ownerId: mem.ownerId,
+        type: 'memory',
+        payload: JSON.parse(JSON.stringify(mem)),
+        preview: (mem.content || '').slice(0, 140),
+        deletedAt: nowIst.iso,
+        deletedAtIST: nowIst.istFull,
+        deletedBy: options.deletedBy,
+        deleteReason: options.reason,
+        sourceCommand: options.sourceCommand,
+        originalId: mem.memoryId,
+      });
+      mem.deletedAt = nowIst.iso;
+      mem.deletedAtIST = nowIst.istFull;
+      mem.deletedBy = options.deletedBy;
+      mem.deleteReason = options.reason;
+      binIds.push(binEntry.binId);
+    }
+
+    this.logMutation(identityId, 'moveToBin:all-memories', true, `${ownerMemories.length} memories`);
+    this.save();
+    return { success: true, binIds, removedCount: ownerMemories.length };
+  }
+
+  // =================================================================
+  // TASK + PATTERN BIN SUPPORT
+  // Soft-delete path for tasks and patterns. Mirrors the memory /
+  // conversation flow so the deletion safety system covers every
+  // persistent user-owned object in the app.
+  // =================================================================
+
+  /**
+   * Move a single task to the Bin. Tasks do not have an in-place
+   * `deletedAt` (the live store uses `status: 'cancelled'`), so we
+   * use a soft flag on the record to exclude it from retrieval.
+   */
+  public moveTaskToBin(
+    taskId: string,
+    options: { deletedBy: string; reason?: string; sourceCommand?: string; targetOwnerId?: string }
+  ): { success: boolean; binId?: string; task?: TaskItem; error?: string } {
+    if (!taskId) return { success: false, error: 'taskId required' };
+    if (!this.data.tasks) this.data.tasks = [];
+    const idx = this.data.tasks.findIndex((t) => t.id === taskId);
+    if (idx === -1) return { success: false, error: 'TASK_NOT_FOUND' };
+    const task = this.data.tasks[idx];
+
+    if (options.targetOwnerId && task.identityId !== options.targetOwnerId && options.deletedBy !== this.data.owner?.id) {
+      return { success: false, error: 'PERMISSION_DENIED' };
+    }
+    if ((task as any).deletedAt) {
+      return { success: false, error: 'ALREADY_IN_BIN' };
+    }
+
+    const nowIst = getISTDateTime();
+    const binEntry = this.pushBinEntry({
+      ownerId: task.identityId,
+      type: 'task',
+      payload: JSON.parse(JSON.stringify(task)),
+      preview: (task.title || '').slice(0, 140),
+      deletedAt: nowIst.iso,
+      deletedAtIST: nowIst.istFull,
+      deletedBy: options.deletedBy,
+      deleteReason: options.reason,
+      sourceCommand: options.sourceCommand,
+      originalId: task.id,
+    });
+
+    (task as any).deletedAt = nowIst.iso;
+    (task as any).deletedAtIST = nowIst.istFull;
+    (task as any).deletedBy = options.deletedBy;
+    (task as any).deleteReason = options.reason;
+    this.logMutation(task.identityId, 'moveToBin:task', true, `taskId: ${task.id}`);
+    this.save();
+    return { success: true, binId: binEntry.binId, task };
+  }
+
+  public moveAllTasksToBin(
+    identityId: string,
+    options: { deletedBy: string; reason?: string; sourceCommand?: string }
+  ): { success: boolean; binIds: string[]; removedCount: number; error?: string } {
+    if (!identityId) return { success: false, binIds: [], removedCount: 0, error: 'identityId required' };
+    const nowIst = getISTDateTime();
+    if (!this.data.bin) this.data.bin = [];
+    const binIds: string[] = [];
+
+    const ownerTasks = (this.data.tasks || []).filter(
+      (t) => t.identityId === identityId && !(t as any).deletedAt,
+    );
+    for (const t of ownerTasks) {
+      const binEntry = this.pushBinEntry({
+        ownerId: t.identityId,
+        type: 'task',
+        payload: JSON.parse(JSON.stringify(t)),
+        preview: (t.title || '').slice(0, 140),
+        deletedAt: nowIst.iso,
+        deletedAtIST: nowIst.istFull,
+        deletedBy: options.deletedBy,
+        deleteReason: options.reason,
+        sourceCommand: options.sourceCommand,
+        originalId: t.id,
+      });
+      (t as any).deletedAt = nowIst.iso;
+      (t as any).deletedAtIST = nowIst.istFull;
+      (t as any).deletedBy = options.deletedBy;
+      (t as any).deleteReason = options.reason;
+      binIds.push(binEntry.binId);
+    }
+    this.logMutation(identityId, 'moveToBin:all-tasks', true, `${ownerTasks.length} tasks`);
+    this.save();
+    return { success: true, binIds, removedCount: ownerTasks.length };
+  }
+
+  /**
+   * Move a single learned pattern to the Bin. Patterns are sourced
+   * data — if a pattern still has surviving sources after the move,
+   * it survives in the live store; if not, this method also
+   * accepts the explicit "single pattern" deletion and binneds it
+   * regardless of source state.
+   */
+  public movePatternToBin(
+    patternId: string,
+    options: { deletedBy: string; reason?: string; sourceCommand?: string; targetOwnerId?: string }
+  ): { success: boolean; binId?: string; pattern?: LearnedPattern; error?: string } {
+    if (!patternId) return { success: false, error: 'patternId required' };
+    if (!this.data.patterns) this.data.patterns = [];
+    const idx = this.data.patterns.findIndex((p) => p.id === patternId);
+    if (idx === -1) return { success: false, error: 'PATTERN_NOT_FOUND' };
+    const pat = this.data.patterns[idx];
+
+    if (options.targetOwnerId && pat.identityId !== options.targetOwnerId && options.deletedBy !== this.data.owner?.id) {
+      return { success: false, error: 'PERMISSION_DENIED' };
+    }
+    if ((pat as any).deletedAt) {
+      return { success: false, error: 'ALREADY_IN_BIN' };
+    }
+
+    const nowIst = getISTDateTime();
+    const binEntry = this.pushBinEntry({
+      ownerId: pat.identityId,
+      type: 'pattern',
+      payload: JSON.parse(JSON.stringify(pat)),
+      preview: (pat.description || '').slice(0, 140),
+      deletedAt: nowIst.iso,
+      deletedAtIST: nowIst.istFull,
+      deletedBy: options.deletedBy,
+      deleteReason: options.reason,
+      sourceCommand: options.sourceCommand,
+      originalId: pat.id,
+    });
+
+    (pat as any).deletedAt = nowIst.iso;
+    (pat as any).deletedAtIST = nowIst.istFull;
+    (pat as any).deletedBy = options.deletedBy;
+    (pat as any).deleteReason = options.reason;
+    this.logMutation(pat.identityId, 'moveToBin:pattern', true, `patternId: ${pat.id}`);
+    this.save();
+    return { success: true, binId: binEntry.binId, pattern: pat };
+  }
+
+  public moveAllPatternsToBin(
+    identityId: string,
+    options: { deletedBy: string; reason?: string; sourceCommand?: string }
+  ): { success: boolean; binIds: string[]; removedCount: number; error?: string } {
+    if (!identityId) return { success: false, binIds: [], removedCount: 0, error: 'identityId required' };
+    const nowIst = getISTDateTime();
+    if (!this.data.bin) this.data.bin = [];
+    const binIds: string[] = [];
+
+    const ownerPatterns = (this.data.patterns || []).filter(
+      (p) => p.identityId === identityId && !(p as any).deletedAt,
+    );
+    for (const p of ownerPatterns) {
+      const binEntry = this.pushBinEntry({
+        ownerId: p.identityId,
+        type: 'pattern',
+        payload: JSON.parse(JSON.stringify(p)),
+        preview: (p.description || '').slice(0, 140),
+        deletedAt: nowIst.iso,
+        deletedAtIST: nowIst.istFull,
+        deletedBy: options.deletedBy,
+        deleteReason: options.reason,
+        sourceCommand: options.sourceCommand,
+        originalId: p.id,
+      });
+      (p as any).deletedAt = nowIst.iso;
+      (p as any).deletedAtIST = nowIst.istFull;
+      (p as any).deletedBy = options.deletedBy;
+      (p as any).deleteReason = options.reason;
+      binIds.push(binEntry.binId);
+    }
+    this.logMutation(identityId, 'moveToBin:all-patterns', true, `${ownerPatterns.length} patterns`);
+    this.save();
+    return { success: true, binIds, removedCount: ownerPatterns.length };
+  }
+
+  /**
+   * List Bin entries for an identity. Newest first.
+   * If the caller is the owner, returns all identities' bins merged.
+   */
+  public listBin(forIdentityId?: string, viewerIsOwner = false): BinEntry[] {
+    if (!this.data.bin) return [];
+    let entries = this.data.bin;
+    if (!viewerIsOwner) {
+      if (!forIdentityId) return [];
+      entries = entries.filter((b) => b.ownerId === forIdentityId);
+    }
+    return [...entries].sort(
+      (a, b) => new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime()
+    );
+  }
+
+  /**
+   * Restore a single Bin entry by id. Re-activates the underlying
+   * record (clears its deletedAt) and removes the Bin entry.
+   */
+  public restoreFromBin(
+    binId: string,
+    options: { restoredBy: string }
+  ): { success: boolean; restored?: { type: BinEntry['type']; originalId: string }; error?: string } {
+    if (!this.data.bin) return { success: false, error: 'BIN_EMPTY' };
+    const idx = this.data.bin.findIndex((b) => b.binId === binId);
+    if (idx === -1) return { success: false, error: 'BIN_ENTRY_NOT_FOUND' };
+
+    const entry = this.data.bin[idx];
+
+    // Permission check
+    const ownerId = this.data.owner?.id;
+    if (options.restoredBy !== entry.ownerId && options.restoredBy !== ownerId) {
+      return { success: false, error: 'PERMISSION_DENIED' };
+    }
+
+    if (entry.type === 'memory') {
+      const mem = this.data.memories.find((m) => m.memoryId === entry.originalId);
+      if (mem) {
+        mem.deletedAt = undefined;
+        mem.deletedAtIST = undefined;
+        mem.deletedBy = undefined;
+        mem.deleteReason = undefined;
+        mem.updatedAt = new Date().toISOString();
+      } else {
+        // Memory was permanently deleted — re-create from payload
+        const restored = JSON.parse(JSON.stringify(entry.payload));
+        restored.deletedAt = undefined;
+        restored.deletedAtIST = undefined;
+        restored.deletedBy = undefined;
+        restored.deleteReason = undefined;
+        this.data.memories.push(restored);
+      }
+    } else if (entry.type === 'conversation_turn') {
+      const turn = this.data.conversations.find((t) => t.turnId === entry.originalId);
+      if (turn) {
+        turn.deletedAt = undefined;
+        turn.deletedAtIST = undefined;
+        turn.deletedBy = undefined;
+        turn.deleteReason = undefined;
+      } else {
+        const restored = JSON.parse(JSON.stringify(entry.payload));
+        restored.deletedAt = undefined;
+        restored.deletedAtIST = undefined;
+        restored.deletedBy = undefined;
+        restored.deleteReason = undefined;
+        this.data.conversations.push(restored);
+      }
+    } else if (entry.type === 'session') {
+      if (!this.data.sessions) this.data.sessions = [];
+      const sess = this.data.sessions.find((s) => s.sessionId === entry.originalId);
+      if (!sess) {
+        this.data.sessions.push(JSON.parse(JSON.stringify(entry.payload)));
+      }
+    } else if (entry.type === 'task') {
+      const t = (this.data.tasks || []).find((x) => x.id === entry.originalId);
+      if (t) {
+        (t as any).deletedAt = undefined;
+      } else {
+        if (!this.data.tasks) this.data.tasks = [];
+        this.data.tasks.push(JSON.parse(JSON.stringify(entry.payload)));
+      }
+    } else if (entry.type === 'note') {
+      const n = (this.data.crossUserNotes || []).find((x) => x.noteId === entry.originalId);
+      if (n) {
+        (n as any).deletedAt = undefined;
+      } else {
+        if (!this.data.crossUserNotes) this.data.crossUserNotes = [];
+        this.data.crossUserNotes.push(JSON.parse(JSON.stringify(entry.payload)));
+      }
+    } else if (entry.type === 'pattern') {
+      if (!this.data.patterns) this.data.patterns = [];
+      const p = this.data.patterns.find((x) => x.id === entry.originalId);
+      if (!p) {
+        this.data.patterns.push(JSON.parse(JSON.stringify(entry.payload)));
+      }
+    }
+
+    this.data.bin.splice(idx, 1);
+    this.logMutation(entry.ownerId, 'restoreFromBin', true, `binId: ${binId} type: ${entry.type}`);
+    this.save();
+    return { success: true, restored: { type: entry.type, originalId: entry.originalId } };
+  }
+
+  /**
+   * Permanently delete a single Bin entry. The original record (if
+   * still present) is also removed from the in-memory store at this
+   * point. This is the ONLY path to permanent delete.
+   */
+  public permanentDeleteFromBin(
+    binId: string,
+    options: { deletedBy: string }
+  ): { success: boolean; error?: string } {
+    if (!this.data.bin) return { success: false, error: 'BIN_EMPTY' };
+    const idx = this.data.bin.findIndex((b) => b.binId === binId);
+    if (idx === -1) return { success: false, error: 'BIN_ENTRY_NOT_FOUND' };
+
+    const entry = this.data.bin[idx];
+
+    // Permission
+    const ownerId = this.data.owner?.id;
+    if (options.deletedBy !== entry.ownerId && options.deletedBy !== ownerId) {
+      return { success: false, error: 'PERMISSION_DENIED' };
+    }
+
+    // Now physically remove the underlying record (if still present)
+    if (entry.type === 'memory') {
+      this.data.memories = this.data.memories.filter((m) => m.memoryId !== entry.originalId);
+    } else if (entry.type === 'conversation_turn') {
+      this.data.conversations = this.data.conversations.filter((t) => t.turnId !== entry.originalId);
+    } else if (entry.type === 'session') {
+      if (this.data.sessions) {
+        this.data.sessions = this.data.sessions.filter((s) => s.sessionId !== entry.originalId);
+      }
+    } else if (entry.type === 'task') {
+      this.data.tasks = (this.data.tasks || []).filter((t) => t.id !== entry.originalId);
+    } else if (entry.type === 'note') {
+      this.data.crossUserNotes = (this.data.crossUserNotes || []).filter((n) => n.noteId !== entry.originalId);
+    } else if (entry.type === 'pattern') {
+      if (this.data.patterns) {
+        this.data.patterns = this.data.patterns.filter((p) => p.id !== entry.originalId);
+      }
+    }
+
+    this.data.bin.splice(idx, 1);
+    this.logMutation(entry.ownerId, 'permanentDeleteFromBin', true, `binId: ${binId} type: ${entry.type}`);
+    this.save();
+    return { success: true };
+  }
+
+  /**
+   * Empty the entire Bin for an identity. (Owner-only utility.)
+   */
+  public emptyBin(
+    forIdentityId: string,
+    options: { deletedBy: string }
+  ): { success: boolean; removed: number; error?: string } {
+    if (!this.data.bin) return { success: false, removed: 0, error: 'BIN_EMPTY' };
+    const ownerId = this.data.owner?.id;
+    if (options.deletedBy !== forIdentityId && options.deletedBy !== ownerId) {
+      return { success: false, removed: 0, error: 'PERMISSION_DENIED' };
+    }
+    const before = this.data.bin.length;
+    this.data.bin = this.data.bin.filter((b) => b.ownerId !== forIdentityId);
+    const removed = before - this.data.bin.length;
+    this.logMutation(forIdentityId, 'emptyBin', true, `${removed} entries`);
+    this.save();
+    return { success: true, removed };
+  }
+
+  // =================================================================
+  // BIN RETENTION — single configurable policy, automatic sweep, and
+  // explicit /api/bin/sweep endpoint for owner operations.
+  // =================================================================
+
+  /**
+   * Read the active retention policy. Always returns a concrete
+   * policy object — either the one stored in the schema or the
+   * default if none has been set. There is no other place that
+   * hard-codes a retention duration.
+   */
+  public getBinRetentionPolicy(): BinRetentionPolicy {
+    if (!this.data.binPolicy) {
+      this.data.binPolicy = { ...DEFAULT_BIN_RETENTION };
+      this.save();
+    }
+    return { ...this.data.binPolicy };
+  }
+
+  /**
+   * Update the retention policy. Validates the inputs. Records the
+   * change as a mutation so it appears in the audit log.
+   */
+  public setBinRetentionPolicy(patch: {
+    retentionDays?: number;
+    sweepIntervalMinutes?: number;
+    actorId?: string;
+  }): { success: boolean; policy: BinRetentionPolicy; error?: string } {
+    const current = this.getBinRetentionPolicy();
+    if (patch.retentionDays !== undefined) {
+      if (
+        typeof patch.retentionDays !== 'number' ||
+        !Number.isFinite(patch.retentionDays) ||
+        patch.retentionDays < 1 ||
+        patch.retentionDays > 3650
+      ) {
+        return { success: false, policy: current, error: 'retentionDays must be a number between 1 and 3650' };
+      }
+    }
+    if (patch.sweepIntervalMinutes !== undefined) {
+      if (
+        typeof patch.sweepIntervalMinutes !== 'number' ||
+        !Number.isFinite(patch.sweepIntervalMinutes) ||
+        patch.sweepIntervalMinutes < 1 ||
+        patch.sweepIntervalMinutes > 1440
+      ) {
+        return { success: false, policy: current, error: 'sweepIntervalMinutes must be a number between 1 and 1440' };
+      }
+    }
+    const next: BinRetentionPolicy = {
+      retentionDays: patch.retentionDays ?? current.retentionDays,
+      sweepIntervalMinutes: patch.sweepIntervalMinutes ?? current.sweepIntervalMinutes,
+      lastSweepAt: current.lastSweepAt,
+      lastSweepAtIST: current.lastSweepAtIST,
+      lastSweepRemoved: current.lastSweepRemoved,
+    };
+    this.data.binPolicy = next;
+    this.logMutation(patch.actorId || 'OWNER_001', 'bin:policy', true, `retentionDays=${next.retentionDays} sweepInterval=${next.sweepIntervalMinutes}m`);
+    this.save();
+    return { success: true, policy: { ...next } };
+  }
+
+  /**
+   * Compute the expiry ISO for a Bin entry written right now, given
+   * the current retention policy. Centralized so there is one
+   * canonical place that translates "moved to bin at T" into
+   * "eligible for cleanup at T + retentionDays".
+   */
+  public computeBinExpiryISO(now: Date = new Date()): string {
+    const policy = this.getBinRetentionPolicy();
+    const ms = policy.retentionDays * 24 * 60 * 60 * 1000;
+    return new Date(now.getTime() + ms).toISOString();
+  }
+
+  /**
+   * Push a Bin entry to the store, stamping `expiresAt` from the
+   * active retention policy. The centralized push point ensures no
+   * Bin entry ever lands without an expiry. Returns the generated
+   * binId so the caller can use it.
+   */
+  public pushBinEntry(entry: Omit<BinEntry, 'binId' | 'expiresAt'> & { expiresAt?: string }): BinEntry {
+    if (!this.data.bin) this.data.bin = [];
+    const binId = `BIN_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const full: BinEntry = {
+      ...entry,
+      binId,
+      expiresAt: entry.expiresAt || this.computeBinExpiryISO(),
+    };
+    this.data.bin.push(full);
+    return full;
+  }
+
+  /**
+   * Permanently remove every Bin entry whose `expiresAt` is in the
+   * past. For each removed entry, also remove its underlying
+   * original record from the live store so the item can no longer
+   * surface in retrieval, search, summaries, or any other
+   * downstream path. Returns a structured report so the caller can
+   * surface what was purged.
+   *
+   * This is the single source of truth for expired-entry cleanup.
+   * No other code path sweeps the Bin.
+   */
+  public sweepExpiredBin(now: Date = new Date()): {
+    removed: number;
+    removedBinIds: string[];
+    removedTypes: Record<string, number>;
+    nextExpiryAt: string | null;
+    sweptAt: string;
+    sweptAtIST: string;
+  } {
+    if (!this.data.bin) this.data.bin = [];
+    const policy = this.getBinRetentionPolicy();
+    const nowIst = getISTDateTime();
+    const nowIso = now.toISOString();
+    const removedBinIds: string[] = [];
+    const removedTypes: Record<string, number> = {};
+
+    // Partition into expired vs still-recoverable
+    const survivors: BinEntry[] = [];
+    for (const entry of this.data.bin) {
+      const expires = entry.expiresAt;
+      if (expires && new Date(expires).getTime() <= now.getTime()) {
+        removedBinIds.push(entry.binId);
+        removedTypes[entry.type] = (removedTypes[entry.type] || 0) + 1;
+
+        // Physically remove the underlying original record if any
+        // is still present. This is the same remove-from-live
+        // step that `permanentDeleteFromBin` performs, so the
+        // no-ghost-knowledge guarantee is preserved.
+        if (entry.type === 'memory') {
+          this.data.memories = this.data.memories.filter((m) => m.memoryId !== entry.originalId);
+        } else if (entry.type === 'conversation_turn') {
+          this.data.conversations = this.data.conversations.filter((t) => t.turnId !== entry.originalId);
+        } else if (entry.type === 'session') {
+          if (this.data.sessions) {
+            this.data.sessions = this.data.sessions.filter((s) => s.sessionId !== entry.originalId);
+          }
+        } else if (entry.type === 'task') {
+          this.data.tasks = (this.data.tasks || []).filter((t) => t.id !== entry.originalId);
+        } else if (entry.type === 'note') {
+          this.data.crossUserNotes = (this.data.crossUserNotes || []).filter((n) => n.noteId !== entry.originalId);
+        } else if (entry.type === 'pattern') {
+          if (this.data.patterns) {
+            this.data.patterns = this.data.patterns.filter((p) => p.id !== entry.originalId);
+          }
+        }
+      } else {
+        survivors.push(entry);
+      }
+    }
+
+    this.data.bin = survivors;
+
+    // Bookkeeping on the policy
+    this.data.binPolicy = {
+      ...policy,
+      lastSweepAt: nowIso,
+      lastSweepAtIST: nowIst.istFull,
+      lastSweepRemoved: removedBinIds.length,
+    };
+
+    this.logMutation('SYSTEM', 'bin:sweep', true, `removed=${removedBinIds.length} types=${JSON.stringify(removedTypes)}`);
+    this.save();
+
+    const nextExpiryAt =
+      survivors.length > 0
+        ? survivors
+            .map((e) => e.expiresAt)
+            .filter((x): x is string => !!x)
+            .sort()[0] || null
+        : null;
+
+    return {
+      removed: removedBinIds.length,
+      removedBinIds,
+      removedTypes,
+      nextExpiryAt,
+      sweptAt: nowIst.iso,
+      sweptAtIST: nowIst.istFull,
+    };
+  }
+
+  // =================================================================
+  // SCOPE RESOLUTION — used by /api/bin/preview to answer
+  // "what will happen if I do this?" before any destructive action
+  // is taken. Returns the count, derived impact, and reversibility
+  // so the UI can render an honest confirmation.
+  // =================================================================
+  public resolveDeletionScope(args: {
+    identityId: string;
+    scope:
+      | 'single_memory'
+      | 'single_conversation'
+      | 'all_memories'
+      | 'all_conversations'
+      | 'single_task'
+      | 'all_tasks'
+      | 'single_pattern'
+      | 'all_patterns'
+      | 'pattern'
+      | 'task'
+      | 'note';
+    target?: string; // memoryId / sessionId / patternId / taskId
+  }): {
+    resolved: boolean;
+    ambiguous?: boolean;
+    candidates?: Array<{ id: string; preview: string; type: string }>;
+    affected?: {
+      memories: number;
+      turns: number;
+      sessions: number;
+      tasks: number;
+      patterns: number;
+      derivedMemories: number;
+    };
+    reversibility: 'recoverable' | 'permanent' | 'n/a';
+    safety: 'safe' | 'requires_confirm' | 'blocked';
+    message: string;
+  } {
+    const { identityId, scope, target } = args;
+    if (!identityId) {
+      return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'identityId required' };
+    }
+
+    if (scope === 'single_memory') {
+      if (!target) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'target memoryId required' };
+      }
+      const mem = this.data.memories.find((m) => m.memoryId === target && m.ownerId === identityId && !m.deletedAt);
+      if (!mem) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'memory not found' };
+      }
+      return {
+        resolved: true,
+        candidates: [{ id: mem.memoryId, preview: mem.content.slice(0, 140), type: 'memory' }],
+        affected: { memories: 1, turns: 0, sessions: 0, tasks: 0, patterns: 0, derivedMemories: 0 },
+        reversibility: 'recoverable',
+        safety: 'safe',
+        message: 'One memory will be moved to Bin. It can be restored.',
+      };
+    }
+
+    if (scope === 'single_conversation') {
+      if (!target) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'target sessionId required' };
+      }
+      const turns = (this.data.conversations || []).filter(
+        (c) => c.identityId === identityId && c.sessionId === target && !c.deletedAt
+      );
+      if (turns.length === 0) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'conversation not found' };
+      }
+      // Count derived memories whose last surviving source is this session
+      const derived = (this.data.memories || []).filter((m) => {
+        if (m.ownerId !== identityId || m.deletedAt) return false;
+        if (!m.provenance) return false;
+        const otherSources = (m.provenance.sourceTurnIds || []).filter((tid) => {
+          const t = this.data.conversations.find((c) => c.turnId === tid && !c.deletedAt);
+          return !!t && t.sessionId !== target;
+        });
+        const otherSessions = (m.provenance.sourceSessionIds || []).filter((sid) => sid !== target);
+        return (
+          (m.provenance.sourceSessionIds || []).includes(target) &&
+          otherSources.length === 0 &&
+          otherSessions.length === 0
+        );
+      });
+      return {
+        resolved: true,
+        candidates: turns.slice(0, 3).map((t) => ({ id: t.turnId, preview: t.content.slice(0, 140), type: 'turn' })),
+        affected: { memories: 0, turns: turns.length, sessions: 1, tasks: 0, patterns: 0, derivedMemories: derived.length },
+        reversibility: 'recoverable',
+        safety: derived.length > 0 ? 'requires_confirm' : 'safe',
+        message:
+          derived.length > 0
+            ? `${turns.length} message(s) and ${derived.length} derived memor${derived.length === 1 ? 'y' : 'ies'} will be moved to Bin. Both can be restored.`
+            : `${turns.length} message(s) in this conversation will be moved to Bin. They can be restored.`,
+      };
+    }
+
+    if (scope === 'all_memories') {
+      const mems = (this.data.memories || []).filter((m) => m.ownerId === identityId && !m.deletedAt);
+      if (mems.length === 0) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'no memories to delete' };
+      }
+      return {
+        resolved: true,
+        candidates: mems.slice(0, 5).map((m) => ({ id: m.memoryId, preview: m.content.slice(0, 140), type: 'memory' })),
+        affected: { memories: mems.length, turns: 0, sessions: 0, tasks: 0, patterns: 0, derivedMemories: 0 },
+        reversibility: 'recoverable',
+        safety: 'requires_confirm',
+        message: `All ${mems.length} memor${mems.length === 1 ? 'y' : 'ies'} for this identity will be moved to Bin. They can be restored.`,
+      };
+    }
+
+    if (scope === 'all_conversations') {
+      const turns = (this.data.conversations || []).filter((c) => c.identityId === identityId && !c.deletedAt);
+      const sessions = (this.data.sessions || []).filter((s) => s.identityId === identityId);
+      // Derived: any memory whose only surviving source is the set of
+      // these turns/sessions
+      const derived = (this.data.memories || []).filter((m) => {
+        if (m.ownerId !== identityId || m.deletedAt) return false;
+        if (!m.provenance) return false;
+        const allTurnSources = m.provenance.sourceTurnIds || [];
+        const allSessionSources = m.provenance.sourceSessionIds || [];
+        const aliveTurns = allTurnSources.filter((tid) => {
+          const t = this.data.conversations.find((c) => c.turnId === tid && !c.deletedAt);
+          return !!t;
+        });
+        const aliveSessions = allSessionSources.filter((sid) => {
+          return (this.data.conversations || []).some((c) => c.sessionId === sid && !c.deletedAt);
+        });
+        return (
+          ((allTurnSources.length > 0 && aliveTurns.length === 0) ||
+            (allSessionSources.length > 0 && aliveSessions.length === 0)) &&
+          aliveTurns.length === 0 &&
+          aliveSessions.length === 0
+        );
+      });
+      return {
+        resolved: true,
+        candidates: turns.slice(0, 5).map((t) => ({ id: t.turnId, preview: t.content.slice(0, 140), type: 'turn' })),
+        affected: {
+          memories: 0,
+          turns: turns.length,
+          sessions: sessions.length,
+          tasks: 0,
+          patterns: 0,
+          derivedMemories: derived.length,
+        },
+        reversibility: 'recoverable',
+        safety: 'requires_confirm',
+        message:
+          derived.length > 0
+            ? `All ${turns.length} message(s) across ${sessions.length} session(s), plus ${derived.length} derived memor${derived.length === 1 ? 'y' : 'ies'} exclusively dependent on them, will be moved to Bin. All can be restored.`
+            : `All ${turns.length} message(s) across ${sessions.length} session(s) will be moved to Bin. They can be restored.`,
+      };
+    }
+
+    if (scope === 'single_task') {
+      if (!target) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'target taskId required' };
+      }
+      const t = (this.data.tasks || []).find(
+        (tk) => tk.id === target && tk.identityId === identityId && !(tk as any).deletedAt
+      );
+      if (!t) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'task not found' };
+      }
+      return {
+        resolved: true,
+        candidates: [{ id: t.id, preview: t.title.slice(0, 140), type: 'task' }],
+        affected: { memories: 0, turns: 0, sessions: 0, tasks: 1, patterns: 0, derivedMemories: 0 },
+        reversibility: 'recoverable',
+        safety: 'safe',
+        message: 'One task will be moved to Bin. It can be restored.',
+      };
+    }
+
+    if (scope === 'all_tasks') {
+      const tasks = (this.data.tasks || []).filter((tk) => tk.identityId === identityId && !(tk as any).deletedAt);
+      if (tasks.length === 0) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'no tasks to delete' };
+      }
+      return {
+        resolved: true,
+        candidates: tasks.slice(0, 5).map((tk) => ({ id: tk.id, preview: tk.title.slice(0, 140), type: 'task' })),
+        affected: { memories: 0, turns: 0, sessions: 0, tasks: tasks.length, patterns: 0, derivedMemories: 0 },
+        reversibility: 'recoverable',
+        safety: 'requires_confirm',
+        message: `All ${tasks.length} task${tasks.length === 1 ? '' : 's'} for this identity will be moved to Bin. They can be restored.`,
+      };
+    }
+
+    if (scope === 'single_pattern') {
+      if (!target) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'target patternId required' };
+      }
+      const p = (this.data.patterns || []).find(
+        (pt) => pt.id === target && pt.identityId === identityId && !(pt as any).deletedAt
+      );
+      if (!p) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'pattern not found' };
+      }
+      return {
+        resolved: true,
+        candidates: [{ id: p.id, preview: p.description.slice(0, 140), type: 'pattern' }],
+        affected: { memories: 0, turns: 0, sessions: 0, tasks: 0, patterns: 1, derivedMemories: 0 },
+        reversibility: 'recoverable',
+        safety: 'safe',
+        message: 'One pattern will be moved to Bin. It can be restored.',
+      };
+    }
+
+    if (scope === 'all_patterns') {
+      const patterns = (this.data.patterns || []).filter(
+        (pt) => pt.identityId === identityId && !(pt as any).deletedAt
+      );
+      if (patterns.length === 0) {
+        return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'no patterns to delete' };
+      }
+      return {
+        resolved: true,
+        candidates: patterns.slice(0, 5).map((p) => ({ id: p.id, preview: p.description.slice(0, 140), type: 'pattern' })),
+        affected: { memories: 0, turns: 0, sessions: 0, tasks: 0, patterns: patterns.length, derivedMemories: 0 },
+        reversibility: 'recoverable',
+        safety: 'requires_confirm',
+        message: `All ${patterns.length} pattern${patterns.length === 1 ? '' : 's'} for this identity will be moved to Bin. They can be restored.`,
+      };
+    }
+
+    return { resolved: false, reversibility: 'n/a', safety: 'blocked', message: 'unsupported scope' };
+  }
+
+  // =================================================================
+  // AMBIGUITY DETECTION — used when the user says "delete my project
+  // conversation" but multiple candidates exist. Returns a list of
+  // candidates the UI can render as a chooser.
+  // =================================================================
+  public findAmbiguousTargets(
+    identityId: string,
+    kind: 'memory' | 'conversation' | 'session' | 'task' | 'pattern',
+    query: string
+  ): Array<{ id: string; preview: string; meta?: string }> {
+    if (!identityId || !query) return [];
+    const q = query.toLowerCase();
+
+    if (kind === 'memory') {
+      return (this.data.memories || [])
+        .filter((m) => m.ownerId === identityId && !m.deletedAt && m.content.toLowerCase().includes(q))
+        .slice(0, 8)
+        .map((m) => ({ id: m.memoryId, preview: m.content.slice(0, 140), meta: m.category }));
+    }
+
+    if (kind === 'task') {
+      return (this.data.tasks || [])
+        .filter((t) => t.identityId === identityId && !(t as any).deletedAt && t.title.toLowerCase().includes(q))
+        .slice(0, 8)
+        .map((t) => ({ id: t.id, preview: t.title.slice(0, 140), meta: t.status }));
+    }
+
+    if (kind === 'pattern') {
+      return (this.data.patterns || [])
+        .filter(
+          (p) => p.identityId === identityId && !(p as any).deletedAt && p.description.toLowerCase().includes(q)
+        )
+        .slice(0, 8)
+        .map((p) => ({ id: p.id, preview: p.description.slice(0, 140), meta: p.category }));
+    }
+
+    if (kind === 'conversation' || kind === 'session') {
+      // Group turns by sessionId
+      const groups = new Map<string, ConversationTurn[]>();
+      for (const c of (this.data.conversations || []).filter(
+        (c) => c.identityId === identityId && !c.deletedAt
+      )) {
+        if (!c.sessionId) continue;
+        if (!groups.has(c.sessionId)) groups.set(c.sessionId, []);
+        groups.get(c.sessionId)!.push(c);
+      }
+      const out: Array<{ id: string; preview: string; meta?: string }> = [];
+      for (const [sessionId, turns] of groups) {
+        const sample = turns
+          .slice()
+          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+          .slice(0, 2)
+          .map((t) => t.content)
+          .join(' / ');
+        const blob = sample.toLowerCase();
+        if (blob.includes(q) || q.split(/\s+/).some((tok) => tok.length > 2 && blob.includes(tok))) {
+          const meta = turns.length === 1 ? '1 turn' : `${turns.length} turns`;
+          out.push({ id: sessionId, preview: sample.slice(0, 140) || sessionId, meta });
+        }
+      }
+      return out.slice(0, 8);
+    }
+
+    return [];
+  }
+
   // --- Identity-Scoped Learned Patterns (Habits, Routines, Preferences, Plans, Recurring Behaviors) ---
   public getPatternsForIdentity(identityId: string): LearnedPattern[] {
     if (!identityId || identityId === 'UNKNOWN' || identityId === 'UNREGISTERED' || identityId === 'GUEST') return [];
     if (!this.data.patterns) this.data.patterns = [];
     return this.data.patterns
-      .filter((p) => p.identityId === identityId)
+      .filter((p) => p.identityId === identityId && !(p as any).deletedAt)
       .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
   }
 
@@ -1268,7 +2776,13 @@ class DatabaseEngine {
     identityId: string,
     description: string,
     category: LearnedPattern['category'] = 'preference',
-    confidence = 0.85
+    confidence = 0.85,
+    provenance?: {
+      sourceTurnIds?: string[];
+      sourceSessionIds?: string[];
+      sourceMemoryIds?: string[];
+      extractedBy?: string;
+    }
   ): LearnedPattern | null {
     if (!identityId || !description.trim()) return null;
     if (!this.data.patterns) this.data.patterns = [];
@@ -1278,7 +2792,7 @@ class DatabaseEngine {
     const newTokens = this.tokenizeText(cleanDesc);
 
     const existing = this.data.patterns.find((p) => {
-      if (p.identityId !== identityId) return false;
+      if (p.identityId !== identityId || p.deletedAt) return false;
       if (p.description.toLowerCase() === cleanDesc.toLowerCase()) return true;
       const sim = this.calculateSimilarity(newTokens, this.tokenizeText(p.description));
       return sim > 0.6;
@@ -1294,6 +2808,29 @@ class DatabaseEngine {
       existing.lastObservedAt = nowIst.iso;
       existing.lastObservedAtIST = nowIst.istFull;
       existing.updatedAt = nowIst.iso;
+
+      // Merge provenance at write time. This is the canonical
+      // place where a pattern records where it came from. Sources
+      // are accumulated, never overwritten, so a pattern can
+      // survive deletion of any single source as long as at least
+      // one valid source remains.
+      if (provenance) {
+        const nowIso = nowIst.iso;
+        const turnSet = new Set(existing.provenance?.sourceTurnIds || []);
+        const sessSet = new Set(existing.provenance?.sourceSessionIds || []);
+        const memSet = new Set(existing.provenance?.sourceMemoryIds || []);
+        for (const t of provenance.sourceTurnIds || []) turnSet.add(t);
+        for (const s of provenance.sourceSessionIds || []) sessSet.add(s);
+        for (const m of provenance.sourceMemoryIds || []) memSet.add(m);
+        existing.provenance = {
+          sourceTurnIds: Array.from(turnSet),
+          sourceSessionIds: Array.from(sessSet),
+          sourceMemoryIds: Array.from(memSet),
+          extractedBy: provenance.extractedBy || existing.provenance?.extractedBy || 'unknown',
+          lastDerivedAtISO: nowIso,
+        };
+      }
+
       this.save();
       return existing;
     }
@@ -1312,6 +2849,15 @@ class DatabaseEngine {
       lastObservedAtIST: nowIst.istFull,
       createdAt: nowIst.iso,
       updatedAt: nowIst.iso,
+      provenance: provenance
+        ? {
+            sourceTurnIds: Array.from(new Set(provenance.sourceTurnIds || [])),
+            sourceSessionIds: Array.from(new Set(provenance.sourceSessionIds || [])),
+            sourceMemoryIds: Array.from(new Set(provenance.sourceMemoryIds || [])),
+            extractedBy: provenance.extractedBy || 'unknown',
+            lastDerivedAtISO: nowIst.iso,
+          }
+        : undefined,
     };
 
     this.data.patterns.push(newPattern);
@@ -1549,8 +3095,8 @@ class DatabaseEngine {
   // --- Identity-Scoped Conversation Context with Rich Temporal Fields ---
   public getRecentTurns(identityId: string, limit = 10, sessionId?: string): ConversationTurn[] {
     if (!identityId) return [];
-    let userTurns = this.data.conversations.filter((c) => c.identityId === identityId);
-    
+    let userTurns = this.data.conversations.filter((c) => c.identityId === identityId && !c.deletedAt);
+
     // STRICT ISOLATION: Prevent cross-guest conversation leakage.
     // If the identity is UNKNOWN/Guest, ONLY return turns matching the CURRENT sessionId.
     if (identityId === 'UNKNOWN' || identityId === 'UNREGISTERED') {
@@ -1560,7 +3106,7 @@ class DatabaseEngine {
         return []; // Do not return other guests' turns if no session is provided
       }
     }
-    
+
     return userTurns.slice(-limit);
   }
 
@@ -1682,7 +3228,7 @@ class DatabaseEngine {
   ): ConversationTurn[] {
     if (!identityId || identityId === 'UNKNOWN' || identityId === 'UNREGISTERED' || identityId === 'GUEST') return [];
     const userTurns = this.data.conversations.filter(
-      (c) => c.identityId === identityId && !excludeTurnIds.has(c.turnId)
+      (c) => c.identityId === identityId && !excludeTurnIds.has(c.turnId) && !c.deletedAt
     );
 
     if (!currentQuery || !currentQuery.trim()) {
@@ -1943,7 +3489,7 @@ class DatabaseEngine {
     if (!identityId || identityId === 'UNKNOWN' || identityId === 'UNREGISTERED' || identityId === 'GUEST') return [];
     if (!this.data.tasks) return [];
     return this.data.tasks
-      .filter((t) => t.identityId === identityId)
+      .filter((t) => t.identityId === identityId && !(t as any).deletedAt)
       .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
   }
 
@@ -2061,7 +3607,7 @@ class DatabaseEngine {
    * Get all tasks across all identities (for awareness engine).
    */
   public getAllTasks(): TaskItem[] {
-    return this.data.tasks || [];
+    return (this.data.tasks || []).filter((t) => !(t as any).deletedAt);
   }
 
   /**
@@ -2091,7 +3637,8 @@ class DatabaseEngine {
       t.dueAt &&
       t.dueAt <= nowIso &&
       t.status !== 'completed' &&
-      t.status !== 'cancelled'
+      t.status !== 'cancelled' &&
+      !(t as any).deletedAt
     );
   }
 

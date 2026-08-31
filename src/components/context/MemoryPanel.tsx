@@ -4,7 +4,7 @@
 
 import { motion } from 'motion/react';
 import { useState } from 'react';
-import { Search, Brain, Sparkles, Filter, Plus } from 'lucide-react';
+import { Search, Brain, Sparkles, Filter, Plus, Trash2 } from 'lucide-react';
 import { Identity } from '../../types.js';
 import { useApi } from '../../hooks/useApi.js';
 import { useStage } from '../../hooks/useStage.js';
@@ -31,9 +31,16 @@ const CATEGORY_EMOJI: Record<string, string> = {
 interface MemoryPanelProps {
   identity: Identity;
   authToken?: string;
+  /**
+   * Optional callback invoked when the user clicks the trash icon on a
+   * memory. Receives the memory id + preview. The host drives the
+   * TARGET → SCOPE → SAFETY → CONFIRMATION → BIN flow; this panel
+   * never deletes anything directly.
+   */
+  onRequestDelete?: (memoryId: string, preview: string) => void;
 }
 
-export function MemoryPanel({ identity, authToken }: MemoryPanelProps) {
+export function MemoryPanel({ identity, authToken, onRequestDelete }: MemoryPanelProps) {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const { setStage } = useStage();
@@ -141,7 +148,7 @@ export function MemoryPanel({ identity, authToken }: MemoryPanelProps) {
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.02 }}
-                className="rounded-2xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.07] p-3 transition-colors cursor-default"
+                className="rounded-2xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.07] p-3 transition-colors cursor-default group"
               >
                 <div className="flex items-start gap-2">
                   <span className="text-base leading-none mt-0.5 shrink-0">
@@ -169,6 +176,17 @@ export function MemoryPanel({ identity, authToken }: MemoryPanelProps) {
                       )}
                     </div>
                   </div>
+                  {onRequestDelete && mem.memoryId && (
+                    <button
+                      type="button"
+                      onClick={() => onRequestDelete(mem.memoryId, mem.content || '')}
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0 w-7 h-7 rounded-lg text-white/45 hover:text-rose-300 hover:bg-rose-500/10 flex items-center justify-center cursor-pointer press-scale"
+                      aria-label="Move to Bin"
+                      title="Move to Bin"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </motion.div>
             ))}

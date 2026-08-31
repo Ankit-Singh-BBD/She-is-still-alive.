@@ -954,7 +954,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
       if (analysis.nothingLearned) return;
 
       // Apply LLM decisions through validated DB operations
-      this.applyPostInteractionDecisions(identityId, senderName, analysis);
+      this.applyPostInteractionDecisions(identityId, senderName, analysis, sessionId);
     } catch (err) {
       // Non-blocking: learning failures should not affect the main interaction
       console.warn('Post-interaction cognition failed:', err);
@@ -964,7 +964,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
   /**
    * Applies the structured decisions from post-interaction cognition through validated DB operations.
    */
-  private applyPostInteractionDecisions(identityId: string, senderName: string, analysis: any): void {
+  private applyPostInteractionDecisions(identityId: string, senderName: string, analysis: any, sessionId?: string): void {
     // New memories
     if (Array.isArray(analysis.newMemories)) {
       for (const mem of analysis.newMemories.slice(0, 3)) {
@@ -999,11 +999,19 @@ Return ONLY valid JSON, no markdown, no explanation.`;
       }
     }
 
-    // New patterns
+    // New patterns — record provenance at write time so the deletion
+    // system can later determine whether the pattern still has
+    // surviving sources.
     if (Array.isArray(analysis.newPatterns)) {
       for (const pat of analysis.newPatterns.slice(0, 2)) {
         if (pat.description && typeof pat.description === 'string' && pat.description.length > 3) {
-          db.addOrUpdatePattern(identityId, pat.description, pat.category || 'preference', 0.85);
+          db.addOrUpdatePattern(
+            identityId,
+            pat.description,
+            pat.category || 'preference',
+            0.85,
+            { sourceSessionIds: sessionId ? [sessionId] : [], extractedBy: 'cognition-2.new' },
+          );
         }
       }
     }
@@ -1015,7 +1023,13 @@ Return ONLY valid JSON, no markdown, no explanation.`;
           // Strengthen by re-observing with the same description
           const existing = db.getPatternsForIdentity(identityId).find(p => p.id === str.patternId);
           if (existing) {
-            db.addOrUpdatePattern(identityId, existing.description, existing.category, existing.confidence);
+            db.addOrUpdatePattern(
+              identityId,
+              existing.description,
+              existing.category,
+              existing.confidence,
+              { sourceSessionIds: sessionId ? [sessionId] : [], extractedBy: 'cognition-2.strengthen' },
+            );
           }
         }
       }
