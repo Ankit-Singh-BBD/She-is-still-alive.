@@ -1248,6 +1248,7 @@ class DatabaseEngine {
 
     this.data.memories.push(record);
     const ok = this.save();
+    this.logMutation(identityId, 'addMemory', ok, `memoryId: ${memoryId}`);
     return ok ? record : null;
   }
 
@@ -2861,7 +2862,8 @@ class DatabaseEngine {
     };
 
     this.data.patterns.push(newPattern);
-    this.save();
+    const ok = this.save();
+    this.logMutation(identityId, 'addOrUpdatePattern', ok, `patternId: ${patternId}`);
     return newPattern;
   }
 
@@ -2936,7 +2938,9 @@ class DatabaseEngine {
     if (newCategory) memory.category = newCategory;
     memory.updatedAt = nowIst.iso;
     memory.updatedAtIST = nowIst.istFull;
-    return this.save();
+    const ok = this.save();
+    this.logMutation(identityId, 'updateMemoryContent', ok, `memoryId: ${memoryId}`);
+    return ok;
   }
 
   /**
@@ -3543,7 +3547,8 @@ class DatabaseEngine {
       const previousState = task.status;
       task.status = status;
       task.updatedAt = new Date().toISOString();
-      this.save();
+      const ok = this.save();
+      this.logMutation(identityId, 'updateTaskStatus', ok, `taskId: ${taskId} ${previousState}→${status}`);
       // Emit event for awareness engine (non-blocking)
       if (previousState !== status) {
         import('./event-system.js').then(({ emitTaskStateChange }) => {
@@ -3591,7 +3596,8 @@ class DatabaseEngine {
       source: options.source || 'user_explicit',
     };
     this.data.tasks.push(newTask);
-    this.save();
+    const ok = this.save();
+    this.logMutation(identityId, 'createTaskWithMetadata', ok, `taskId: ${newTask.id}`);
 
     // Emit event
     import('./event-system.js').then(({ emitTaskStateChange }) => {
@@ -3687,7 +3693,8 @@ class DatabaseEngine {
     };
 
     this.data.crossUserNotes.push(note);
-    this.save();
+    const ok = this.save();
+    this.logMutation(senderId, 'addCrossUserNote', ok, `noteId: ${noteId} target: ${targetName || resolvedTargetId || 'ANY'}`);
     return note;
   }
 
@@ -4244,7 +4251,8 @@ class DatabaseEngine {
       status: 'open',
     };
     wa.openLoops.unshift(loop);
-    this.save();
+    const ok = this.save();
+    this.logMutation(identityId, 'addOpenLoop', ok, `loopId: ${id}`);
 
     // Emit event
     import('./event-system.js').then(({ emitLoopStateChange }) => {
@@ -4266,7 +4274,8 @@ class DatabaseEngine {
       loop.status = 'resolved';
       loop.resolvedAtISO = nowIst.iso;
       loop.resolvedAtIST = nowIst.istFull;
-      this.save();
+      const ok = this.save();
+      this.logMutation(loop.identityId, 'resolveOpenLoop', ok, `loopId: ${loopId}`);
 
       // Emit event
       import('./event-system.js').then(({ emitLoopResolved, emitLoopStateChange }) => {
@@ -4291,7 +4300,8 @@ class DatabaseEngine {
       loop.status = 'open';
       loop.resolvedAtISO = undefined;
       loop.resolvedAtIST = undefined;
-      this.save();
+      const ok = this.save();
+      this.logMutation(loop.identityId, 'reopenOpenLoop', ok, `loopId: ${loopId}`);
       return true;
     }
     return false;

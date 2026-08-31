@@ -237,14 +237,45 @@ export class CognitiveDecisionEngine {
 
   /**
    * Fallback decision when LLM is unavailable.
+   * Derives understanding, intent, and tone from the raw input so
+   * the response is never a static canned string — even offline.
    * Always speaks with low confidence; never invents tools.
    */
   private fallbackDecision(context: CognitiveContext): CognitiveDecision {
+    const raw = (context.perception?.raw || '').trim();
+    const lower = raw.toLowerCase();
+    const isQuestion = /[?]\s*$/.test(raw) || /^(what|where|when|who|why|how|kya|kahan|kab|kaun|kaise)\b/i.test(raw);
+    const isGreeting = /^(hi|hello|hey|namaste|namaskar|hola|gm|good (morning|afternoon|evening))\b/i.test(raw);
+    const isAcknowledgment = /^(ok|okay|thanks|thank you|thx|cool|great|noted|got it)\b/i.test(raw);
+
+    let intent = 'Conversational input';
+    let understanding = `Treating "${raw}" as a general conversational turn.`;
+    let tone: 'casual' | 'warm' | 'professional' | 'neutral' = 'neutral';
+    if (isGreeting) {
+      intent = 'Greeting';
+      understanding = `Recognized greeting: "${raw}"`;
+      tone = 'warm';
+    } else if (isQuestion) {
+      intent = 'Question';
+      understanding = `Question detected: "${raw}"`;
+      tone = 'casual';
+    } else if (isAcknowledgment) {
+      intent = 'Acknowledgment';
+      understanding = `Brief acknowledgment: "${raw}"`;
+      tone = 'casual';
+    } else if (raw.length > 0) {
+      intent = 'Statement';
+      understanding = `Statement received: "${raw}"`;
+    } else {
+      intent = 'Empty input';
+      understanding = 'Empty input — no action required.';
+    }
+
     return {
-      understanding: 'Unable to perform full semantic reasoning. Treating as general conversational input.',
+      understanding,
       relevantContext: [],
-      intent: 'Unknown — LLM unavailable',
-      reasoning: 'Cognitive engine unavailable; defaulting to a low-confidence speak action without tool use.',
+      intent,
+      reasoning: `Cognitive engine unavailable; derived '${intent}' from input shape so response is still contextually relevant.`,
       confusions: ['LLM not reachable'],
       assumptions: ['User wants a response'],
       proposedAction: {
@@ -254,9 +285,9 @@ export class CognitiveDecisionEngine {
       },
       speechDecision: {
         shouldSpeak: true,
-        reason: 'Default behavior when reasoning engine is offline',
+        reason: `Adaptive fallback for ${intent.toLowerCase()} (LLM offline)`,
         urgency: 'whenever',
-        tone: 'neutral',
+        tone,
       },
       learningDecision: {
         shouldLearn: false,
@@ -265,7 +296,7 @@ export class CognitiveDecisionEngine {
       },
       knowledgeUpdates: [],
       confidence: 0.3,
-      uncertainty: ['LLM unavailable', 'No semantic understanding available'],
+      uncertainty: ['LLM unavailable', 'Heuristic-only understanding'],
       decidedAt: new Date().toISOString(),
       decisionId: generateDecisionId(),
     };

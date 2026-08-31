@@ -29,6 +29,13 @@ export interface RuntimeContext {
     istTime: string;
     istFull: string;
   };
+  temporal: {
+    timeIST: string;
+    dateIST: string;
+    dayOfWeek: string;
+    timeOfDay: 'early_morning' | 'morning' | 'afternoon' | 'evening' | 'night';
+    formattedDate: string;
+  };
   voiceConfig: PersonaAndVoiceConfig;
 }
 
@@ -127,6 +134,26 @@ export function buildRuntimeContext(context: AuthContext, sessionId?: string): R
       istTime: nowIst.istTime,
       istFull: nowIst.istFull,
     },
+    temporal: {
+      timeIST: nowIst.istTime,
+      dateIST: nowIst.istDate,
+      dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Kolkata' }),
+      timeOfDay: deriveTimeOfDay(nowIst.istTime),
+      formattedDate: nowIst.istFull,
+    },
     voiceConfig: db.getPersonaVoiceConfig(context.id),
   };
+}
+
+/**
+ * Derive a coarse time-of-day bucket from the HH:MM IST string.
+ */
+function deriveTimeOfDay(istTime: string): 'early_morning' | 'morning' | 'afternoon' | 'evening' | 'night' {
+  const hour = parseInt(istTime.split(':')[0] || '0', 10);
+  if (hour < 5) return 'night';
+  if (hour < 8) return 'early_morning';
+  if (hour < 12) return 'morning';
+  if (hour < 17) return 'afternoon';
+  if (hour < 21) return 'evening';
+  return 'night';
 }

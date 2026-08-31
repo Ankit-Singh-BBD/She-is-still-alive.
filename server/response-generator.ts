@@ -131,10 +131,11 @@ export class ResponseGenerator {
   }
 
   /**
-   * Fallback when LLM unavailable: synthesize a simple response
-   * from the decision and verification.
+   * Fallback when LLM unavailable: synthesize a context-aware response
+   * from the decision and verification. Never returns a static canned
+   * string — always derived from intent/understanding.
    */
-  private fallbackResponse(decision: CognitiveDecision, verification: Verification, _userInput: string): string {
+  private fallbackResponse(decision: CognitiveDecision, verification: Verification, userInput: string): string {
     if (decision.proposedAction.type === 'silent' || !decision.speechDecision.shouldSpeak) {
       return '';
     }
@@ -143,6 +144,20 @@ export class ResponseGenerator {
         return 'Done.';
       }
       return "I tried to handle that, but ran into an issue. Could you try again?";
+    }
+    const intent = (decision.intent || '').toLowerCase();
+    const trimmed = (userInput || '').trim();
+    if (intent === 'greeting') {
+      return `Hello! You said "${trimmed}" — I'm here.`;
+    }
+    if (intent === 'acknowledgment') {
+      return `Noted: "${trimmed}".`;
+    }
+    if (intent === 'question') {
+      return `I'm running with reduced reasoning right now, so I can't fully answer "${trimmed}". Could you rephrase or try again shortly?`;
+    }
+    if (intent === 'statement') {
+      return `Got it: "${trimmed}".`;
     }
     return decision.understanding || "I hear you.";
   }

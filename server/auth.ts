@@ -22,7 +22,7 @@ export interface AuthContext {
   scopes: string[];
 }
 
-const OWNER_SCOPES = [
+export const OWNER_SCOPES = [
   'system:settings',
   'system:diagnostics',
   'memory:read_owner',
@@ -32,7 +32,7 @@ const OWNER_SCOPES = [
   'tool:all',
 ];
 
-const USER_SCOPES = [
+export const USER_SCOPES = [
   'memory:read_self',
   'memory:write_self',
   'conversation:recall_self',
@@ -40,7 +40,7 @@ const USER_SCOPES = [
   'tool:info',
 ];
 
-const UNKNOWN_SCOPES = [
+export const UNKNOWN_SCOPES = [
   'conversation:general',
   'user:register',
   'owner:auth',

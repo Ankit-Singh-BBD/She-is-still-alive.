@@ -540,22 +540,22 @@ export class CognitiveLoop {
     const verification = await this.verify(actionResult, decision);
 
     // Stage 9: RESPOND — generate natural language AFTER state resolved
-    const responseText = await responseGenerator.generate(
-      decision.cognitiveDecision,
+    // Route through this.respond() so the RESPOND stage timing is captured
+    // alongside the other 11 stages of the 12-stage cognitive loop.
+    const response: Response = await this.respond(
       verification,
-      userInput,
-      identity.name,
-      identity.role,
-      identity.isOwnerAuthenticated
+      decision,
+      async (decisionArg, verificationArg) => {
+        return await responseGenerator.generate(
+          decisionArg,
+          verificationArg,
+          userInput,
+          identity.name,
+          identity.role,
+          identity.isOwnerAuthenticated
+        );
+      }
     );
-    const response: Response = {
-      text: responseText,
-      metadata: {
-        confidence: decision.cognitiveDecision.confidence,
-        basedOnVerification: verification.verified,
-        tone: decision.cognitiveDecision.speechDecision.tone || 'neutral',
-      },
-    };
 
     // Stage 10: LEARN
     const learning = await this.learn(context, decision, response);

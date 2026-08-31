@@ -9,7 +9,7 @@
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test": "tsx test-deletion-safety.ts"
+    "test": "tsx test-deletion-safety.ts && tsx test-architectural-invariants.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
