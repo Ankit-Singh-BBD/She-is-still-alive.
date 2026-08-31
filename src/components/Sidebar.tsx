@@ -215,72 +215,57 @@ export function Sidebar({
             })}
           </nav>
 
-          {/* ---- Active identity card -------------------------------- */}
+          {/* ---- Active identity badge (Section 1 Exact Mirror) ---------------- */}
           <div className="mt-auto">
             <div className="cine-hairline mb-3" />
 
-            <button
-              type="button"
-              onClick={onOpenIdentitySwitch}
-              className="w-full cine-chip rounded-2xl px-3 py-2.5 flex items-center gap-2.5 text-left cursor-pointer press-scale transition-transform hover:brightness-110"
-            >
-              <span className="relative w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-semibold text-white shrink-0 overflow-hidden border border-white/20">
-                <span
-                  className="absolute inset-0"
-                  style={{
-                    background:
-                      'linear-gradient(140deg, rgba(253,186,116,0.42), rgba(244,114,182,0.38) 50%, rgba(139,92,246,0.45))',
-                  }}
-                />
-                <span className="relative">
-                  {identity.name?.charAt(0)?.toUpperCase() || 'G'}
+            <div className="w-full cine-chip rounded-2xl px-3 py-2.5 flex items-center justify-between gap-2.5 transition-all">
+              <button
+                type="button"
+                onClick={onOpenIdentitySwitch}
+                className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition-opacity"
+              >
+                <span className="relative w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-semibold text-white shrink-0 overflow-hidden border border-white/20">
+                  <span
+                    className="absolute inset-0"
+                    style={{
+                      background:
+                        'linear-gradient(140deg, rgba(253,186,116,0.45), rgba(244,114,182,0.4) 50%, rgba(139,92,246,0.45))',
+                    }}
+                  />
+                  <span className="relative">
+                    {identity.name?.charAt(0)?.toUpperCase() || 'M'}
+                  </span>
                 </span>
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[12.5px] font-semibold text-white truncate leading-tight">
-                  {identity.name}
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12px] font-semibold text-white truncate leading-tight">
+                    {identity.name || 'Madhurita'}
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-white/55 truncate leading-tight mt-0.5">
+                    <span>Online</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)] animate-pulse" />
+                  </span>
                 </span>
-                <span className="block text-[10px] text-white/50 truncate leading-tight mt-0.5">
-                  {roleLabel} · Switch
-                </span>
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-white/40 shrink-0" />
-            </button>
+              </button>
 
-            {/* Voice status mini pill */}
-            <div
-              className={`mt-2.5 rounded-xl px-3 py-1.5 flex items-center gap-2 text-[11px] transition-all duration-300 border ${
-                isVoiceActive
-                  ? 'cine-chip text-white border-indigo-300/35'
-                  : 'bg-white/[0.035] border-white/10 text-white/50'
-              }`}
-              style={
-                isVoiceActive
-                  ? { boxShadow: '0 0 22px -6px rgba(99,102,241,0.55)' }
-                  : undefined
-              }
-            >
-              <AudioLines
-                className={`w-3.5 h-3.5 ${
-                  isVoiceActive ? 'text-indigo-200 animate-soft-glow' : 'text-white/40'
-                }`}
-              />
-              <span className="truncate">
-                {state === 'connecting'
-                  ? 'Connecting…'
-                  : state === 'listening'
-                  ? 'Listening…'
-                  : state === 'speaking'
-                  ? 'Speaking…'
-                  : 'Voice idle'}
-              </span>
-              <span
-                className={`ml-auto w-1.5 h-1.5 rounded-full ${
+              {/* Right side interactive waveform trigger button (-|||-) */}
+              <button
+                type="button"
+                onClick={onVoiceTrigger}
+                className={`w-7 h-7 rounded-xl flex items-center justify-center border transition-all cursor-pointer press-scale shrink-0 ${
                   isVoiceActive
-                    ? 'bg-emerald-300 shadow-[0_0_6px_rgba(52,211,153,0.7)]'
-                    : 'bg-slate-400'
+                    ? 'bg-orange-500/20 border-orange-400/40 text-orange-300 shadow-[0_0_12px_rgba(251,146,60,0.4)]'
+                    : 'bg-white/[0.05] border-white/10 text-white/60 hover:text-white hover:bg-white/[0.1]'
                 }`}
-              />
+                aria-label="Toggle voice"
+                title="Toggle Voice"
+              >
+                <div className="flex items-center gap-0.5 h-2.5">
+                  <span className="w-0.5 h-1.5 rounded-full bg-current" />
+                  <span className="w-0.5 h-2.5 rounded-full bg-current" />
+                  <span className="w-0.5 h-1.5 rounded-full bg-current" />
+                </div>
+              </button>
             </div>
           </div>
         </div>

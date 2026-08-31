@@ -1170,6 +1170,44 @@ export default function App() {
 
             {/* Main content column */}
             <main className="flex-1 flex flex-col min-w-0 relative pb-20 lg:pb-0">
+              {/* Top-Right Floating Waveform Voice Trigger Button (Section 1) */}
+              <div className="hidden lg:block absolute top-5 right-6 z-30 pointer-events-auto">
+                <button
+                  type="button"
+                  onClick={handleToggleVoice}
+                  className={`w-10 h-10 rounded-full glass-panel border flex items-center justify-center transition-all duration-200 cursor-pointer press-scale group ${
+                    liveState === 'listening' || liveState === 'speaking'
+                      ? 'border-orange-400/50 shadow-[0_0_20px_rgba(251,146,60,0.4)]'
+                      : 'border-white/15 hover:border-white/30'
+                  }`}
+                  aria-label="Toggle live voice"
+                  title="Toggle Full-Duplex Voice"
+                >
+                  <div className="flex items-center gap-0.5 h-3.5">
+                    <span
+                      className={`w-0.5 rounded-full transition-all duration-200 ${
+                        liveState === 'listening' || liveState === 'speaking'
+                          ? 'h-3 bg-orange-300 animate-pulse'
+                          : 'h-1.5 bg-white/70 group-hover:bg-white'
+                      }`}
+                    />
+                    <span
+                      className={`w-0.5 rounded-full transition-all duration-200 ${
+                        liveState === 'listening' || liveState === 'speaking'
+                          ? 'h-4 bg-orange-400 animate-pulse delay-75'
+                          : 'h-3.5 bg-white/90 group-hover:bg-white'
+                      }`}
+                    />
+                    <span
+                      className={`w-0.5 rounded-full transition-all duration-200 ${
+                        liveState === 'listening' || liveState === 'speaking'
+                          ? 'h-2.5 bg-orange-300 animate-pulse delay-150'
+                          : 'h-2 bg-white/70 group-hover:bg-white'
+                      }`}
+                    />
+                  </div>
+                </button>
+              </div>
               {/* Error Banner */}
               <AnimatePresence>
                 {errorMessage && (
@@ -1216,6 +1254,8 @@ export default function App() {
                   onToggleVoice={handleToggleVoice}
                   onQuickAction={handleSendChatMessage}
                   onOpenOnboarding={() => setIsOwnerAuthOpen(true)}
+                  streamer={liveClientRef.current?.getStreamer()}
+                  player={liveClientRef.current?.getPlayer()}
                 />
               </div>
             </main>

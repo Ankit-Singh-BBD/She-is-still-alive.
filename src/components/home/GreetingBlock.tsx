@@ -31,12 +31,15 @@ export function GreetingBlock({ identityName, role = 'unknown' }: GreetingBlockP
       transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
       className="flex flex-col items-center text-center"
     >
-      {/* Greeting line */}
-      <h1 className="text-[32px] sm:text-[40px] lg:text-[44px] font-semibold tracking-tight leading-[1.1] text-white">
+      {/* Greeting headline & subtitle */}
+      <h1 className="text-[32px] sm:text-[42px] lg:text-[46px] font-bold tracking-tight leading-[1.15] text-white">
         {greeting.label},{' '}
         <span className="text-gradient-sunset">{firstName}</span>{' '}
-        <span className="inline-block">{greeting.emoji}</span>
+        <span className="inline-block text-amber-300 drop-shadow-[0_0_12px_rgba(251,191,36,0.6)]">✨</span>
       </h1>
+      <p className="text-[14px] sm:text-[15px] text-white/70 mt-1.5 font-normal tracking-wide">
+        How can I help you today?
+      </p>
 
       {/* Time + weather subline */}
       <motion.div
