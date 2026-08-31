@@ -366,10 +366,36 @@ async function startServer() {
             condition: weather.condition,
             description: weather.description,
             humidity: weather.humidity,
+            windSpeed: weather.windSpeed,
+            sunrise: weather.sunrise,
+            sunset: weather.sunset,
+            sunriseIso: weather.sunriseIso,
+            sunsetIso: weather.sunsetIso,
+            aqi: weather.aqi,
+            aqiLabel: weather.aqiLabel,
+            hourly: weather.hourly,
+            locationName: weather.locationName,
           } : null,
           expression: weatherExpression,
           timestamp: new Date().toISOString(),
         },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Dedicated Weather Endpoint: GET
+  app.get('/api/weather', async (req, res) => {
+    try {
+      setCacheControl(res, 60, 300);
+      const weather = await weatherService.getWeather();
+      if (!weather) {
+        return res.status(500).json({ error: 'Weather unavailable' });
+      }
+      res.json({
+        success: true,
+        weather,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

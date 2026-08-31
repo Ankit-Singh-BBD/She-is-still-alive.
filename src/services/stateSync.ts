@@ -27,6 +27,15 @@ export interface UIState {
       condition: string;
       description: string;
       humidity: number;
+      windSpeed?: number;
+      sunrise?: string;
+      sunset?: string;
+      sunriseIso?: string;
+      sunsetIso?: string;
+      aqi?: number;
+      aqiLabel?: string;
+      hourly?: Array<{ time: string; temp: number; condition: string }>;
+      locationName?: string;
     } | null;
     expression: {
       mood: 'hot' | 'pleasant' | 'cold' | 'rainy' | 'stormy' | 'misty';

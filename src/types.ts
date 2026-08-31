@@ -91,8 +91,16 @@ export interface WeatherData {
   feelsLike?: number;
   humidity?: number;
   windSpeed?: number;
+  sunrise?: string;
+  sunset?: string;
+  sunriseIso?: string;
+  sunsetIso?: string;
+  aqi?: number;
+  aqiLabel?: string;
+  hourly?: Array<{ time: string; temp: number; condition: string }>;
   precipitation?: number;
   condition?: string;
+  description?: string;
   time?: string;
   timezone?: string;
   error?: string;
