@@ -7,30 +7,56 @@
   /* Liquid Glass design tokens */
   --color-glass-line: rgba(255, 255, 255, 0.14);
   --color-glass-line-strong: rgba(255, 255, 255, 0.24);
+  --color-glass-line-soft: rgba(255, 255, 255, 0.08);
   --radius-glass: 1.75rem;
+  --radius-glass-sm: 1.25rem;
+  --radius-glass-lg: 2.25rem;
+
+  /* Sunset / atmospheric palette */
+  --color-sunset-coral: #ff8a65;
+  --color-sunset-peach: #ffb088;
+  --color-sunset-pink: #ff6b9d;
+  --color-sunset-violet: #c084fc;
+  --color-sunset-indigo: #7c3aed;
+
+  /* Voice state accents */
+  --color-voice-idle: #a78bfa;
+  --color-voice-listening: #60a5fa;
+  --color-voice-thinking: #c084fc;
+  --color-voice-speaking: #fb923c;
+  --color-voice-processing: #34d399;
+  --color-voice-error: #fb7185;
 }
 
 @layer base {
   html {
-    background-color: #0b1224;
+    background-color: #050810;
   }
 
   body {
     font-family: var(--font-sans);
-    /* Twilight wallpaper behind the frosted app frame */
-    background-image:
-      radial-gradient(120% 90% at 78% 8%, rgba(88, 120, 220, 0.28), transparent 55%),
-      radial-gradient(100% 70% at 50% 100%, rgba(240, 170, 120, 0.14), transparent 60%),
-      url("/wallpaper.png");
-    background-size: cover;
-    background-position: center;
-    background-attachment: fixed;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Custom selection */
+  ::selection {
+    background: rgba(192, 132, 252, 0.35);
+    color: white;
+  }
+
+  /* Custom focus rings */
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid rgba(192, 132, 252, 0.6);
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 }
 
 @layer utilities {
-  /* Frosted translucent glass surface */
+  /* Frosted translucent glass surface (3 depth levels) */
   .glass {
     background: linear-gradient(
       160deg,
@@ -53,6 +79,17 @@
     border: 1px solid var(--color-glass-line);
   }
 
+  .glass-deep {
+    background: linear-gradient(
+      160deg,
+      rgba(20, 25, 50, 0.72),
+      rgba(10, 14, 30, 0.55)
+    );
+    backdrop-filter: blur(48px) saturate(180%);
+    -webkit-backdrop-filter: blur(48px) saturate(180%);
+    border: 1px solid var(--color-glass-line);
+  }
+
   .glass-hover {
     transition: background-color 200ms ease, border-color 200ms ease,
       box-shadow 200ms ease, transform 200ms ease;
@@ -71,6 +108,51 @@
       inset 0 -1px 0 rgba(0, 0, 0, 0.15);
   }
 
+  /* Subtle glass edge highlight (used on hero panels) */
+  .glass-edge {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+      0 30px 60px -20px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Warm sunset glow (used for accents behind orb) */
+  .glow-sunset {
+    box-shadow:
+      0 0 40px rgba(255, 138, 101, 0.35),
+      0 0 80px rgba(192, 132, 252, 0.18);
+  }
+
+  .glow-listening {
+    box-shadow:
+      0 0 30px rgba(96, 165, 250, 0.4),
+      0 0 60px rgba(96, 165, 250, 0.2);
+  }
+
+  .glow-speaking {
+    box-shadow:
+      0 0 30px rgba(251, 146, 60, 0.45),
+      0 0 60px rgba(251, 146, 60, 0.22);
+  }
+
+  .glow-thinking {
+    box-shadow:
+      0 0 30px rgba(192, 132, 252, 0.4),
+      0 0 60px rgba(192, 132, 252, 0.2);
+  }
+
+  .glow-processing {
+    box-shadow:
+      0 0 30px rgba(52, 211, 153, 0.4),
+      0 0 60px rgba(52, 211, 153, 0.2);
+  }
+
+  .glow-error {
+    box-shadow:
+      0 0 30px rgba(251, 113, 133, 0.4),
+      0 0 60px rgba(251, 113, 133, 0.2);
+  }
+
   .text-gradient {
     background: linear-gradient(100deg, #a5c8ff 0%, #c4b5fd 45%, #f0abfc 100%);
     -webkit-background-clip: text;
@@ -78,6 +160,27 @@
     color: transparent;
   }
 
+  .text-gradient-sunset {
+    background: linear-gradient(
+      100deg,
+      #ffb088 0%,
+      #ff8a65 35%,
+      #ff6b9d 70%,
+      #c084fc 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .text-gradient-cool {
+    background: linear-gradient(100deg, #93c5fd 0%, #c4b5fd 50%, #f0abfc 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Custom scrollbar */
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -93,6 +196,27 @@
     background: rgba(255, 255, 255, 0.32);
   }
 
+  /* Thin scrollbar (for chip rows) */
+  .scrollbar-thin::-webkit-scrollbar {
+    height: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 9999px;
+  }
+
+  /* Hide scrollbar */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+
+  /* Glass float (gentle hover) */
   @keyframes glass-float {
     0%, 100% { transform: translateY(0); }
     50% { transform: translateY(-6px); }
@@ -101,11 +225,55 @@
     animation: glass-float 6s ease-in-out infinite;
   }
 
+  /* Soft glow pulse */
   @keyframes soft-glow {
     0%, 100% { opacity: 0.55; }
     50% { opacity: 1; }
   }
   .animate-soft-glow {
     animation: soft-glow 3.2s ease-in-out infinite;
+  }
+
+  /* Shimmer (for skeletons) */
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.08) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  /* Aurora drift (background orbs) */
+  @keyframes aurora-drift {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    33% { transform: translate3d(4%, -3%, 0) scale(1.06); }
+    66% { transform: translate3d(-3%, 4%, 0) scale(0.96); }
+  }
+  .animate-aurora {
+    animation: aurora-drift 24s ease-in-out infinite;
+  }
+
+  /* Star twinkle */
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.2; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.2); }
+  }
+  .animate-twinkle {
+    animation: twinkle 3s ease-in-out infinite;
+  }
+
+  /* Press-down effect (subtle click feedback) */
+  .press-scale {
+    transition: transform 120ms ease;
+  }
+  .press-scale:active {
+    transform: scale(0.97);
   }
 }

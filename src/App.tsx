@@ -1,26 +1,19 @@
-import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense, FormEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { LiveClient } from './services/liveClient.js';
 import { Identity, LiveState, SystemStatus, ToolActionItem, RuntimeContext } from './types.js';
 import { ExperienceIntro } from './components/ExperienceIntro.js';
-import { HUDHeader } from './components/HUDHeader.js';
-import { VoiceCore } from './components/VoiceCore.js';
 import { ToolActionToast } from './components/ToolActionToast.js';
-import { Sidebar, NavKey } from './components/Sidebar.js';
-import { GreetingHero } from './components/GreetingHero.js';
-import { Composer } from './components/Composer.js';
+import { Sidebar } from './components/Sidebar.js';
 import { BackgroundAtmosphere } from './components/BackgroundAtmosphere.js';
-import { MadhuritaOrb } from './components/MadhuritaOrb.js';
+import { HomeStage } from './components/home/HomeStage.js';
+import { ContextPanel } from './components/context/ContextPanel.js';
+import { CommandFlowBanner } from './components/state/CommandFlowBanner.js';
 import { UIStateProvider } from './hooks/useUIState.js';
-import {
-  Shield,
-  AlertTriangle,
-  Lock,
-  AudioLines,
-  X,
-  Bot,
-  User,
-} from 'lucide-react';
+import { useStage, StageKey } from './hooks/useStage.js';
+import { useCommandFlow } from './hooks/useCommandFlow.js';
+import { routeVoiceCommand, stageForCommand, VoiceCommand } from './utils/voiceCommandRouter.js';
+import { AlertTriangle, X } from 'lucide-react';
 
 // Lazy-loaded Modal Components for Code-Splitting & Minimal Initial Bundle Size
 const OwnerSetupModal = lazy(() =>
@@ -28,12 +21,6 @@ const OwnerSetupModal = lazy(() =>
 );
 const OwnerAuthModal = lazy(() =>
   import('./components/OwnerAuthModal.js').then((m) => ({ default: m.OwnerAuthModal }))
-);
-const IdentitySwitchModal = lazy(() =>
-  import('./components/IdentitySwitchModal.js').then((m) => ({ default: m.IdentitySwitchModal }))
-);
-const MemoryViewerModal = lazy(() =>
-  import('./components/MemoryViewerModal.js').then((m) => ({ default: m.MemoryViewerModal }))
 );
 
 import { sanitizeAuthToken } from './utils/auth.js';
@@ -44,6 +31,24 @@ interface ChatMessage {
   text: string;
   timestamp: number;
 }
+
+/**
+ * Commands that fully complete via the stage change itself
+ * (no backend roundtrip, no chat reply expected).
+ */
+const PURE_NAV: ReadonlySet<string> = new Set([
+  'go-home',
+  'go-back',
+  'close-panel',
+  'open-memory',
+  'open-search',
+  'open-tasks',
+  'open-calendar',
+  'open-devices',
+  'open-identity',
+  'open-settings',
+  'show-tasks',
+]);
 
 export default function App() {
   // Deterministic clean boot: every page load starts on Intro and with UNKNOWN Guest identity
@@ -72,6 +77,14 @@ export default function App() {
   identityRef.current = identity;
   authTokenRef.current = authToken;
 
+  // Active stage (single source of truth for nav/panel state)
+  const { activeStage, previousStage, setStage } = useStage('home');
+
+  // Voice/manual command lifecycle (UNDERSTAND → ACT → SHOW PROGRESS → RESULT → ACK → RETURN)
+  const commandFlow = useCommandFlow(setStage);
+  const commandFlowRef = useRef(commandFlow);
+  commandFlowRef.current = commandFlow;
+
   // On initial mount: purge any stale legacy tokens from storage so fresh boot is guaranteed
   useEffect(() => {
     try {
@@ -86,7 +99,16 @@ export default function App() {
 
   // Central Single Identity State Applier
   const applyAuthoritativeState = useCallback((state: RuntimeContext, tokenOverride?: string) => {
-    if (!state || !state.activeIdentity) return;
+    if (!state || !state.activeIdentity) {
+      // Backend returned an invalid or incomplete runtime state.
+      // Surface this rather than silently leaving stale state.
+      console.warn('applyAuthoritativeState: missing activeIdentity, retaining previous state');
+      setErrorMessageRef.current?.('Backend returned an incomplete runtime state. Retrying…');
+      // Re-fetch once to recover; if the backend is actually down the
+      // error banner will re-surface on the next attempt.
+      setTimeout(() => fetchRuntimeStateRef.current?.(), 1500);
+      return;
+    }
     const resolvedIdentity = state.activeIdentity;
     setIdentity((prev) => {
       if (prev.id === resolvedIdentity.id && prev.name === resolvedIdentity.name && prev.role === resolvedIdentity.role) {
@@ -106,23 +128,20 @@ export default function App() {
   // Modal States
   const [isOwnerSetupOpen, setIsOwnerSetupOpen] = useState(false);
   const [isOwnerAuthOpen, setIsOwnerAuthOpen] = useState(false);
-  const [isIdentitySwitchOpen, setIsIdentitySwitchOpen] = useState(false);
-  const [activeModalMode, setActiveModalMode] = useState<'database' | 'tasks' | 'voice' | 'iot' | null>(null);
 
   // Toast actions
   const [toolActions, setToolActions] = useState<ToolActionItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const setErrorMessageRef = useRef<(msg: string | null) => void>(setErrorMessage);
+  setErrorMessageRef.current = setErrorMessage;
 
-  // Text Chat & Cognitive Interaction Console State
-  const [isChatConsoleOpen, setIsChatConsoleOpen] = useState(false);
-  const [activeNav, setActiveNav] = useState<NavKey>('chat');
-  const [chatInput, setChatInput] = useState('');
+  // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isProcessingChat, setIsProcessingChat] = useState(false);
+  const [voiceMuted, setVoiceMuted] = useState(false);
 
   // LiveClient instance
   const liveClientRef = useRef<LiveClient | null>(null);
-  const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
   // Generate a temporary session ID for text chat continuity
   const [chatSessionId] = useState(() => `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
@@ -167,7 +186,9 @@ export default function App() {
         headers['X-User-Id'] = userId;
       }
       const res = await fetch('/api/runtime-state', { headers, cache: 'no-store' });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
       const data: RuntimeContext = await res.json();
 
       // Discard stale in-flight response if a newer action occurred
@@ -183,11 +204,51 @@ export default function App() {
     }
   }, [applyAuthoritativeState]);
 
+  const fetchRuntimeStateRef = useRef(fetchRuntimeState);
+  fetchRuntimeStateRef.current = fetchRuntimeState;
+
   // Initial single boot fetch
   useEffect(() => {
     fetchStatus();
     fetchRuntimeState();
   }, [fetchStatus, fetchRuntimeState]);
+
+  // Load existing conversation history
+  const loadHistory = useCallback(async () => {
+    try {
+      const headers: Record<string, string> = {};
+      const token = authTokenRef.current;
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const activeId = identityRef.current.id;
+      if (activeId) headers['X-User-Id'] = activeId;
+      const url = activeId && activeId !== 'UNKNOWN'
+        ? `/api/conversations?userId=${encodeURIComponent(activeId)}&limit=500`
+        : `/api/conversations?sessionId=${encodeURIComponent(chatSessionId)}&limit=500`;
+
+      const res = await fetch(url, { headers, cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.turns && Array.isArray(data.turns)) {
+          const formatted: ChatMessage[] = data.turns.map((t: any) => ({
+            id: t.turnId || `turn_${t.timestamp}`,
+            role: t.role === 'assistant' ? 'assistant' : 'user',
+            text: t.content,
+            timestamp: new Date(t.timestamp).getTime() || Date.now(),
+          }));
+          setChatMessages((prev) => {
+            if (prev.length === formatted.length && prev.every((m, i) => m.id === formatted[i].id && m.text === formatted[i].text)) {
+              return prev;
+            }
+            return formatted;
+          });
+        } else {
+          setChatMessages((prev) => (prev.length === 0 ? prev : []));
+        }
+      }
+    } catch (e) {
+      console.warn('Could not load conversation history:', e);
+    }
+  }, [chatSessionId]);
 
   // Initialize LiveClient
   useEffect(() => {
@@ -228,7 +289,31 @@ export default function App() {
         loadHistory();
       },
       onUserTranscript: (transcript, isFinal) => {
-        if (isFinal && transcript) {
+        if (!isFinal || !transcript) return;
+        // Run the transcript through the command router.
+        const cmd = routeVoiceCommand(transcript);
+
+        // "Stop" / "Continue" / "Repeat" / "Help" are voice-control
+        // commands, NOT chat input. They never get sent to the
+        // cognitive engine; they operate on the live session itself.
+        if (cmd.kind === 'stop') {
+          handleStopVoice();
+          return;
+        }
+        if (cmd.kind === 'continue' || cmd.kind === 'repeat') {
+          // No-op for now: the live session continues from where it
+          // left off. The user just wanted to convey "keep going".
+          // The command flow ends immediately.
+          const flowCmd = commandFlowRef.current.submit(transcript, activeStage);
+          // Synthetic completion: there is no backend to wait on.
+          // Pure continuation control — mark done.
+          commandFlowRef.current.complete();
+          return;
+        }
+        if (cmd.kind === 'help') {
+          // Show the help text in the conversation as an assistant
+          // message — the user spoke the word, so the answer belongs
+          // in the conversation stream, not in a tool call.
           setChatMessages((prev) => [
             ...prev,
             {
@@ -237,25 +322,80 @@ export default function App() {
               text: transcript,
               timestamp: Date.now(),
             },
-          ]);
-        }
-      },
-      onAssistantTranscript: (transcript) => {
-        if (transcript) {
-          setChatMessages((prev) => [
-            ...prev,
             {
-              id: `ast_live_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              id: `ast_help_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
               role: 'assistant',
-              text: transcript,
+              text:
+                'You can say things like:\n' +
+                '• "Open my memory", "Show my tasks", "Open settings"\n' +
+                '• "What\'s the weather?", "Summarize my day"\n' +
+                '• "Add a task to call mom"\n' +
+                '• "Search my past", "What did we talk about?"\n' +
+                '• "Stop", "Continue", "Repeat", "Go back", "Home"',
               timestamp: Date.now(),
             },
           ]);
+          return;
+        }
+
+        // Submit to command flow so voice + manual trigger the SAME
+        // UI lifecycle. We use the ref so the closure always sees the
+        // latest commandFlow (no stale state).
+        const flowCmd = commandFlowRef.current.submit(transcript, activeStage);
+        // Show the user message in the conversation stream
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `usr_live_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            role: 'user',
+            text: transcript,
+            timestamp: Date.now(),
+          },
+        ]);
+
+        if (PURE_NAV.has(flowCmd.kind)) {
+          // "go back" needs the actual previous stage which the
+          // command router returns null for. Resolve it from the
+          // authoritative stage state.
+          if (flowCmd.kind === 'go-back' && previousStage) {
+            setStage(previousStage);
+          }
+          // The panel mount itself is the "result". Mark done
+          // immediately — no backend to wait on. The user is now
+          // looking at their destination panel; we do NOT auto-return
+          // (shouldReturn is false for these).
+          commandFlowRef.current.complete();
+        }
+        // For everything else (chat, search-query, recall, show-weather,
+        // summarize-day, add-task) the LiveSession backend will reply
+        // via onAssistantTranscript or onToolAction; the completion
+        // handler is attached below.
+      },
+      onAssistantTranscript: (transcript) => {
+        if (!transcript) return;
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `ast_live_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            role: 'assistant',
+            text: transcript,
+            timestamp: Date.now(),
+          },
+        ]);
+        // Mark the live command flow as completed: the assistant
+        // transcript IS the authoritative result. This closes the
+        // banner's SHOW PROGRESS phase.
+        if (!commandFlowRef.current.isIdle) {
+          commandFlowRef.current.complete();
         }
       },
       onError: (msg) => {
         setErrorMessage(msg);
         setTimeout(() => setErrorMessage((prev) => (prev === msg ? null : prev)), 7000);
+        // A real error in the live session aborts the flow.
+        if (!commandFlowRef.current.isIdle) {
+          commandFlowRef.current.fail();
+        }
       },
     });
 
@@ -264,44 +404,20 @@ export default function App() {
     return () => {
       client.disconnect();
     };
-  }, [fetchRuntimeState]);
+  }, [fetchRuntimeState, loadHistory, activeStage]);
 
-  // Auto-scroll chat console
+  // Reload history when identity changes
   useEffect(() => {
-    if (isChatConsoleOpen && chatBottomRef.current) {
-      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatMessages, isChatConsoleOpen]);
+    loadHistory();
+  }, [identity.id, loadHistory]);
 
   const handleSidebarNavigate = useCallback(
-    (key: NavKey) => {
-      setActiveNav(key);
-      switch (key) {
-        case 'chat':
-          setIsChatConsoleOpen(true);
-          break;
-        case 'memory':
-        case 'knowledge':
-          setActiveModalMode('database');
-          break;
-        case 'recall':
-          setIsChatConsoleOpen(true);
-          setChatInput('What did we talk about?');
-          break;
-        case 'tasks':
-          setActiveModalMode('tasks');
-          break;
-        case 'devices':
-          setActiveModalMode('iot');
-          break;
-        case 'settings':
-          setActiveModalMode('voice');
-          break;
-        default:
-          break;
-      }
+    (key: StageKey) => {
+      // Manual nav interrupts any in-flight voice command flow
+      commandFlow.reset();
+      setStage(key);
     },
-    [],
+    [setStage, commandFlow],
   );
 
   const handleEnterExperience = useCallback(async () => {
@@ -334,6 +450,19 @@ export default function App() {
       liveClientRef.current.disconnect();
     }
   }, [liveState]);
+
+  /**
+   * Cancel the live voice session and any in-flight command flow.
+   * Used by the "stop" voice command, by the manual toggle, and
+   * when the user starts a different command while voice is active.
+   */
+  const handleStopVoice = useCallback(() => {
+    if (liveClientRef.current) {
+      liveClientRef.current.disconnect();
+    }
+    setLiveState('disconnected');
+    commandFlowRef.current.reset();
+  }, []);
 
   const handleOwnerSetupSuccess = useCallback((
     owner: { id: string; name: string; role: 'owner' },
@@ -368,15 +497,15 @@ export default function App() {
     fetchStatus();
     fetchRuntimeState(token, owner.id);
 
-    setActiveModalMode('database');
+    setStage('memory');
 
     if (liveClientRef.current) {
       liveClientRef.current.updateAuth(token, owner.id);
     }
-  }, [fetchStatus, fetchRuntimeState]);
+  }, [fetchStatus, fetchRuntimeState, setStage]);
 
   // Atomic Backend-Driven Profile Switch
-  const handleSelectIdentity = useCallback(async (target: Identity) => {
+  const handleSelectIdentity = useCallback(async (target: { id: string; name: string; role: string }) => {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       const token = authTokenRef.current;
@@ -408,8 +537,8 @@ export default function App() {
         if (data.runtimeState) {
           setRuntimeContext(data.runtimeState);
         }
-        setIsIdentitySwitchOpen(false);
         setChatMessages([]);
+        setStage('home');
 
         if (liveClientRef.current) {
           liveClientRef.current.updateAuth(data.token || token, data.identity.id);
@@ -419,7 +548,7 @@ export default function App() {
       console.error('Profile switch error:', err);
       setErrorMessage(err.message || 'Error switching profile');
     }
-  }, []);
+  }, [setStage]);
 
   const handleRegisterUser = useCallback(async (name: string) => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -464,52 +593,50 @@ export default function App() {
     setToolActions((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
-  // Load existing conversation history for active profile on identity change
-  const loadHistory = useCallback(async () => {
-    try {
-      const headers: Record<string, string> = {};
-      const token = authTokenRef.current;
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      if (identity?.id) headers['X-User-Id'] = identity.id;
-      const url = identity.id && identity.id !== 'UNKNOWN'
-        ? `/api/conversations?userId=${encodeURIComponent(identity.id)}&limit=500`
-        : `/api/conversations?sessionId=${encodeURIComponent(chatSessionId)}&limit=500`;
-
-      const res = await fetch(url, { headers, cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.turns && Array.isArray(data.turns)) {
-          const formatted: ChatMessage[] = data.turns.map((t: any) => ({
-            id: t.turnId || `turn_${t.timestamp}`,
-            role: t.role === 'assistant' ? 'assistant' : 'user',
-            text: t.content,
-            timestamp: new Date(t.timestamp).getTime() || Date.now(),
-          }));
-          setChatMessages((prev) => {
-            if (prev.length === formatted.length && prev.every((m, i) => m.id === formatted[i].id && m.text === formatted[i].text)) {
-              return prev;
-            }
-            return formatted;
-          });
-        } else {
-          setChatMessages((prev) => (prev.length === 0 ? prev : []));
-        }
-      }
-    } catch (e) {
-      console.warn('Could not load conversation history:', e);
-    }
-  }, [identity.id, chatSessionId]);
-
-  useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
-
   // Send Text Message through Cognitive Process Pipeline
-  const handleSendChatMessage = async (e?: FormEvent, presetText?: string) => {
-    if (e) e.preventDefault();
-    const textToSend = (presetText || chatInput).trim();
+  // Routes through command flow so voice + manual trigger the SAME actions
+  // and the SAME UI lifecycle (UNDERSTAND → ACT → SHOW PROGRESS → RESULT → ACK → RETURN).
+  const handleSendChatMessage = useCallback(async (text: string) => {
+    const textToSend = text.trim();
     if (!textToSend || isProcessingChat) return;
 
+    // Pre-classify. Voice-control commands (stop/continue/repeat/help)
+    // are NOT chat input and never reach /api/chat.
+    const preCmd = routeVoiceCommand(textToSend);
+    if (preCmd.kind === 'stop') {
+      handleStopVoice();
+      return;
+    }
+    if (preCmd.kind === 'continue' || preCmd.kind === 'repeat') {
+      // No backend call needed; the user is asking the live session
+      // to keep going, not the chat pipeline.
+      commandFlow.submit(textToSend, activeStage);
+      commandFlow.complete();
+      return;
+    }
+    if (preCmd.kind === 'help') {
+      // Insert the help answer into the local chat without
+      // round-tripping through the cognitive engine.
+      const helpText =
+        'You can try:\n' +
+        '• "Open my memory", "Show my tasks", "Open settings"\n' +
+        '• "What\'s the weather?", "Summarize my day"\n' +
+        '• "Add a task to call mom"\n' +
+        '• "Search my past", "What did we talk about?"\n' +
+        '• "Stop", "Continue", "Repeat", "Go back", "Home"';
+      setChatMessages((prev) => [
+        ...prev,
+        { id: `usr_${Date.now()}`, role: 'user', text: textToSend, timestamp: Date.now() },
+        { id: `ast_${Date.now()}`, role: 'assistant', text: helpText, timestamp: Date.now() },
+      ]);
+      return;
+    }
+
+    // Submit to command flow — this may navigate to a panel
+    // (e.g. "open my memory" → memory panel) and start the visual lifecycle.
+    const cmd = commandFlow.submit(textToSend, activeStage);
+
+    // Always show the user message in the conversation stream
     const userMsgId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const userMsg: ChatMessage = {
       id: userMsgId,
@@ -517,9 +644,27 @@ export default function App() {
       text: textToSend,
       timestamp: Date.now(),
     };
-
     setChatMessages((prev) => [...prev, userMsg]);
-    setChatInput('');
+
+    // For pure navigation commands (e.g. "open my tasks"), the panel
+    // IS the action — no chat needed. The destination panel is the
+    // final state; the user is now where they asked to be.
+    if (PURE_NAV.has(cmd.kind)) {
+      // "go back" needs the actual previous stage (recorded in the
+      // stage hook). The command router returns null for it because
+      // it doesn't know the previous stage. We resolve it here.
+      if (cmd.kind === 'go-back' && previousStage) {
+        setStage(previousStage);
+      }
+      // For all other PURE_NAV commands, submit() already called
+      // setStage() with the correct destination — nothing to do.
+      commandFlow.complete();
+      return;
+    }
+
+    // For commands that still need backend (chat, search-query,
+    // recall, show-weather, summarize-day, add-task, show-tasks), call
+    // /api/chat and complete the flow on the real response.
     setIsProcessingChat(true);
 
     try {
@@ -548,6 +693,7 @@ export default function App() {
         }
         setChatMessages((prev) => prev.filter((m) => m.id !== userMsgId));
         setErrorMessage(errText);
+        commandFlow.fail();
         return;
       }
 
@@ -562,18 +708,22 @@ export default function App() {
         setChatMessages((prev) => [...prev, assistantMsg]);
         fetchRuntimeState();
         loadHistory();
+        // Mark command flow done — the real reply is the result.
+        commandFlow.complete();
       } else if (data.error) {
         setChatMessages((prev) => prev.filter((m) => m.id !== userMsgId));
         setErrorMessage(data.error);
+        commandFlow.fail();
       }
     } catch (err: any) {
       console.error('Chat error:', err);
       setChatMessages((prev) => prev.filter((m) => m.id !== userMsgId));
       setErrorMessage(err.message || 'Failed to send message to cognitive engine');
+      commandFlow.fail();
     } finally {
       setIsProcessingChat(false);
     }
-  };
+  }, [authToken, identity.id, isProcessingChat, chatSessionId, fetchRuntimeState, loadHistory, commandFlow, activeStage, handleStopVoice]);
 
   return (
     <UIStateProvider authToken={authToken} userId={identity.id}>
@@ -581,46 +731,38 @@ export default function App() {
         {/* Immersive atmospheric background - adapts to time + weather */}
         <BackgroundAtmosphere />
 
+        {/* Live command lifecycle banner (visible during voice/typed commands) */}
+        <CommandFlowBanner
+          state={commandFlow.state}
+          onSkipReturn={commandFlow.reset}
+        />
+
         {/* Intro Experience Splash */}
         <AnimatePresence>
-        {!hasEnteredExperience && (
-          <ExperienceIntro
-            onEnter={handleEnterExperience}
-            hasOwner={Boolean(systemStatus?.hasOwner)}
-            ownerName={systemStatus?.ownerName || null}
-          />
-        )}
-      </AnimatePresence>
+          {!hasEnteredExperience && (
+            <ExperienceIntro
+              onEnter={handleEnterExperience}
+              hasOwner={Boolean(systemStatus?.hasOwner)}
+              ownerName={systemStatus?.ownerName || null}
+            />
+          )}
+        </AnimatePresence>
 
-      {/* Main Experience Layout — macOS Liquid Glass window */}
-      {hasEnteredExperience && (
-        <div className="w-full h-full overflow-hidden flex flex-col">
-          {/* Top toolbar */}
-          <HUDHeader
-            identity={identity}
-            state={liveState}
-            streamer={liveClientRef.current?.getStreamer()}
-            player={liveClientRef.current?.getPlayer()}
-            onOpenOwnerAuth={() => setIsOwnerAuthOpen(true)}
-            onOpenIdentitySwitch={() => setIsIdentitySwitchOpen(true)}
-            onOpenMemoryViewer={() => setActiveModalMode('database')}
-            onOpenTasks={() => setActiveModalMode('tasks')}
-            onOpenVoice={() => setActiveModalMode('voice')}
-            onOpenIoT={() => setActiveModalMode('iot')}
-          />
-
-          {/* Body: sidebar + content */}
-          <div className="flex-1 flex min-h-0">
+        {/* Main Experience Layout — Liquid Glass shell */}
+        {hasEnteredExperience && (
+          <div className="w-full h-full overflow-hidden flex">
+            {/* Left: glass nav rail (desktop) or bottom tab bar (mobile, see Sidebar) */}
             <Sidebar
               identity={identity}
               state={liveState}
-              activeNav={activeNav}
+              activeNav={activeStage}
               onNavigate={handleSidebarNavigate}
-              onOpenIdentitySwitch={() => setIsIdentitySwitchOpen(true)}
+              onOpenIdentitySwitch={() => setStage('identity')}
+              onVoiceTrigger={handleToggleVoice}
             />
 
             {/* Main content column */}
-            <div className="flex-1 flex flex-col min-w-0 relative">
+            <div className="flex-1 flex flex-col min-w-0 relative pb-20 lg:pb-0">
               {/* Error Banner */}
               <AnimatePresence>
                 {errorMessage && (
@@ -628,7 +770,7 @@ export default function App() {
                     initial={{ opacity: 0, y: -20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
-                    className="absolute top-4 left-1/2 -translate-x-1/2 z-40 max-w-lg w-[90%] p-3.5 rounded-2xl glass-panel border border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-3 shadow-xl"
+                    className="absolute top-4 left-1/2 -translate-x-1/2 z-50 max-w-lg w-[90%] p-3.5 rounded-2xl glass-panel border border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-3 shadow-xl"
                   >
                     <div className="flex items-center gap-2.5 flex-1 min-w-0">
                       <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
@@ -655,198 +797,52 @@ export default function App() {
                 )}
               </AnimatePresence>
 
-              {/* Center stage */}
-              <main className="flex-1 flex items-stretch justify-center min-h-0 overflow-hidden">
-                {/* Conversation-first hero / chat area */}
-                <div className="flex-1 flex flex-col min-w-0 px-4 sm:px-8 pt-6 pb-4">
-                  {chatMessages.length === 0 && !isChatConsoleOpen ? (
-                    <div className="flex-1 flex items-center justify-center">
-                      <GreetingHero
-                        identityName={identity.name}
-                        onQuickAction={(text) => handleSendChatMessage(undefined, text)}
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 pr-1">
-                      <div className="max-w-2xl mx-auto w-full space-y-3 py-2">
-                        {chatMessages.length === 0 && (
-                          <div className="text-center py-10 text-white/45 text-sm">
-                            Send a message or try recall questions like{' '}
-                            <span className="text-indigo-200 font-medium">"What did we talk about?"</span>
-                          </div>
-                        )}
-                        {chatMessages.map((msg) => (
-                          <div
-                            key={msg.id}
-                            className={`flex items-start gap-2.5 ${
-                              msg.role === 'user' ? 'justify-end' : 'justify-start'
-                            }`}
-                          >
-                            {msg.role === 'assistant' && (
-                              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-400/40 to-fuchsia-400/40 border border-white/15 text-indigo-100 flex items-center justify-center shrink-0 mt-0.5">
-                                <Bot className="w-4 h-4" />
-                              </div>
-                            )}
-                            <div
-                              className={`px-4 py-2.5 rounded-2xl max-w-[80%] text-sm leading-relaxed ${
-                                msg.role === 'user'
-                                  ? 'glass text-white'
-                                  : 'bg-white/[0.06] border border-white/10 text-white/90'
-                              }`}
-                            >
-                              <p className="whitespace-pre-wrap">{msg.text}</p>
-                            </div>
-                            {msg.role === 'user' && (
-                              <div className="w-7 h-7 rounded-full bg-white/10 border border-white/15 text-white/80 flex items-center justify-center shrink-0 mt-0.5">
-                                <User className="w-4 h-4" />
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                        {isProcessingChat && (
-                          <div className="flex items-center gap-2 text-sm text-white/50 py-1 pl-1">
-                            <span className="w-2 h-2 rounded-full bg-indigo-300 animate-ping" />
-                            <span>Madhurita is thinking…</span>
-                          </div>
-                        )}
-                        <div ref={chatBottomRef} />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Recall suggestion chips (only when in conversation view) */}
-                  {(chatMessages.length > 0 || isChatConsoleOpen) && (
-                    <div className="max-w-2xl mx-auto w-full flex items-center gap-2 overflow-x-auto pb-2 pt-1 custom-scrollbar text-[11px]">
-                      {[
-                        'What did we talk about?',
-                        'What do you remember about me?',
-                        'My project deadline is this Friday',
-                      ].map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => handleSendChatMessage(undefined, s)}
-                          className="px-3 py-1.5 rounded-full glass glass-hover text-white/70 hover:text-white cursor-pointer shrink-0"
-                        >
-                          {`"${s}"`}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Floating glass composer */}
-                  <div className="max-w-2xl mx-auto w-full mt-2">
-                    <Composer
-                      value={chatInput}
-                      onChange={setChatInput}
-                      onSubmit={(e) => handleSendChatMessage(e)}
-                      onToggleVoice={handleToggleVoice}
-                      onToggleConsole={() => setIsChatConsoleOpen(!isChatConsoleOpen)}
-                      isProcessing={isProcessingChat}
-                      liveState={liveState}
-                      identityName={identity.name}
-                    />
-                  </div>
-                </div>
-
-                {/* Right voice panel */}
-                <div className="hidden lg:flex items-center pr-6 pl-2 shrink-0">
-                  {liveClientRef.current && (
-                    <VoiceCore
-                      state={liveState}
-                      onToggle={handleToggleVoice}
-                      streamer={liveClientRef.current.getStreamer()}
-                      player={liveClientRef.current.getPlayer()}
-                      activeIdentityName={identity.name}
-                      isOwner={identity.role === 'owner'}
-                    />
-                  )}
-                </div>
+              {/* Home stage (centered hero / conversation stream) */}
+              <main className="flex-1 min-h-0 overflow-hidden">
+                <HomeStage
+                  identity={identity}
+                  authToken={authToken}
+                  liveState={liveState}
+                  messages={chatMessages}
+                  isThinking={isProcessingChat}
+                  onSendMessage={handleSendChatMessage}
+                  onToggleVoice={handleToggleVoice}
+                  onQuickAction={handleSendChatMessage}
+                  onOpenOnboarding={() => setIsOwnerAuthOpen(true)}
+                />
               </main>
-
-              {/* Bottom status bar */}
-              <footer className="w-full px-6 py-2.5 flex items-center justify-between gap-3 border-t border-white/10">
-                <div className="text-[12px] text-white/50 truncate">
-                  {identity.role === 'owner' ? (
-                    <span className="text-amber-200/90 flex items-center gap-1.5 font-medium">
-                      <Shield className="w-3.5 h-3.5" /> Owner Mode • Authoritative access
-                    </span>
-                  ) : identity.role === 'user' ? (
-                    <span className="text-white/60">
-                      Personal Mode • Context isolated to{' '}
-                      <strong className="text-white/85 font-medium">{identity.name}</strong>
-                    </span>
-                  ) : (
-                    <span className="text-white/55">Guest Mode • Introduce yourself or switch identity</span>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3 shrink-0">
-                  <Lock className="w-3.5 h-3.5 text-white/35" />
-                  <span className="flex items-center gap-1.5">
-                    <AudioLines
-                      className={`w-3.5 h-3.5 ${
-                        liveState === 'listening' || liveState === 'speaking'
-                          ? 'text-indigo-200'
-                          : 'text-white/35'
-                      }`}
-                    />
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        liveState === 'idle'
-                          ? 'bg-slate-400'
-                          : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]'
-                      }`}
-                    />
-                  </span>
-                </div>
-              </footer>
             </div>
+
+            {/* Right: contextual panel overlay */}
+            <ContextPanel
+              identity={identity}
+              authToken={authToken}
+              onSwitchIdentity={handleSelectIdentity}
+              onRegisterUser={handleRegisterUser}
+              onDeleteUser={identity.role === 'owner' ? handleDeleteUser : undefined}
+              onOpenOnboarding={() => setIsOwnerAuthOpen(true)}
+            />
           </div>
-        </div>
-      )}
-
-      {/* Lazy Loaded Modals wrapped in Suspense for minimum initial bundle size */}
-      <Suspense fallback={null}>
-        {isOwnerSetupOpen && (
-          <OwnerSetupModal
-            isOpen={isOwnerSetupOpen}
-            onSuccess={handleOwnerSetupSuccess}
-            onClose={() => setIsOwnerSetupOpen(false)}
-          />
         )}
 
-        {isOwnerAuthOpen && (
-          <OwnerAuthModal
-            isOpen={isOwnerAuthOpen}
-            onSuccess={handleOwnerAuthSuccess}
-            onClose={() => setIsOwnerAuthOpen(false)}
-          />
-        )}
+        {/* Lazy Loaded Modals wrapped in Suspense for minimum initial bundle size */}
+        <Suspense fallback={null}>
+          {isOwnerSetupOpen && (
+            <OwnerSetupModal
+              isOpen={isOwnerSetupOpen}
+              onSuccess={handleOwnerSetupSuccess}
+              onClose={() => setIsOwnerSetupOpen(false)}
+            />
+          )}
 
-        {isIdentitySwitchOpen && (
-          <IdentitySwitchModal
-            isOpen={isIdentitySwitchOpen}
-            currentIdentity={identity}
-            authToken={authToken}
-            onSelectIdentity={handleSelectIdentity}
-            onRegisterUser={handleRegisterUser}
-            onDeleteUser={identity.role === 'owner' ? handleDeleteUser : undefined}
-            onClose={() => setIsIdentitySwitchOpen(false)}
-          />
-        )}
-
-        {activeModalMode && (
-          <MemoryViewerModal
-            isOpen={true}
-            identity={identity}
-            token={authToken}
-            mode={activeModalMode}
-            onClose={() => setActiveModalMode(null)}
-            onRestored={fetchStatus}
-          />
-        )}
-      </Suspense>
+          {isOwnerAuthOpen && (
+            <OwnerAuthModal
+              isOpen={isOwnerAuthOpen}
+              onSuccess={handleOwnerAuthSuccess}
+              onClose={() => setIsOwnerAuthOpen(false)}
+            />
+          )}
+        </Suspense>
 
         {/* Tool Action Notifications */}
         <ToolActionToast actions={toolActions} onDismiss={handleDismissToast} />
