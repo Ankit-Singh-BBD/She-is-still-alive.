@@ -1,19 +1,21 @@
 // ===================================================================
-// MADHURITA ORB — Real-Time 3D Glass Sphere with Three.js & GLSL
+// MADHURITA ORB — Real-Time 3D WebGL / R3F Cinematic Experience
 // ===================================================================
 //
-// Built with Three.js + WebGL + GLSL Shaders + Web Audio API:
-//   - Volumetric physical glass shader with Snell's law refraction
-//   - Inverted mountain landscape & sky refraction inside the sphere
-//   - Schlick Fresnel reflectance with chromatic dispersion
-//   - Concentric optical caustic rings & radial sunburst ray flares
-//   - 3D internal stardust particle cloud with depth parallax
-//   - Real-time 3D audio-reactive equator soundwave driven by Web Audio API
-//   - Time-of-day natural lighting (NIGHT, SUNRISE, DAY, SUNSET)
+// Built with React Three Fiber (R3F), Three.js, GLSL, and Web Audio API:
+//   - Outer Glass Sphere: Physical transmission, IOR 1.45, iridescence, clearcoat
+//   - Inner Energy Core: Custom GLSL ShaderMaterial nebula & vortex
+//   - Equator Waveform Ring: Dynamic 128-vertex 3D soundwave driven by real audio
+//   - Acoustic Ripple Rings: Expansive concentric sound pulses
+//   - Post-Processing: ACES Filmic ToneMapping & Selective Bloom
+//   - Time-of-Day Lighting Palettes (NIGHT, SUNRISE, DAY, SUNSET)
 //   - 6 Voice states (Listening, Thinking, Speaking, Processing, Idle, Error)
 
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import * as THREE from 'three';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { Environment } from '@react-three/drei';
+import { EffectComposer, Bloom, ToneMapping } from '@react-three/postprocessing';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTimeOfDay, useWeatherExpression } from '../hooks/useUIState.js';
 import { LiveState } from '../types.js';
@@ -25,7 +27,7 @@ export type TimePeriod = 'night' | 'sunrise' | 'day' | 'sunset';
 
 interface MadhuritaOrbProps {
   state?: OrbVoiceState;
-  size?: number; // Diameter in pixels (scales responsively)
+  size?: number; // Diameter in pixels
   onClick?: () => void;
   streamer?: AudioStreamer;
   player?: AudioPlayer;
@@ -35,122 +37,454 @@ interface MadhuritaOrbProps {
 }
 
 // -------------------------------------------------------------------
-// GLSL Shaders for the Photorealistic Glass Sphere
+// GLSL Shaders for Inner Volumetric Nebula Core
 // -------------------------------------------------------------------
-const glassVertexShader = `
+const coreVertexShader = `
   varying vec3 vNormal;
-  varying vec3 vViewPosition;
-  varying vec3 vWorldPosition;
+  varying vec3 vPosition;
   varying vec2 vUv;
 
   void main() {
     vUv = uv;
     vNormal = normalize(normalMatrix * normal);
-    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-    vWorldPosition = worldPosition.xyz;
-    vec4 mvPosition = viewMatrix * worldPosition;
-    vViewPosition = -mvPosition.xyz;
-    gl_Position = projectionMatrix * mvPosition;
+    vPosition = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
-const glassFragmentShader = `
+const coreFragmentShader = `
   uniform float uTime;
   uniform float uAudioVolume;
   uniform vec3 uColorPrimary;
   uniform vec3 uColorSecondary;
   uniform vec3 uColorAccent;
-  uniform vec3 uRimColor;
-  uniform vec3 uCoreGlowColor;
-  uniform float uTimePeriod; // 0=night, 1=sunrise, 2=day, 3=sunset
-  uniform float uPulseSpeed;
+  uniform float uVoiceState; // 0=idle, 1=listening, 2=thinking, 3=speaking, 4=processing, 5=error
 
   varying vec3 vNormal;
-  varying vec3 vViewPosition;
-  varying vec3 vWorldPosition;
+  varying vec3 vPosition;
   varying vec2 vUv;
 
+  // Simplex-style 3D noise
+  vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+  vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+  float snoise(vec3 v) {
+    const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+    vec3 i  = floor(v + dot(v, C.yyy));
+    vec3 x0 = v - i + dot(i, C.xxx);
+    vec3 g = step(x0.yzx, x0.xyz);
+    vec3 l = 1.0 - g;
+    vec3 i1 = min(g.xyz, l.zxy);
+    vec3 i2 = max(g.xyz, l.zxy);
+    vec3 x1 = x0 - i1 + C.xxx;
+    vec3 x2 = x0 - i2 + C.yyy;
+    vec3 x3 = x0 - D.yyy;
+    i = mod289(i);
+    vec4 p = permute(permute(permute(
+              i.z + vec4(0.0, i1.z, i2.z, 1.0))
+            + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+            + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+    float n_ = 0.142857142857;
+    vec3 ns = n_ * D.wyz - D.xzx;
+    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+    vec4 x_ = floor(j * ns.z);
+    vec4 y_ = floor(j - 7.0 * x_);
+    vec4 x = x_ *ns.x + ns.yyyy;
+    vec4 y = y_ *ns.x + ns.yyyy;
+    vec4 h = 1.0 - abs(x) - abs(y);
+    vec4 b0 = vec4(x.xy, y.xy);
+    vec4 b1 = vec4(x.zw, y.zw);
+    vec4 s0 = floor(b0)*2.0 + 1.0;
+    vec4 s1 = floor(b1)*2.0 + 1.0;
+    vec4 sh = -step(h, vec4(0.0));
+    vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+    vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+    vec3 p0 = vec3(a0.xy, h.x);
+    vec3 p1 = vec3(a0.zw, h.y);
+    vec3 p2 = vec3(a1.xy, h.z);
+    vec3 p3 = vec3(a1.zw, h.w);
+    vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+    p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+    vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+    m = m * m;
+    return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+  }
+
   void main() {
-    vec3 normal = normalize(vNormal);
-    vec3 viewDir = normalize(vViewPosition);
+    vec3 pos = vPosition * 2.2;
+    float timeSpeed = 0.45;
+    if (uVoiceState > 1.5 && uVoiceState < 3.5) timeSpeed = 1.2; // faster during thinking/speaking
 
-    // 1. Fresnel Reflectance (Schlick's approximation with chromatic dispersion)
-    float fresnelFactor = dot(normal, viewDir);
-    float fresnel = pow(clamp(1.0 - fresnelFactor, 0.0, 1.0), 2.8);
-    float fresnelEdge = pow(clamp(1.0 - fresnelFactor, 0.0, 1.0), 4.5);
+    // Flowing turbulence nebula noise
+    float n1 = snoise(pos + vec3(0.0, uTime * timeSpeed, 0.0));
+    float n2 = snoise(pos * 2.0 - vec3(uTime * timeSpeed * 0.8, 0.0, uTime * 0.4));
+    float combinedNoise = (n1 * 0.6 + n2 * 0.4);
 
-    // 2. Optical Glass Refraction Vector
-    vec3 refractVec = refract(-viewDir, normal, 1.0 / 1.52);
+    // Radial falloff from core center
+    float dist = length(vPosition) / 0.85;
+    float coreFalloff = smoothstep(1.0, 0.1, dist);
 
-    // 3. Inverted Landscape Refraction inside sphere (Optical Lens effect)
-    // Spherically warped coordinates inside sphere
-    vec2 refUv = refractVec.xy * 0.5 + 0.5;
-    
-    // Inverted sky gradient at bottom & mountain silhouette at top
-    float invertedSky = smoothstep(0.3, 0.9, refUv.y);
-    float mountainWarp = sin(refUv.x * 6.28 + 1.2) * 0.12 + sin(refUv.x * 12.56) * 0.06;
-    float mountainMask = smoothstep(0.48 + mountainWarp, 0.52 + mountainWarp, refUv.y);
+    // Color gradient mixing
+    vec3 color = mix(uColorSecondary, uColorPrimary, combinedNoise * 0.5 + 0.5);
+    color = mix(color, uColorAccent, pow(clamp(n2, 0.0, 1.0), 2.0) * (0.8 + uAudioVolume * 1.5));
 
-    vec3 innerSkyColor = mix(uColorSecondary * 0.4, uColorPrimary * 0.6, invertedSky);
-    vec3 innerLandscapeColor = mix(vec3(0.04, 0.05, 0.1), innerSkyColor, mountainMask);
+    // Internal starburst spike
+    float spike = exp(-dist * 8.0) * (1.2 + uAudioVolume * 2.0);
+    color += vec3(1.0) * spike * 0.45;
 
-    // 4. Concentric Optical Caustic Rings (Newton Rings)
-    float distFromCenter = length(vUv - vec2(0.5));
-    float causticRings = sin(distFromCenter * 35.0 - uTime * 2.0 * uPulseSpeed);
-    causticRings = pow(clamp(causticRings * 0.5 + 0.5, 0.0, 1.0), 4.0) * (1.0 - distFromCenter * 1.6);
-    causticRings = clamp(causticRings, 0.0, 1.0) * 0.35;
-
-    // 5. Radial Sunburst Flares emanating from center
-    float angle = atan(vUv.y - 0.5, vUv.x - 0.5);
-    float sunburst = sin(angle * 18.0 + uTime * 0.6) * 0.5 + 0.5;
-    sunburst = pow(sunburst, 3.0) * (1.0 - smoothstep(0.0, 0.45, distFromCenter)) * 0.3;
-
-    // 6. Central Pinpoint Starburst Core
-    float coreDist = distFromCenter;
-    float centerCore = exp(-coreDist * 16.0) * (1.2 + uAudioVolume * 1.5);
-    float centerSpike = exp(-abs(vUv.y - 0.5) * 45.0) * exp(-abs(vUv.x - 0.5) * 6.0) * 0.8;
-
-    // 7. Specular Highlights (Top-Left primary catchlight + sharp point)
-    vec3 lightDir1 = normalize(vec3(-0.45, 0.65, 0.8));
-    vec3 halfVec1 = normalize(lightDir1 + viewDir);
-    float spec1 = pow(max(dot(normal, halfVec1), 0.0), 32.0) * 0.85;
-
-    vec3 lightDir2 = normalize(vec3(-0.35, 0.55, 0.9));
-    vec3 halfVec2 = normalize(lightDir2 + viewDir);
-    float spec2 = pow(max(dot(normal, halfVec2), 0.0), 128.0) * 1.2;
-
-    // 8. Lower Horizon Lake Bounce Light
-    vec3 bounceDir = normalize(vec3(0.0, -1.0, 0.4));
-    float bounceLight = pow(max(dot(normal, bounceDir), 0.0), 3.0) * 0.65;
-
-    // 9. Final Color Composite
-    vec3 finalColor = innerLandscapeColor;
-
-    // Add caustic rings and radial sunburst
-    finalColor += uColorAccent * causticRings;
-    finalColor += uCoreGlowColor * sunburst;
-
-    // Add center starburst
-    finalColor += vec3(1.0, 0.98, 0.92) * centerCore;
-    finalColor += uColorAccent * centerSpike;
-
-    // Add Fresnel rim with chromatic iridescence
-    vec3 fresnelColor = mix(uRimColor, uColorAccent, fresnel * 0.5);
-    finalColor += fresnelColor * (fresnel * 0.85 + fresnelEdge * 1.2);
-
-    // Add lake bounce reflection
-    finalColor += uColorPrimary * bounceLight;
-
-    // Add specular catchlights
-    finalColor += vec3(1.0) * (spec1 + spec2);
-
-    // Translucent glass alpha (0.25 in center to 0.95 at rim)
-    float alpha = clamp(0.25 + fresnel * 0.7 + centerCore * 0.5 + spec1 * 0.5, 0.0, 0.98);
-
-    gl_FragColor = vec4(finalColor, alpha);
+    float alpha = clamp((coreFalloff * 0.85 + spike * 0.5) * (0.6 + combinedNoise * 0.4), 0.0, 0.95);
+    gl_FragColor = vec4(color, alpha);
   }
 `;
 
+// -------------------------------------------------------------------
+// 3D Scene Inside Canvas
+// -------------------------------------------------------------------
+interface SceneProps {
+  orbTheme: any;
+  activeState: OrbVoiceState;
+  timePeriod: TimePeriod;
+  streamer?: AudioStreamer;
+  player?: AudioPlayer;
+}
+
+function OrbScene({
+  orbTheme,
+  activeState,
+  timePeriod,
+  streamer,
+  player,
+}: SceneProps) {
+  const outerSphereRef = useRef<THREE.Mesh>(null);
+  const coreMatRef = useRef<THREE.ShaderMaterial>(null);
+  const waveLineRef = useRef<THREE.Line>(null);
+  const particlesRef = useRef<THREE.Points>(null);
+  const ripple1Ref = useRef<THREE.Mesh>(null);
+  const ripple2Ref = useRef<THREE.Mesh>(null);
+  const ripple3Ref = useRef<THREE.Mesh>(null);
+
+  // Audio analysis buffer
+  const audioBuffer = useMemo(() => new Uint8Array(128), []);
+  const smoothedVolRef = useRef(0);
+
+  // 128-point Equator Waveform Ring — BufferGeometry + Line object
+  const waveGeometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry();
+    const count = 128;
+    const positions = new Float32Array(count * 3);
+    const radius = 1.32;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      positions[i * 3] = Math.cos(angle) * radius;
+      positions[i * 3 + 1] = 0;
+      positions[i * 3 + 2] = Math.sin(angle) * radius;
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    return geo;
+  }, []);
+
+  const waveLineObject = useMemo(() => {
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const line = new THREE.Line(waveGeometry, mat);
+    line.frustumCulled = false;
+    return line;
+  }, [waveGeometry]);
+
+  // Internal 3D Stardust Particles
+  const { particleGeometry, particleSpeeds } = useMemo(() => {
+    const count = 220;
+    const geo = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const speeds = new Float32Array(count);
+
+    for (let i = 0; i < count; i++) {
+      const r = 0.15 + Math.random() * 0.85;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(Math.random() * 2 - 1);
+
+      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) * 0.65;
+      positions[i * 3 + 2] = r * Math.cos(phi);
+      speeds[i] = (0.2 + Math.random() * 0.5) * (Math.random() > 0.5 ? 1 : -1);
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    return { particleGeometry: geo, particleSpeeds: speeds };
+  }, []);
+
+  // Uniforms for Inner ShaderMaterial
+  const coreUniforms = useMemo(() => {
+    let stateCode = 0.0;
+    if (activeState === 'listening') stateCode = 1.0;
+    if (activeState === 'thinking') stateCode = 2.0;
+    if (activeState === 'speaking') stateCode = 3.0;
+    if (activeState === 'processing') stateCode = 4.0;
+    if (activeState === 'error') stateCode = 5.0;
+
+    return {
+      uTime: { value: 0 },
+      uAudioVolume: { value: 0 },
+      uColorPrimary: { value: orbTheme.primary },
+      uColorSecondary: { value: orbTheme.secondary },
+      uColorAccent: { value: orbTheme.accent },
+      uVoiceState: { value: stateCode },
+    };
+  }, [orbTheme, activeState]);
+
+  // Frame Loop Animation
+  useFrame(({ clock }) => {
+    const elapsedTime = clock.getElapsedTime();
+
+    // 1. Web Audio API live telemetry
+    let rawVolume = 0;
+    let hasAudio = false;
+
+    if (activeState === 'listening' && streamer) {
+      streamer.getWaveformData(audioBuffer);
+      let sum = 0;
+      for (let i = 0; i < audioBuffer.length; i++) {
+        sum += Math.abs(audioBuffer[i] - 128);
+      }
+      rawVolume = sum / (audioBuffer.length * 128);
+      hasAudio = rawVolume > 0.002;
+    } else if (activeState === 'speaking' && player) {
+      player.getWaveformData(audioBuffer);
+      let sum = 0;
+      for (let i = 0; i < audioBuffer.length; i++) {
+        sum += Math.abs(audioBuffer[i] - 128);
+      }
+      rawVolume = sum / (audioBuffer.length * 128);
+      hasAudio = rawVolume > 0.002;
+    } else if (activeState === 'thinking') {
+      rawVolume = 0.2 + Math.sin(elapsedTime * 3.5) * 0.08;
+    } else if (activeState === 'processing') {
+      rawVolume = 0.16 + Math.cos(elapsedTime * 4.0) * 0.06;
+    } else if (activeState === 'error') {
+      rawVolume = 0.05;
+    }
+
+    smoothedVolRef.current += (rawVolume - smoothedVolRef.current) * 0.18;
+    const vol = smoothedVolRef.current;
+
+    // 2. Update Inner Core Shader Uniforms
+    if (coreMatRef.current) {
+      coreMatRef.current.uniforms.uTime.value = elapsedTime;
+      coreMatRef.current.uniforms.uAudioVolume.value = vol;
+      coreMatRef.current.uniforms.uColorPrimary.value.copy(orbTheme.primary);
+      coreMatRef.current.uniforms.uColorSecondary.value.copy(orbTheme.secondary);
+      coreMatRef.current.uniforms.uColorAccent.value.copy(orbTheme.accent);
+    }
+
+    // 3. Update Outer Glass Sphere
+    if (outerSphereRef.current) {
+      const scale = 1.0 + vol * 0.05;
+      outerSphereRef.current.scale.setScalar(scale);
+      outerSphereRef.current.rotation.y = elapsedTime * 0.08;
+    }
+
+    // 4. Update Stardust Particles
+    if (particlesRef.current) {
+      particlesRef.current.rotation.y = elapsedTime * 0.15 * orbTheme.pulseSpeed;
+      particlesRef.current.rotation.z = Math.sin(elapsedTime * 0.25) * 0.08;
+    }
+
+    // 5. Update 3D Equator Waveform Ring
+    if (waveLineRef.current) {
+      if (waveLineRef.current.material) {
+        (waveLineRef.current.material as THREE.LineBasicMaterial).color.copy(orbTheme.accent);
+      }
+      const posAttr = waveGeometry.attributes.position as THREE.BufferAttribute;
+      const pos = posAttr.array as Float32Array;
+      const count = 128;
+      const baseRadius = 1.3;
+
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2;
+        let waveDisplacement = 0;
+
+        if ((activeState === 'listening' || activeState === 'speaking') && hasAudio) {
+          const bufIdx = Math.floor((i / count) * 128);
+          const rawSignal = (audioBuffer[bufIdx] - 128) / 128;
+          const amp = vol * 0.8 + 0.06;
+          waveDisplacement = rawSignal * amp + Math.sin(elapsedTime * 6.0 + i * 0.2) * 0.025;
+        } else if (activeState === 'thinking') {
+          waveDisplacement = Math.sin(elapsedTime * 5.0 + i * 0.35) * 0.06 * (1.0 + vol);
+        } else if (activeState === 'processing') {
+          waveDisplacement = Math.cos(elapsedTime * 6.5 + i * 0.45) * 0.05;
+        } else if (activeState === 'error') {
+          const s = Math.sin(elapsedTime * 8.0 + i * 0.5);
+          waveDisplacement = Math.sign(s) * Math.min(1.0, Math.abs(s) * 2.0) * 0.04;
+        } else {
+          // Idle calm harmonic breathing wave
+          waveDisplacement =
+            (Math.sin(elapsedTime * 1.6 + i * 0.2) * 0.02 +
+              Math.cos(elapsedTime * 2.4 + i * 0.3) * 0.015);
+        }
+
+        const r = baseRadius + waveDisplacement;
+        pos[i * 3] = Math.cos(angle) * r;
+        pos[i * 3 + 1] = waveDisplacement * 1.5; // slight 3D vertical displacement
+        pos[i * 3 + 2] = Math.sin(angle) * r;
+      }
+      posAttr.needsUpdate = true;
+    }
+
+    // 6. Expand Acoustic Ripple Rings during voice active states
+    const isVoiceActive = activeState === 'listening' || activeState === 'speaking';
+    const rippleSpeed = 1.2;
+
+    if (ripple1Ref.current && ripple2Ref.current && ripple3Ref.current) {
+      if (isVoiceActive) {
+        const t1 = (elapsedTime * rippleSpeed) % 2.0;
+        const t2 = (elapsedTime * rippleSpeed + 0.66) % 2.0;
+        const t3 = (elapsedTime * rippleSpeed + 1.33) % 2.0;
+
+        ripple1Ref.current.scale.setScalar(1.3 + t1 * 0.7);
+        ripple2Ref.current.scale.setScalar(1.3 + t2 * 0.7);
+        ripple3Ref.current.scale.setScalar(1.3 + t3 * 0.7);
+
+        (ripple1Ref.current.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (1 - t1 / 2.0) * 0.35);
+        (ripple2Ref.current.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (1 - t2 / 2.0) * 0.35);
+        (ripple3Ref.current.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (1 - t3 / 2.0) * 0.35);
+      } else {
+        (ripple1Ref.current.material as THREE.MeshBasicMaterial).opacity = 0;
+        (ripple2Ref.current.material as THREE.MeshBasicMaterial).opacity = 0;
+        (ripple3Ref.current.material as THREE.MeshBasicMaterial).opacity = 0;
+      }
+    }
+  });
+
+  return (
+    <>
+      {/* 1. Time-of-Day Adaptive Lighting */}
+      <ambientLight
+        color={orbTheme.ambientLightColor}
+        intensity={orbTheme.ambientIntensity}
+      />
+      <directionalLight
+        position={[-3, 4, 3]}
+        color={orbTheme.dirLightColor}
+        intensity={orbTheme.dirIntensity}
+      />
+      <directionalLight
+        position={[3, -2, -2]}
+        color={orbTheme.secondary}
+        intensity={0.35}
+      />
+      <pointLight
+        position={[0, 0, 0]}
+        color={orbTheme.accent}
+        intensity={1.2}
+        distance={4}
+      />
+
+      {/* 2. Inner Nebula Energy Core */}
+      <mesh scale={0.88}>
+        <sphereGeometry args={[1, 48, 48]} />
+        <shaderMaterial
+          ref={coreMatRef}
+          vertexShader={coreVertexShader}
+          fragmentShader={coreFragmentShader}
+          uniforms={coreUniforms}
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      {/* 3. Internal 3D Stardust Particles */}
+      <points ref={particlesRef} geometry={particleGeometry}>
+        <pointsMaterial
+          color={orbTheme.accent}
+          size={0.04}
+          transparent
+          opacity={0.7}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </points>
+
+      {/* 4. Outer Cinematic Glass Sphere */}
+      <mesh ref={outerSphereRef}>
+        <sphereGeometry args={[1.28, 64, 64]} />
+        <meshPhysicalMaterial
+          transmission={0.92}
+          thickness={2.2}
+          ior={1.45}
+          roughness={0.03}
+          metalness={0.0}
+          iridescence={0.15}
+          iridescenceIOR={1.3}
+          clearcoat={1.0}
+          clearcoatRoughness={0.05}
+          envMapIntensity={orbTheme.envMapIntensity}
+          color={orbTheme.rim}
+          emissive={orbTheme.primary}
+          emissiveIntensity={0.18}
+          transparent
+        />
+      </mesh>
+
+      {/* 5. Equator Audio Waveform Ring — 128-point live soundwave */}
+      <primitive object={waveLineObject} ref={waveLineRef as any} />
+
+      {/* 6. Concentric Acoustic Ripple Rings */}
+      <mesh ref={ripple1Ref} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[1.0, 1.04, 64]} />
+        <meshBasicMaterial
+          color={orbTheme.accent}
+          transparent
+          opacity={0}
+          side={THREE.DoubleSide}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+      <mesh ref={ripple2Ref} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[1.0, 1.04, 64]} />
+        <meshBasicMaterial
+          color={orbTheme.accent}
+          transparent
+          opacity={0}
+          side={THREE.DoubleSide}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+      <mesh ref={ripple3Ref} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[1.0, 1.04, 64]} />
+        <meshBasicMaterial
+          color={orbTheme.accent}
+          transparent
+          opacity={0}
+          side={THREE.DoubleSide}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      {/* 7. Post-Processing Bloom & ACES Tone Mapping */}
+      <EffectComposer>
+        <Bloom
+          luminanceThreshold={0.72}
+          intensity={0.45}
+          levels={5}
+          mipmapBlur
+        />
+        <ToneMapping />
+      </EffectComposer>
+    </>
+  );
+}
+
+// -------------------------------------------------------------------
+// MadhuritaOrb Component Export
+// -------------------------------------------------------------------
 export function MadhuritaOrb({
   state = 'idle',
   size = 340,
@@ -161,13 +495,11 @@ export function MadhuritaOrb({
   showStateLabel = false,
   isThinking = false,
 }: MadhuritaOrbProps) {
-  const mountRef = useRef<HTMLDivElement | null>(null);
   const { istHour } = useTimeOfDay();
-  const weatherExpression = useWeatherExpression();
   const [isHovered, setIsHovered] = useState(false);
-  const [ripples, setRipples] = useState<Array<{ id: number; x: number; y: number; createdAt: number }>>([]);
+  const [ripples, setRipples] = useState<Array<{ id: number; x: number; y: number }>>([]);
 
-  // Resolve active time period based on IST hour
+  // Time-of-day resolution
   const timePeriod: TimePeriod = useMemo(() => {
     if (istHour >= 5 && istHour < 8) return 'sunrise';
     if (istHour >= 8 && istHour < 17) return 'day';
@@ -175,7 +507,7 @@ export function MadhuritaOrb({
     return 'night';
   }, [istHour]);
 
-  // Resolve active voice state
+  // Voice state resolution
   const activeState: OrbVoiceState = useMemo(() => {
     if (isThinking) return 'thinking';
     if (state === 'disconnected') return 'idle';
@@ -183,7 +515,7 @@ export function MadhuritaOrb({
     return state;
   }, [state, isThinking]);
 
-  // Dynamic color configuration for Three.js shaders
+  // Theme palettes based on Time of Day & Voice State
   const orbTheme = useMemo(() => {
     if (activeState === 'listening') {
       return {
@@ -193,11 +525,14 @@ export function MadhuritaOrb({
         secondary: new THREE.Color('#0284C7'),
         accent: new THREE.Color('#BAE6FD'),
         rim: new THREE.Color('#E0F2FE'),
-        coreGlow: new THREE.Color('#38BDF8'),
         glowCss: 'rgba(56, 189, 248, 0.55)',
         ringCss: 'rgba(56, 189, 248, 0.25)',
+        dirLightColor: '#BAE6FD',
+        ambientLightColor: '#0C4A6E',
+        dirIntensity: 0.8,
+        ambientIntensity: 0.35,
+        envMapIntensity: 0.9,
         pulseSpeed: 1.5,
-        periodCode: 2.0,
       };
     }
     if (activeState === 'thinking') {
@@ -208,11 +543,14 @@ export function MadhuritaOrb({
         secondary: new THREE.Color('#7E22CE'),
         accent: new THREE.Color('#E9D5FF'),
         rim: new THREE.Color('#F3E8FF'),
-        coreGlow: new THREE.Color('#A855F7'),
         glowCss: 'rgba(168, 85, 247, 0.55)',
         ringCss: 'rgba(168, 85, 247, 0.25)',
+        dirLightColor: '#E9D5FF',
+        ambientLightColor: '#3B0764',
+        dirIntensity: 0.75,
+        ambientIntensity: 0.3,
+        envMapIntensity: 0.85,
         pulseSpeed: 2.0,
-        periodCode: 0.0,
       };
     }
     if (activeState === 'speaking') {
@@ -223,11 +561,14 @@ export function MadhuritaOrb({
         secondary: new THREE.Color('#EA580C'),
         accent: new THREE.Color('#FED7AA'),
         rim: new THREE.Color('#FFF7ED'),
-        coreGlow: new THREE.Color('#FB923C'),
         glowCss: 'rgba(251, 146, 60, 0.65)',
         ringCss: 'rgba(251, 146, 60, 0.3)',
+        dirLightColor: '#FED7AA',
+        ambientLightColor: '#431407',
+        dirIntensity: 0.9,
+        ambientIntensity: 0.4,
+        envMapIntensity: 0.95,
         pulseSpeed: 1.4,
-        periodCode: 3.0,
       };
     }
     if (activeState === 'processing') {
@@ -238,11 +579,14 @@ export function MadhuritaOrb({
         secondary: new THREE.Color('#059669'),
         accent: new THREE.Color('#A7F3D0'),
         rim: new THREE.Color('#ECFDF5'),
-        coreGlow: new THREE.Color('#10B981'),
         glowCss: 'rgba(16, 185, 129, 0.55)',
         ringCss: 'rgba(16, 185, 129, 0.22)',
+        dirLightColor: '#A7F3D0',
+        ambientLightColor: '#064E3B',
+        dirIntensity: 0.7,
+        ambientIntensity: 0.3,
+        envMapIntensity: 0.8,
         pulseSpeed: 1.8,
-        periodCode: 2.0,
       };
     }
     if (activeState === 'error') {
@@ -253,15 +597,18 @@ export function MadhuritaOrb({
         secondary: new THREE.Color('#BE123C'),
         accent: new THREE.Color('#FECDD3'),
         rim: new THREE.Color('#FFF1F2'),
-        coreGlow: new THREE.Color('#F43F5E'),
         glowCss: 'rgba(244, 63, 94, 0.55)',
         ringCss: 'rgba(244, 63, 94, 0.22)',
+        dirLightColor: '#FECDD3',
+        ambientLightColor: '#4C0519',
+        dirIntensity: 0.6,
+        ambientIntensity: 0.25,
+        envMapIntensity: 0.7,
         pulseSpeed: 0.8,
-        periodCode: 3.0,
       };
     }
 
-    // IDLE: Time-aware wallpaper lighting
+    // IDLE: Time-of-day natural lighting palettes
     switch (timePeriod) {
       case 'sunrise':
         return {
@@ -271,11 +618,14 @@ export function MadhuritaOrb({
           secondary: new THREE.Color('#F43F5E'),
           accent: new THREE.Color('#FDE68A'),
           rim: new THREE.Color('#FEF3C7'),
-          coreGlow: new THREE.Color('#FBBF24'),
           glowCss: 'rgba(251, 191, 36, 0.45)',
           ringCss: 'rgba(251, 146, 60, 0.2)',
+          dirLightColor: '#FFD6A5',
+          ambientLightColor: '#451A03',
+          dirIntensity: 0.75,
+          ambientIntensity: 0.35,
+          envMapIntensity: 0.85,
           pulseSpeed: 1.0,
-          periodCode: 1.0,
         };
       case 'day':
         return {
@@ -285,11 +635,14 @@ export function MadhuritaOrb({
           secondary: new THREE.Color('#0284C7'),
           accent: new THREE.Color('#E0F2FE'),
           rim: new THREE.Color('#FFFFFF'),
-          coreGlow: new THREE.Color('#38BDF8'),
           glowCss: 'rgba(186, 230, 253, 0.45)',
           ringCss: 'rgba(186, 230, 253, 0.18)',
+          dirLightColor: '#FFFFFF',
+          ambientLightColor: '#0369A1',
+          dirIntensity: 0.85,
+          ambientIntensity: 0.45,
+          envMapIntensity: 1.0,
           pulseSpeed: 1.0,
-          periodCode: 2.0,
         };
       case 'night':
         return {
@@ -299,11 +652,14 @@ export function MadhuritaOrb({
           secondary: new THREE.Color('#6366F1'),
           accent: new THREE.Color('#C7D2FE'),
           rim: new THREE.Color('#E0E7FF'),
-          coreGlow: new THREE.Color('#818CF8'),
           glowCss: 'rgba(129, 140, 248, 0.4)',
           ringCss: 'rgba(99, 102, 241, 0.18)',
+          dirLightColor: '#C7D2FE',
+          ambientLightColor: '#1E1B4B',
+          dirIntensity: 0.5,
+          ambientIntensity: 0.25,
+          envMapIntensity: 0.65,
           pulseSpeed: 0.9,
-          periodCode: 0.0,
         };
       case 'sunset':
       default:
@@ -314,245 +670,17 @@ export function MadhuritaOrb({
           secondary: new THREE.Color('#EA580C'),
           accent: new THREE.Color('#FED7AA'),
           rim: new THREE.Color('#FFF7ED'),
-          coreGlow: new THREE.Color('#FB923C'),
           glowCss: 'rgba(251, 146, 60, 0.55)',
           ringCss: 'rgba(244, 63, 94, 0.22)',
+          dirLightColor: '#FFEDD5',
+          ambientLightColor: '#7C2D12',
+          dirIntensity: 0.8,
+          ambientIntensity: 0.35,
+          envMapIntensity: 0.9,
           pulseSpeed: 1.0,
-          periodCode: 3.0,
         };
     }
   }, [activeState, timePeriod]);
-
-  // -------------------------------------------------------------------
-  // Real-Time Three.js WebGL + GLSL Scene Engine
-  // -------------------------------------------------------------------
-  useEffect(() => {
-    const mount = mountRef.current;
-    if (!mount) return;
-
-    const width = size;
-    const height = size;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-
-    // 1. Scene, Camera, WebGLRenderer
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-    camera.position.z = 3.6;
-
-    const renderer = new THREE.WebGLRenderer({
-      alpha: true,
-      antialias: true,
-      powerPreference: 'high-performance',
-    });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(dpr);
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
-    mount.appendChild(renderer.domElement);
-
-    // 2. Glass Sphere Mesh with Custom GLSL Shader
-    const sphereGeo = new THREE.SphereGeometry(1.2, 64, 64);
-    const glassUniforms = {
-      uTime: { value: 0 },
-      uAudioVolume: { value: 0 },
-      uColorPrimary: { value: orbTheme.primary },
-      uColorSecondary: { value: orbTheme.secondary },
-      uColorAccent: { value: orbTheme.accent },
-      uRimColor: { value: orbTheme.rim },
-      uCoreGlowColor: { value: orbTheme.coreGlow },
-      uTimePeriod: { value: orbTheme.periodCode },
-      uPulseSpeed: { value: orbTheme.pulseSpeed },
-    };
-
-    const glassMat = new THREE.ShaderMaterial({
-      vertexShader: glassVertexShader,
-      fragmentShader: glassFragmentShader,
-      uniforms: glassUniforms,
-      transparent: true,
-      depthWrite: false,
-    });
-
-    const sphereMesh = new THREE.Mesh(sphereGeo, glassMat);
-    scene.add(sphereMesh);
-
-    // 3. Internal 3D Particle Cloud
-    const particleCount = 280;
-    const particleGeo = new THREE.BufferGeometry();
-    const particlePositions = new Float32Array(particleCount * 3);
-    const particleScales = new Float32Array(particleCount);
-    const particleSpeeds = new Float32Array(particleCount);
-
-    for (let i = 0; i < particleCount; i++) {
-      const radius = 0.15 + Math.random() * 0.95;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(Math.random() * 2 - 1);
-
-      particlePositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
-      particlePositions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta) * 0.6; // slightly squash
-      particlePositions[i * 3 + 2] = radius * Math.cos(phi);
-
-      particleScales[i] = 0.03 + Math.random() * 0.06;
-      particleSpeeds[i] = (0.2 + Math.random() * 0.6) * (Math.random() > 0.5 ? 1 : -1);
-    }
-
-    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
-
-    const particleMat = new THREE.PointsMaterial({
-      color: orbTheme.accent,
-      size: 0.045,
-      transparent: true,
-      opacity: 0.75,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-
-    const particlePoints = new THREE.Points(particleGeo, particleMat);
-    scene.add(particlePoints);
-
-    // 4. 3D Equator Audio Waveform Ribbon
-    const wavePointCount = 128;
-    const waveGeo = new THREE.BufferGeometry();
-    const wavePositions = new Float32Array(wavePointCount * 3);
-    const waveWidth = 2.8;
-
-    for (let i = 0; i < wavePointCount; i++) {
-      const x = -waveWidth / 2 + (i / (wavePointCount - 1)) * waveWidth;
-      wavePositions[i * 3] = x;
-      wavePositions[i * 3 + 1] = 0;
-      wavePositions[i * 3 + 2] = 0.05; // slightly in front of center
-    }
-
-    waveGeo.setAttribute('position', new THREE.BufferAttribute(wavePositions, 3));
-
-    const waveMat = new THREE.LineBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending,
-      linewidth: 2,
-    });
-
-    const waveLine = new THREE.Line(waveGeo, waveMat);
-    scene.add(waveLine);
-
-    // Audio telemetry buffer
-    const audioBuffer = new Uint8Array(128);
-    let smoothedVolume = 0;
-    let clock = new THREE.Clock();
-    let animId = 0;
-
-    // 5. Render Loop
-    const animate = () => {
-      animId = requestAnimationFrame(animate);
-      const elapsedTime = clock.getElapsedTime();
-
-      // Read Web Audio API
-      let rawVolume = 0;
-      let hasAudio = false;
-      if (activeState === 'listening' && streamer) {
-        streamer.getWaveformData(audioBuffer);
-        let sum = 0;
-        for (let i = 0; i < audioBuffer.length; i++) {
-          sum += Math.abs(audioBuffer[i] - 128);
-        }
-        rawVolume = sum / (audioBuffer.length * 128);
-        hasAudio = rawVolume > 0.0015;
-      } else if (activeState === 'speaking' && player) {
-        player.getWaveformData(audioBuffer);
-        let sum = 0;
-        for (let i = 0; i < audioBuffer.length; i++) {
-          sum += Math.abs(audioBuffer[i] - 128);
-        }
-        rawVolume = sum / (audioBuffer.length * 128);
-        hasAudio = rawVolume > 0.0015;
-      } else if (activeState === 'thinking') {
-        rawVolume = 0.22 + Math.sin(elapsedTime * 3) * 0.1;
-      } else if (activeState === 'processing') {
-        rawVolume = 0.18 + Math.cos(elapsedTime * 4) * 0.08;
-      } else if (activeState === 'error') {
-        rawVolume = 0.06;
-      }
-
-      smoothedVolume += (rawVolume - smoothedVolume) * 0.16;
-
-      // Update Shader Uniforms
-      glassUniforms.uTime.value = elapsedTime;
-      glassUniforms.uAudioVolume.value = smoothedVolume;
-      glassUniforms.uColorPrimary.value.copy(orbTheme.primary);
-      glassUniforms.uColorSecondary.value.copy(orbTheme.secondary);
-      glassUniforms.uColorAccent.value.copy(orbTheme.accent);
-      glassUniforms.uRimColor.value.copy(orbTheme.rim);
-      glassUniforms.uCoreGlowColor.value.copy(orbTheme.coreGlow);
-      glassUniforms.uTimePeriod.value = orbTheme.periodCode;
-      glassUniforms.uPulseSpeed.value = orbTheme.pulseSpeed;
-
-      // Update Particle Cloud rotation & positions
-      particlePoints.rotation.y = elapsedTime * 0.12 * orbTheme.pulseSpeed;
-      particlePoints.rotation.z = Math.sin(elapsedTime * 0.2) * 0.1;
-      particleMat.color.copy(orbTheme.accent);
-
-      // Update 3D Equator Waveform
-      const posAttr = waveGeo.attributes.position as THREE.BufferAttribute;
-      const positions = posAttr.array as Float32Array;
-
-      for (let i = 0; i < wavePointCount; i++) {
-        const x = positions[i * 3];
-        const relX = x / (waveWidth / 2);
-        const envelope = Math.max(0, 1.0 - relX * relX);
-        const soft = Math.pow(envelope, 0.85);
-
-        let waveY = 0;
-        if ((activeState === 'listening' || activeState === 'speaking') && hasAudio) {
-          const bufIndex = Math.min(127, Math.floor((i / wavePointCount) * 128));
-          const amp = smoothedVolume * 0.85 + 0.08;
-          const audioVal = ((audioBuffer[bufIndex] - 128) / 128) * amp;
-          const organic = Math.sin(elapsedTime * 5.0 + i * 0.25) * 0.04;
-          waveY = (audioVal + organic) * soft;
-        } else if (activeState === 'thinking') {
-          waveY =
-            (Math.sin(elapsedTime * 5.5 + i * 0.3) * 0.12 +
-              Math.sin(elapsedTime * 2.8 + i * 0.15) * 0.06) *
-            soft *
-            (0.75 + smoothedVolume);
-        } else if (activeState === 'processing') {
-          waveY = Math.cos(elapsedTime * 7.0 + i * 0.4) * 0.09 * soft;
-        } else if (activeState === 'error') {
-          const s = Math.sin(elapsedTime * 9.0 + i * 0.5);
-          waveY = Math.sign(s) * Math.min(1.0, Math.abs(s) * 2.0) * 0.07 * soft;
-        } else {
-          // Calm harmonic breathing wave
-          waveY =
-            (Math.sin(elapsedTime * 1.8 + i * 0.18) * 0.045 +
-              Math.cos(elapsedTime * 2.6 + i * 0.28) * 0.025) *
-            soft;
-        }
-
-        positions[i * 3 + 1] = waveY;
-      }
-      posAttr.needsUpdate = true;
-
-      // Subtle scale pulse on audio
-      const targetScale = 1.0 + smoothedVolume * 0.04;
-      sphereMesh.scale.setScalar(targetScale);
-
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    return () => {
-      cancelAnimationFrame(animId);
-      renderer.dispose();
-      sphereGeo.dispose();
-      glassMat.dispose();
-      particleGeo.dispose();
-      particleMat.dispose();
-      waveGeo.dispose();
-      waveMat.dispose();
-      if (mount.contains(renderer.domElement)) {
-        mount.removeChild(renderer.domElement);
-      }
-    };
-  }, [size, activeState, orbTheme, streamer, player]);
 
   const handleClick = (e: React.MouseEvent) => {
     if (!onClick) return;
@@ -561,7 +689,7 @@ export function MadhuritaOrb({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const id = Date.now();
-    setRipples((prev) => [...prev, { id, x, y, createdAt: Date.now() }]);
+    setRipples((prev) => [...prev, { id, x, y }]);
     setTimeout(() => {
       setRipples((prev) => prev.filter((r) => r.id !== id));
     }, 900);
@@ -581,14 +709,14 @@ export function MadhuritaOrb({
       {/* ============ 1. Natural Sinusoidal Lake Hover Motion ======== */}
       <motion.div
         className="relative w-full h-full flex items-center justify-center pointer-events-none"
-        animate={{ y: [-5, 5, -5] }}
+        animate={{ y: [-4, 4, -4] }}
         transition={{
           duration: 6.4,
           repeat: Infinity,
           ease: 'easeInOut',
         }}
       >
-        {/* Ambient Soft Atmospheric Aura Bloom */}
+        {/* Atmospheric Soft Aura Glow */}
         <motion.div
           className="absolute rounded-full pointer-events-none"
           style={{
@@ -598,12 +726,12 @@ export function MadhuritaOrb({
               ${orbTheme.glowCss} 0%,
               ${orbTheme.ringCss} 36%,
               rgba(0,0,0,0) 70%)`,
-            filter: 'blur(18px)',
+            filter: 'blur(20px)',
             mixBlendMode: 'screen',
           }}
           animate={{
-            scale: activeState === 'listening' || activeState === 'speaking' ? [1, 1.07, 1] : [1, 1.025, 1],
-            opacity: [0.6, 0.9, 0.6],
+            scale: activeState === 'listening' || activeState === 'speaking' ? [1, 1.08, 1] : [1, 1.025, 1],
+            opacity: [0.6, 0.85, 0.6],
           }}
           transition={{
             duration: orbTheme.pulseSpeed * 2.6,
@@ -612,10 +740,28 @@ export function MadhuritaOrb({
           }}
         />
 
-        {/* 2. Real-Time 3D Three.js WebGL Mount */}
-        <div ref={mountRef} className="absolute inset-0 flex items-center justify-center pointer-events-none" />
+        {/* ============ 2. Real-Time 3D R3F Canvas ===================== */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <Canvas
+            camera={{ position: [0, 0, 3.8], fov: 42 }}
+            gl={{
+              alpha: true,
+              antialias: true,
+              powerPreference: 'high-performance',
+            }}
+            dpr={[1, 2]}
+          >
+            <OrbScene
+              orbTheme={orbTheme}
+              activeState={activeState}
+              timePeriod={timePeriod}
+              streamer={streamer}
+              player={player}
+            />
+          </Canvas>
+        </div>
 
-        {/* 3. Optical Horizon Contact Shimmer on Lake */}
+        {/* ============ 3. Optical Horizon Contact Shimmer ============ */}
         <div
           className="absolute pointer-events-none"
           style={{
@@ -631,7 +777,7 @@ export function MadhuritaOrb({
         />
       </motion.div>
 
-      {/* ============ 4. Interactive Hitbox ========================== */}
+      {/* ============ 4. Interactive Hitbox Button =================== */}
       <motion.button
         type="button"
         onClick={handleClick}
@@ -639,12 +785,12 @@ export function MadhuritaOrb({
         onMouseLeave={() => setIsHovered(false)}
         className="absolute rounded-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 z-20"
         style={{
-          width: size * 0.8,
-          height: size * 0.8,
+          width: size * 0.82,
+          height: size * 0.82,
           background: 'transparent',
           border: 'none',
         }}
-        whileHover={{ scale: 1.03 }}
+        whileHover={{ scale: 1.025 }}
         whileTap={{ scale: 0.97 }}
         aria-label={`Madhurita ${orbTheme.title} state`}
       >
@@ -670,7 +816,7 @@ export function MadhuritaOrb({
         ))}
       </motion.button>
 
-      {/* ============ 5. Subtle State Indicator Chip ================= */}
+      {/* ============ 5. State Indicator Chip ======================== */}
       {showStateLabel && (
         <div className="absolute -bottom-7 left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none z-30">
           <AnimatePresence mode="wait">

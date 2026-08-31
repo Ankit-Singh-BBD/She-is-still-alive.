@@ -11,7 +11,7 @@
 // - Time-of-day + weather adaptation
 // - Smooth loading states
 
-import { motion } from 'motion/react';
+import { motion, type Variants } from 'motion/react';
 import { useEffect, useState } from 'react';
 import { Sparkles, Mic, ShieldCheck, Cpu, Volume2 } from 'lucide-react';
 import { useTimeOfDay, useWeatherExpression } from '../hooks/useUIState.js';
@@ -22,7 +22,7 @@ interface ExperienceIntroProps {
   ownerName: string | null;
 }
 
-const containerVariants = {
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
@@ -33,7 +33,7 @@ const containerVariants = {
   },
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { y: 30, opacity: 0, filter: 'blur(10px)' },
   show: {
     y: 0,
@@ -46,7 +46,7 @@ const itemVariants = {
   },
 };
 
-const orbPulseVariants = {
+const orbPulseVariants: Variants = {
   hidden: { scale: 0, opacity: 0 },
   show: {
     scale: 1,
