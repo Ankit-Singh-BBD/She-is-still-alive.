@@ -1185,7 +1185,8 @@ class DatabaseEngine {
       exactMatch.updatedAtIST = nowIst.istFull;
       // Merge provenance — add the new source if we have one
       this.mergeProvenance(exactMatch, provenance, nowIst.iso);
-      this.save();
+      const ok = this.save();
+      this.logMutation(identityId, 'addMemory', ok, `memoryId: ${exactMatch.memoryId} | content: ${cleanContent.slice(0, 80)}`);
       return exactMatch;
     }
 
@@ -1216,7 +1217,8 @@ class DatabaseEngine {
       bestMatch.updatedAt = nowIst.iso;
       bestMatch.updatedAtIST = nowIst.istFull;
       this.mergeProvenance(bestMatch, provenance, nowIst.iso);
-      this.save();
+      const ok = this.save();
+      this.logMutation(identityId, 'addMemory', ok, `memoryId: ${bestMatch.memoryId} | content: ${cleanContent.slice(0, 80)}`);
       return bestMatch;
     }
 
@@ -1248,7 +1250,7 @@ class DatabaseEngine {
 
     this.data.memories.push(record);
     const ok = this.save();
-    this.logMutation(identityId, 'addMemory', ok, `memoryId: ${memoryId}`);
+    this.logMutation(identityId, 'addMemory', ok, `memoryId: ${memoryId} | content: ${cleanContent.slice(0, 80)}`);
     return ok ? record : null;
   }
 
@@ -1397,7 +1399,8 @@ class DatabaseEngine {
       bestMatch.updatedAt = nowIst.iso;
       bestMatch.updatedAtIST = nowIst.istFull;
       this.mergeProvenance(bestMatch, provenance, nowIst.iso);
-      this.save();
+      const ok = this.save();
+      this.logMutation(identityId, 'addMemory', ok, `memoryId: ${bestMatch.memoryId} | content: ${cleanContent.slice(0, 80)}`);
       return { decision, memory: bestMatch };
     }
 

@@ -4,8 +4,8 @@
     "name": "AuditMaster",
     "role": "owner",
     "relationship": "Creator and Master Identity of Madhurita",
-    "passcodeHash": "62f5ed475623eb83bd0a64779e3601b5a3fea0750d59ee6acdb5880255df4edb2a0dc7782422b262abdd214426693b586d28dda704bf7b3d9e3c4d81033ec628",
-    "passcodeSalt": "ef9dc03f5fbbec4d48491aa74c095479",
+    "passcodeHash": "509e46b7e0fa818a740a38c49d35d225dd58a3dadf9221c2680d4e43b02ca5d06e2626f7c7105394e6125f24303c757abed663cc5f122506d91c7a6646a1ed76",
+    "passcodeSalt": "a997018ff5ee75a81fe6279599ecf1fb",
     "preferences": {
       "personalityTone": "energetic_witty",
       "voiceName": "Kore",
@@ -823,6 +823,25 @@
       },
       "createdAt": "2026-08-31T10:36:35.137Z",
       "updatedAt": "2026-08-31T10:36:35.137Z"
+    },
+    {
+      "id": "USER_044",
+      "name": "RegUser_1788173895209",
+      "role": "user",
+      "preferences": {
+        "personaAndVoice": {
+          "speakingStyle": "warm_conversational",
+          "tone": "friendly_warm",
+          "formality": "balanced",
+          "preferredLanguage": "Hinglish",
+          "hinglishBehavior": "natural_mix",
+          "voiceName": "Callirrhoe",
+          "responseLength": "balanced",
+          "conversationalStyle": "interactive_engaging"
+        }
+      },
+      "createdAt": "2026-08-31T10:58:15.209Z",
+      "updatedAt": "2026-08-31T10:58:15.209Z"
     }
   ],
   "memories": [
@@ -3662,12 +3681,12 @@
       "category": "preference",
       "confidence": 1,
       "importance": 0.8,
-      "evidenceCount": 5,
+      "evidenceCount": 6,
       "novelty": 1,
       "createdAt": "2026-08-31T07:35:06.661Z",
       "createdAtIST": "31 August 2026, 01:05:06 pm",
-      "updatedAt": "2026-08-31T10:36:35.134Z",
-      "updatedAtIST": "31 August 2026, 04:06:35 pm"
+      "updatedAt": "2026-08-31T10:58:15.206Z",
+      "updatedAtIST": "31 August 2026, 04:28:15 pm"
     },
     {
       "memoryId": "MEM_1788161706693_mzuoa",
@@ -3676,12 +3695,12 @@
       "category": "fact",
       "confidence": 1,
       "importance": 0.8,
-      "evidenceCount": 5,
+      "evidenceCount": 6,
       "novelty": 1,
       "createdAt": "2026-08-31T07:35:06.692Z",
       "createdAtIST": "31 August 2026, 01:05:06 pm",
-      "updatedAt": "2026-08-31T10:36:35.155Z",
-      "updatedAtIST": "31 August 2026, 04:06:35 pm"
+      "updatedAt": "2026-08-31T10:58:15.236Z",
+      "updatedAtIST": "31 August 2026, 04:28:15 pm"
     },
     {
       "memoryId": "MEM_1788161706752_o4wnr",
@@ -3690,12 +3709,12 @@
       "category": "fact",
       "confidence": 1,
       "importance": 1,
-      "evidenceCount": 5,
+      "evidenceCount": 6,
       "novelty": 1,
       "createdAt": "2026-08-31T07:35:06.752Z",
       "createdAtIST": "31 August 2026, 01:05:06 pm",
-      "updatedAt": "2026-08-31T10:36:35.210Z",
-      "updatedAtIST": "31 August 2026, 04:06:35 pm"
+      "updatedAt": "2026-08-31T10:58:15.315Z",
+      "updatedAtIST": "31 August 2026, 04:28:15 pm"
     },
     {
       "memoryId": "MEM_1788161706758_vrs1g",
@@ -3704,12 +3723,12 @@
       "category": "preference",
       "confidence": 1,
       "importance": 0.8,
-      "evidenceCount": 5,
+      "evidenceCount": 6,
       "novelty": 1,
       "createdAt": "2026-08-31T07:35:06.757Z",
       "createdAtIST": "31 August 2026, 01:05:06 pm",
-      "updatedAt": "2026-08-31T10:36:35.212Z",
-      "updatedAtIST": "31 August 2026, 04:06:35 pm"
+      "updatedAt": "2026-08-31T10:58:15.318Z",
+      "updatedAtIST": "31 August 2026, 04:28:15 pm"
     },
     {
       "memoryId": "MEM_1788161706759_1v472",
@@ -3718,12 +3737,12 @@
       "category": "preference",
       "confidence": 1,
       "importance": 0.8,
-      "evidenceCount": 5,
+      "evidenceCount": 6,
       "novelty": 1,
       "createdAt": "2026-08-31T07:35:06.759Z",
       "createdAtIST": "31 August 2026, 01:05:06 pm",
-      "updatedAt": "2026-08-31T10:36:35.214Z",
-      "updatedAtIST": "31 August 2026, 04:06:35 pm"
+      "updatedAt": "2026-08-31T10:58:15.321Z",
+      "updatedAtIST": "31 August 2026, 04:28:15 pm"
     },
     {
       "memoryId": "MEM_1788165046336_duudj",
@@ -3732,12 +3751,12 @@
       "category": "preference",
       "confidence": 1,
       "importance": 0.8,
-      "evidenceCount": 3,
+      "evidenceCount": 4,
       "novelty": 1,
       "createdAt": "2026-08-31T08:30:46.336Z",
       "createdAtIST": "31 August 2026, 02:00:46 pm",
-      "updatedAt": "2026-08-31T10:36:35.157Z",
-      "updatedAtIST": "31 August 2026, 04:06:35 pm"
+      "updatedAt": "2026-08-31T10:58:15.240Z",
+      "updatedAtIST": "31 August 2026, 04:28:15 pm"
     }
   ],
   "conversations": [
@@ -10386,46 +10405,292 @@
       "referencedPeople": [],
       "importantEvents": [],
       "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173895178_p2wl",
+      "speaker": "AuditConvUser",
+      "identityId": "USER_022",
+      "role": "user",
+      "content": "My secret project is Project Chimera",
+      "timestamp": "2026-08-31T10:58:15.178Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_audit_1788173895174",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true,
+      "deletedAt": "2026-08-31T10:58:15.191Z",
+      "deletedAtIST": "31 August 2026, 04:28:15 pm",
+      "deletedBy": "USER_022",
+      "deleteReason": "Audit cleanup"
+    },
+    {
+      "turnId": "TURN_1788173895185_js6w",
+      "speaker": "Madhurita",
+      "identityId": "USER_022",
+      "role": "assistant",
+      "content": "Understood. I will remember Project Chimera.",
+      "timestamp": "2026-08-31T10:58:15.185Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_audit_1788173895174",
+      "turnOrder": 2,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true,
+      "deletedAt": "2026-08-31T10:58:15.191Z",
+      "deletedAtIST": "31 August 2026, 04:28:15 pm",
+      "deletedBy": "USER_022",
+      "deleteReason": "Audit cleanup"
+    },
+    {
+      "turnId": "TURN_1788173895247_p4fd",
+      "speaker": "AuditLoopExecUser",
+      "identityId": "USER_031",
+      "role": "user",
+      "content": "What time is it in Orai?",
+      "timestamp": "2026-08-31T10:58:15.247Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_1788173895247",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173895274_e2ca",
+      "speaker": "Madhurita",
+      "identityId": "USER_031",
+      "role": "assistant",
+      "content": "I'm running with reduced reasoning right now, so I can't fully answer \"What time is it in Orai?\". Could you rephrase or try again shortly?",
+      "timestamp": "2026-08-31T10:58:15.274Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_1788173895247",
+      "turnOrder": 2,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173895280_t6lm",
+      "speaker": "AuditReasonUser",
+      "identityId": "USER_032",
+      "role": "user",
+      "content": "Check my tasks for today",
+      "timestamp": "2026-08-31T10:58:15.280Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_1788173895280",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173895287_se3q",
+      "speaker": "Madhurita",
+      "identityId": "USER_032",
+      "role": "assistant",
+      "content": "Got it: \"Check my tasks for today\".",
+      "timestamp": "2026-08-31T10:58:15.287Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_1788173895280",
+      "turnOrder": 2,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173895293_z3ru",
+      "speaker": "AuditVerifyUser",
+      "identityId": "USER_033",
+      "role": "user",
+      "content": "What is the weather in Delhi?",
+      "timestamp": "2026-08-31T10:58:15.293Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_1788173895293",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173895300_95mz",
+      "speaker": "Madhurita",
+      "identityId": "USER_033",
+      "role": "assistant",
+      "content": "I'm running with reduced reasoning right now, so I can't fully answer \"What is the weather in Delhi?\". Could you rephrase or try again shortly?",
+      "timestamp": "2026-08-31T10:58:15.299Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_1788173895293",
+      "turnOrder": 2,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173895325_m90u",
+      "speaker": "AuditDynamicUser",
+      "identityId": "USER_039",
+      "role": "user",
+      "content": "What is 2 + 2?",
+      "timestamp": "2026-08-31T10:58:15.325Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_dyn_1",
+      "turnOrder": 11,
+      "sessionDuration": "203 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173895333_22an",
+      "speaker": "Madhurita",
+      "identityId": "USER_039",
+      "role": "assistant",
+      "content": "I'm running with reduced reasoning right now, so I can't fully answer \"What is 2 + 2?\". Could you rephrase or try again shortly?",
+      "timestamp": "2026-08-31T10:58:15.333Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_dyn_1",
+      "turnOrder": 12,
+      "sessionDuration": "203 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173895340_bw4c",
+      "speaker": "AuditDynamicUser",
+      "identityId": "USER_039",
+      "role": "user",
+      "content": "What is the capital of France?",
+      "timestamp": "2026-08-31T10:58:15.339Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_dyn_2",
+      "turnOrder": 11,
+      "sessionDuration": "203 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173895346_1cn4",
+      "speaker": "Madhurita",
+      "identityId": "USER_039",
+      "role": "assistant",
+      "content": "I'm running with reduced reasoning right now, so I can't fully answer \"What is the capital of France?\". Could you rephrase or try again shortly?",
+      "timestamp": "2026-08-31T10:58:15.346Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:15 pm",
+      "timestampIST": "31 August 2026, 04:28:15 pm",
+      "sessionId": "sess_dyn_2",
+      "turnOrder": 12,
+      "sessionDuration": "203 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173905103_f6wn",
+      "speaker": "User",
+      "identityId": "USER_INVARIANT_TEST",
+      "role": "user",
+      "content": "What are my fitness preferences?",
+      "timestamp": "2026-08-31T10:58:25.103Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:25 pm",
+      "timestampIST": "31 August 2026, 04:28:25 pm",
+      "sessionId": "sess_loop_1788173905103",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788173905112_2y27",
+      "speaker": "Madhurita",
+      "identityId": "USER_INVARIANT_TEST",
+      "role": "assistant",
+      "content": "I'm running with reduced reasoning right now, so I can't fully answer \"What are my fitness preferences?\". Could you rephrase or try again shortly?",
+      "timestamp": "2026-08-31T10:58:25.112Z",
+      "istDate": "31 August 2026",
+      "istTime": "04:28:25 pm",
+      "timestampIST": "31 August 2026, 04:28:25 pm",
+      "sessionId": "sess_loop_1788173905103",
+      "turnOrder": 2,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
     }
   ],
   "worldAwareness": {
-    "lastSystemStartup": "2026-08-31T10:44:18.873Z",
-    "lastSystemStartupIST": "31 August 2026, 04:14:18 pm",
+    "lastSystemStartup": "2026-08-31T10:58:25.039Z",
+    "lastSystemStartupIST": "31 August 2026, 04:28:25 pm",
     "recentVisitors": [
       {
         "identityId": "USER_039",
         "name": "AuditDynamicUser",
-        "lastSeenISO": "2026-08-31T10:36:35.229Z",
-        "lastSeenIST": "31 August 2026, 04:06:35 pm",
-        "sessionCount": 20
+        "lastSeenISO": "2026-08-31T10:58:15.346Z",
+        "lastSeenIST": "31 August 2026, 04:28:15 pm",
+        "sessionCount": 24
       },
       {
         "identityId": "USER_033",
         "name": "AuditVerifyUser",
-        "lastSeenISO": "2026-08-31T10:36:35.199Z",
-        "lastSeenIST": "31 August 2026, 04:06:35 pm",
-        "sessionCount": 10
+        "lastSeenISO": "2026-08-31T10:58:15.300Z",
+        "lastSeenIST": "31 August 2026, 04:28:15 pm",
+        "sessionCount": 12
       },
       {
         "identityId": "USER_032",
         "name": "AuditReasonUser",
-        "lastSeenISO": "2026-08-31T10:36:35.188Z",
-        "lastSeenIST": "31 August 2026, 04:06:35 pm",
-        "sessionCount": 10
+        "lastSeenISO": "2026-08-31T10:58:15.287Z",
+        "lastSeenIST": "31 August 2026, 04:28:15 pm",
+        "sessionCount": 12
       },
       {
         "identityId": "USER_031",
         "name": "AuditLoopExecUser",
-        "lastSeenISO": "2026-08-31T10:36:35.180Z",
-        "lastSeenIST": "31 August 2026, 04:06:35 pm",
-        "sessionCount": 10
+        "lastSeenISO": "2026-08-31T10:58:15.274Z",
+        "lastSeenIST": "31 August 2026, 04:28:15 pm",
+        "sessionCount": 12
       },
       {
         "identityId": "USER_022",
         "name": "AuditConvUser",
-        "lastSeenISO": "2026-08-31T10:36:35.120Z",
-        "lastSeenIST": "31 August 2026, 04:06:35 pm",
-        "sessionCount": 15
+        "lastSeenISO": "2026-08-31T10:58:15.185Z",
+        "lastSeenIST": "31 August 2026, 04:28:15 pm",
+        "sessionCount": 18
       },
       {
         "identityId": "USER_019",
@@ -10465,9 +10730,9 @@
       {
         "identityId": "USER_INVARIANT_TEST",
         "name": "User",
-        "lastSeenISO": "2026-08-31T10:23:07.505Z",
-        "lastSeenIST": "31 August 2026, 03:53:07 pm",
-        "sessionCount": 22
+        "lastSeenISO": "2026-08-31T10:58:25.112Z",
+        "lastSeenIST": "31 August 2026, 04:28:25 pm",
+        "sessionCount": 24
       },
       {
         "identityId": "USER_014",
@@ -10535,6 +10800,26 @@
     ],
     "recentInteractions": [],
     "openLoops": [
+      {
+        "id": "LOOP_1788173905141_eiy3",
+        "identityId": "USER_INVARIANT_TEST",
+        "name": "Check flight tickets",
+        "description": "Find tickets to Bangalore for next Friday",
+        "createdAtIST": "31 August 2026, 04:28:25 pm",
+        "createdAtISO": "2026-08-31T10:58:25.141Z",
+        "status": "resolved",
+        "resolvedAtISO": "2026-08-31T10:58:25.145Z",
+        "resolvedAtIST": "31 August 2026, 04:28:25 pm"
+      },
+      {
+        "id": "LOOP_1788173895222_wk7t",
+        "identityId": "USER_026",
+        "name": "Verify SSL cert renewal",
+        "description": "Check cert expiry on domain",
+        "createdAtIST": "31 August 2026, 04:28:15 pm",
+        "createdAtISO": "2026-08-31T10:58:15.222Z",
+        "status": "open"
+      },
       {
         "id": "LOOP_1788172595146_qoub",
         "identityId": "USER_026",
@@ -10725,13 +11010,13 @@
       "category": "preference",
       "description": "Prefers dark mode theme",
       "confidence": 1,
-      "evidenceCount": 5,
+      "evidenceCount": 6,
       "firstObservedAt": "2026-08-31T07:35:06.743Z",
       "firstObservedAtIST": "31 August 2026, 01:05:06 pm",
-      "lastObservedAt": "2026-08-31T10:36:35.203Z",
-      "lastObservedAtIST": "31 August 2026, 04:06:35 pm",
+      "lastObservedAt": "2026-08-31T10:58:15.306Z",
+      "lastObservedAtIST": "31 August 2026, 04:28:15 pm",
       "createdAt": "2026-08-31T07:35:06.743Z",
-      "updatedAt": "2026-08-31T10:36:35.203Z",
+      "updatedAt": "2026-08-31T10:58:15.306Z",
       "provenance": {
         "sourceTurnIds": [],
         "sourceSessionIds": [
@@ -10739,11 +11024,12 @@
           "sess_learn_1788161727033",
           "sess_learn_1788165046385",
           "sess_learn_1788172577918",
-          "sess_learn_1788172595203"
+          "sess_learn_1788172595203",
+          "sess_learn_1788173895306"
         ],
         "sourceMemoryIds": [],
         "extractedBy": "audit-test",
-        "lastDerivedAtISO": "2026-08-31T10:36:35.203Z"
+        "lastDerivedAtISO": "2026-08-31T10:58:15.306Z"
       }
     },
     {
@@ -10752,13 +11038,13 @@
       "category": "habit",
       "description": "Prefers morning meetings before 11 AM",
       "confidence": 1,
-      "evidenceCount": 5,
+      "evidenceCount": 6,
       "firstObservedAt": "2026-08-31T07:35:06.747Z",
       "firstObservedAtIST": "31 August 2026, 01:05:06 pm",
-      "lastObservedAt": "2026-08-31T10:36:35.205Z",
-      "lastObservedAtIST": "31 August 2026, 04:06:35 pm",
+      "lastObservedAt": "2026-08-31T10:58:15.309Z",
+      "lastObservedAtIST": "31 August 2026, 04:28:15 pm",
       "createdAt": "2026-08-31T07:35:06.747Z",
-      "updatedAt": "2026-08-31T10:36:35.205Z",
+      "updatedAt": "2026-08-31T10:58:15.309Z",
       "provenance": {
         "sourceTurnIds": [],
         "sourceSessionIds": [
@@ -10766,7 +11052,7 @@
         ],
         "sourceMemoryIds": [],
         "extractedBy": "audit-test",
-        "lastDerivedAtISO": "2026-08-31T10:36:35.205Z"
+        "lastDerivedAtISO": "2026-08-31T10:58:15.309Z"
       }
     }
   ],
@@ -11237,12 +11523,12 @@
       "userName": "AuditDynamicUser",
       "startedAt": "2026-08-31T07:35:06.763Z",
       "startedAtIST": "31 August 2026, 01:05:06 pm",
-      "lastActiveAt": "2026-08-31T10:36:35.221Z",
-      "lastActiveAtIST": "31 August 2026, 04:06:35 pm",
-      "durationMs": 10888458,
-      "durationHuman": "181 min",
+      "lastActiveAt": "2026-08-31T10:58:15.333Z",
+      "lastActiveAtIST": "31 August 2026, 04:28:15 pm",
+      "durationMs": 12188570,
+      "durationHuman": "203 min",
       "topicsDiscussed": [],
-      "turnCount": 10,
+      "turnCount": 12,
       "referencedEntities": [],
       "unresolvedTopics": []
     },
@@ -11252,12 +11538,12 @@
       "userName": "AuditDynamicUser",
       "startedAt": "2026-08-31T07:35:06.770Z",
       "startedAtIST": "31 August 2026, 01:05:06 pm",
-      "lastActiveAt": "2026-08-31T10:36:35.229Z",
-      "lastActiveAtIST": "31 August 2026, 04:06:35 pm",
-      "durationMs": 10888459,
-      "durationHuman": "181 min",
+      "lastActiveAt": "2026-08-31T10:58:15.346Z",
+      "lastActiveAtIST": "31 August 2026, 04:28:15 pm",
+      "durationMs": 12188576,
+      "durationHuman": "203 min",
       "topicsDiscussed": [],
-      "turnCount": 10,
+      "turnCount": 12,
       "referencedEntities": [],
       "unresolvedTopics": []
     },
@@ -11455,6 +11741,66 @@
       "turnCount": 2,
       "referencedEntities": [],
       "unresolvedTopics": []
+    },
+    {
+      "sessionId": "sess_1788173895247",
+      "identityId": "USER_031",
+      "userName": "AuditLoopExecUser",
+      "startedAt": "2026-08-31T10:58:15.247Z",
+      "startedAtIST": "31 August 2026, 04:28:15 pm",
+      "lastActiveAt": "2026-08-31T10:58:15.274Z",
+      "lastActiveAtIST": "31 August 2026, 04:28:15 pm",
+      "durationMs": 27,
+      "durationHuman": "< 1 min",
+      "topicsDiscussed": [],
+      "turnCount": 2,
+      "referencedEntities": [],
+      "unresolvedTopics": []
+    },
+    {
+      "sessionId": "sess_1788173895280",
+      "identityId": "USER_032",
+      "userName": "AuditReasonUser",
+      "startedAt": "2026-08-31T10:58:15.280Z",
+      "startedAtIST": "31 August 2026, 04:28:15 pm",
+      "lastActiveAt": "2026-08-31T10:58:15.287Z",
+      "lastActiveAtIST": "31 August 2026, 04:28:15 pm",
+      "durationMs": 7,
+      "durationHuman": "< 1 min",
+      "topicsDiscussed": [],
+      "turnCount": 2,
+      "referencedEntities": [],
+      "unresolvedTopics": []
+    },
+    {
+      "sessionId": "sess_1788173895293",
+      "identityId": "USER_033",
+      "userName": "AuditVerifyUser",
+      "startedAt": "2026-08-31T10:58:15.293Z",
+      "startedAtIST": "31 August 2026, 04:28:15 pm",
+      "lastActiveAt": "2026-08-31T10:58:15.300Z",
+      "lastActiveAtIST": "31 August 2026, 04:28:15 pm",
+      "durationMs": 7,
+      "durationHuman": "< 1 min",
+      "topicsDiscussed": [],
+      "turnCount": 2,
+      "referencedEntities": [],
+      "unresolvedTopics": []
+    },
+    {
+      "sessionId": "sess_loop_1788173905103",
+      "identityId": "USER_INVARIANT_TEST",
+      "userName": "User",
+      "startedAt": "2026-08-31T10:58:25.103Z",
+      "startedAtIST": "31 August 2026, 04:28:25 pm",
+      "lastActiveAt": "2026-08-31T10:58:25.112Z",
+      "lastActiveAtIST": "31 August 2026, 04:28:25 pm",
+      "durationMs": 9,
+      "durationHuman": "< 1 min",
+      "topicsDiscussed": [],
+      "turnCount": 2,
+      "referencedEntities": [],
+      "unresolvedTopics": []
     }
   ],
   "systemVoiceConfig": {
@@ -11521,6 +11867,17 @@
       "content": "Private payload for receiver only",
       "createdAt": "2026-08-31T10:36:35.153Z",
       "createdAtIST": "31 August 2026, 04:06:35 pm",
+      "delivered": false
+    },
+    {
+      "noteId": "NOTE_1788173895233_7tj4",
+      "senderId": "USER_027",
+      "senderName": "AuditSender",
+      "targetId": "USER_028",
+      "targetName": "AuditReceiver",
+      "content": "Private payload for receiver only",
+      "createdAt": "2026-08-31T10:58:15.232Z",
+      "createdAtIST": "31 August 2026, 04:28:15 pm",
       "delivered": false
     }
   ],
@@ -12031,6 +12388,34 @@
       "dueAt": "2026-08-31T10:36:36.139Z",
       "priority": "high",
       "lastEvaluatedAt": "2026-08-31T10:36:35.139Z",
+      "executionCount": 0,
+      "lastExecutionResult": "pending",
+      "source": "user_explicit"
+    },
+    {
+      "id": "TASK_1788173895213_oiiw",
+      "identityId": "USER_025",
+      "title": "Execute system backup verification",
+      "status": "completed",
+      "createdAt": "2026-08-31T10:58:15.213Z",
+      "updatedAt": "2026-08-31T10:58:15.219Z",
+      "dueAt": "2026-08-31T10:58:16.213Z",
+      "priority": "high",
+      "lastEvaluatedAt": "2026-08-31T10:58:15.213Z",
+      "executionCount": 0,
+      "lastExecutionResult": "pending",
+      "source": "user_explicit"
+    },
+    {
+      "id": "TASK_1788173905131_uhqw",
+      "identityId": "USER_INVARIANT_TEST",
+      "title": "Complete system verification audit",
+      "status": "completed",
+      "createdAt": "2026-08-31T10:58:25.131Z",
+      "updatedAt": "2026-08-31T10:58:25.138Z",
+      "dueAt": "2026-08-31T11:58:25.131Z",
+      "priority": "high",
+      "lastEvaluatedAt": "2026-08-31T10:58:25.131Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit"
@@ -13952,6 +14337,211 @@
       "payload": {
         "loopId": "LOOP_1788172595146_qoub",
         "description": "Verify SSL cert renewal",
+        "resolvedHow": "explicitly_resolved"
+      },
+      "importance": 60,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173895256_1_l1vwf",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T10:58:15.255Z",
+      "timestampIST": "31/8/2026, 16:28:15",
+      "identityId": "USER_025",
+      "payload": {
+        "taskId": "TASK_1788173895213_oiiw",
+        "previousState": "none",
+        "newState": "completed",
+        "taskTitle": "Execute system backup verification"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173895259_2_bilv4",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T10:58:15.259Z",
+      "timestampIST": "31/8/2026, 16:28:15",
+      "identityId": "USER_025",
+      "payload": {
+        "taskId": "TASK_1788173895213_oiiw",
+        "previousState": "pending",
+        "newState": "in_progress",
+        "taskTitle": "Execute system backup verification"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173895262_3_0w68v",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T10:58:15.262Z",
+      "timestampIST": "31/8/2026, 16:28:15",
+      "identityId": "USER_025",
+      "payload": {
+        "taskId": "TASK_1788173895213_oiiw",
+        "previousState": "in_progress",
+        "newState": "completed",
+        "taskTitle": "Execute system backup verification"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173895265_4_d6zgs",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-31T10:58:15.264Z",
+      "timestampIST": "31/8/2026, 16:28:15",
+      "identityId": "USER_026",
+      "payload": {
+        "loopId": "LOOP_1788173895222_wk7t",
+        "previousState": "none",
+        "newState": "open",
+        "description": "Verify SSL cert renewal"
+      },
+      "importance": 55,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173895267_5_0cco9",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-31T10:58:15.267Z",
+      "timestampIST": "31/8/2026, 16:28:15",
+      "identityId": "USER_026",
+      "payload": {
+        "loopId": "LOOP_1788173895222_wk7t",
+        "previousState": "open",
+        "newState": "resolved",
+        "description": "Verify SSL cert renewal"
+      },
+      "importance": 55,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173895270_6_qiswz",
+      "eventType": "loop_resolved",
+      "timestamp": "2026-08-31T10:58:15.270Z",
+      "timestampIST": "31/8/2026, 16:28:15",
+      "identityId": "USER_026",
+      "payload": {
+        "loopId": "LOOP_1788173895222_wk7t",
+        "description": "Verify SSL cert renewal",
+        "resolvedHow": "explicitly_resolved"
+      },
+      "importance": 60,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173905148_1_5jxh8",
+      "eventType": "user_arrival",
+      "timestamp": "2026-08-31T10:58:25.148Z",
+      "timestampIST": "31/8/2026, 16:28:25",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "name": "Invariant Tester",
+        "channel": "text",
+        "isReturningUser": false
+      },
+      "importance": 75,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173905196_2_ygeap",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T10:58:25.195Z",
+      "timestampIST": "31/8/2026, 16:28:25",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "taskId": "TASK_1788173905131_uhqw",
+        "previousState": "none",
+        "newState": "completed",
+        "taskTitle": "Complete system verification audit"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173905199_3_9xmrs",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T10:58:25.199Z",
+      "timestampIST": "31/8/2026, 16:28:25",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "taskId": "TASK_1788173905131_uhqw",
+        "previousState": "pending",
+        "newState": "in_progress",
+        "taskTitle": "Complete system verification audit"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173905202_4_f1nm6",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T10:58:25.202Z",
+      "timestampIST": "31/8/2026, 16:28:25",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "taskId": "TASK_1788173905131_uhqw",
+        "previousState": "in_progress",
+        "newState": "completed",
+        "taskTitle": "Complete system verification audit"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173905205_5_9t8hx",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-31T10:58:25.205Z",
+      "timestampIST": "31/8/2026, 16:28:25",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "loopId": "LOOP_1788173905141_eiy3",
+        "previousState": "none",
+        "newState": "open",
+        "description": "Check flight tickets"
+      },
+      "importance": 55,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173905209_6_sx4s9",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-31T10:58:25.209Z",
+      "timestampIST": "31/8/2026, 16:28:25",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "loopId": "LOOP_1788173905141_eiy3",
+        "previousState": "open",
+        "newState": "resolved",
+        "description": "Check flight tickets"
+      },
+      "importance": 55,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788173905212_7_elmly",
+      "eventType": "loop_resolved",
+      "timestamp": "2026-08-31T10:58:25.212Z",
+      "timestampIST": "31/8/2026, 16:28:25",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "loopId": "LOOP_1788173905141_eiy3",
+        "description": "Check flight tickets",
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
@@ -19330,6 +19920,91 @@
       "originalId": "sess_audit_1788172595113",
       "binId": "BIN_1788172595125_otu29",
       "expiresAt": "2026-09-30T10:36:35.125Z"
+    },
+    {
+      "ownerId": "USER_022",
+      "type": "conversation_turn",
+      "payload": {
+        "turnId": "TURN_1788173895178_p2wl",
+        "speaker": "AuditConvUser",
+        "identityId": "USER_022",
+        "role": "user",
+        "content": "My secret project is Project Chimera",
+        "timestamp": "2026-08-31T10:58:15.178Z",
+        "istDate": "31 August 2026",
+        "istTime": "04:28:15 pm",
+        "timestampIST": "31 August 2026, 04:28:15 pm",
+        "sessionId": "sess_audit_1788173895174",
+        "turnOrder": 1,
+        "sessionDuration": "< 1 min",
+        "referencedPeople": [],
+        "importantEvents": [],
+        "isResolved": true
+      },
+      "preview": "My secret project is Project Chimera",
+      "deletedAt": "2026-08-31T10:58:15.191Z",
+      "deletedAtIST": "31 August 2026, 04:28:15 pm",
+      "deletedBy": "USER_022",
+      "deleteReason": "Audit cleanup",
+      "originalId": "TURN_1788173895178_p2wl",
+      "binId": "BIN_1788173895191_rpg2f",
+      "expiresAt": "2026-09-30T10:58:15.191Z"
+    },
+    {
+      "ownerId": "USER_022",
+      "type": "conversation_turn",
+      "payload": {
+        "turnId": "TURN_1788173895185_js6w",
+        "speaker": "Madhurita",
+        "identityId": "USER_022",
+        "role": "assistant",
+        "content": "Understood. I will remember Project Chimera.",
+        "timestamp": "2026-08-31T10:58:15.185Z",
+        "istDate": "31 August 2026",
+        "istTime": "04:28:15 pm",
+        "timestampIST": "31 August 2026, 04:28:15 pm",
+        "sessionId": "sess_audit_1788173895174",
+        "turnOrder": 2,
+        "sessionDuration": "< 1 min",
+        "referencedPeople": [],
+        "importantEvents": [],
+        "isResolved": true
+      },
+      "preview": "Understood. I will remember Project Chimera.",
+      "deletedAt": "2026-08-31T10:58:15.191Z",
+      "deletedAtIST": "31 August 2026, 04:28:15 pm",
+      "deletedBy": "USER_022",
+      "deleteReason": "Audit cleanup",
+      "originalId": "TURN_1788173895185_js6w",
+      "binId": "BIN_1788173895191_5wgbr",
+      "expiresAt": "2026-09-30T10:58:15.191Z"
+    },
+    {
+      "ownerId": "USER_022",
+      "type": "session",
+      "payload": {
+        "sessionId": "sess_audit_1788173895174",
+        "identityId": "USER_022",
+        "userName": "AuditConvUser",
+        "startedAt": "2026-08-31T10:58:15.174Z",
+        "startedAtIST": "31 August 2026, 04:28:15 pm",
+        "lastActiveAt": "2026-08-31T10:58:15.185Z",
+        "lastActiveAtIST": "31 August 2026, 04:28:15 pm",
+        "durationMs": 11,
+        "durationHuman": "< 1 min",
+        "topicsDiscussed": [],
+        "turnCount": 3,
+        "referencedEntities": [],
+        "unresolvedTopics": []
+      },
+      "preview": "Session: sess_audit_1788173895174",
+      "deletedAt": "2026-08-31T10:58:15.191Z",
+      "deletedAtIST": "31 August 2026, 04:28:15 pm",
+      "deletedBy": "USER_022",
+      "deleteReason": "Audit cleanup",
+      "originalId": "sess_audit_1788173895174",
+      "binId": "BIN_1788173895191_4ycin",
+      "expiresAt": "2026-09-30T10:58:15.191Z"
     }
   ],
   "binPolicy": {

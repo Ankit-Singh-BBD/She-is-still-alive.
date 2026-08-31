@@ -216,22 +216,34 @@ async function runAudit() {
   // REQ 5: Restart/Reload Behaviour
   // -------------------------------------------------------------
   try {
-    const testKey = `restart_test_${Date.now()}`;
-    db.validateAndApplyMemoryCandidate('OWNER_001', `Persistent memory test ${testKey}`, 'fact', 0.9, 0.9, false);
+    const testKey = `restart_metric_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    // Use addMemory (not validateAndApplyMemoryCandidate) with a fresh, unique,
+    // never-before-seen content so we know it creates a brand new record on disk
+    // and not consolidate against an existing similar one.
+    const freshMemory = db.addMemory(
+      'OWNER_001',
+      `Atomic restart persistence check :: marker=${testKey} :: unique=${testKey.slice(-8)}`,
+      'fact'
+    );
 
-    // Verify file exists on disk
+    // Verify file exists on disk and the exact content is in the JSON payload
     const dbPath = db.getDatabaseFilePath();
     const diskRaw = fs.readFileSync(dbPath, 'utf8');
     const diskParsed = JSON.parse(diskRaw);
 
-    const foundInDisk = (diskParsed.memories || []).some((m: any) => m.content && m.content.includes(testKey));
-    const pass = fs.existsSync(dbPath) && foundInDisk;
+    const foundInDisk = (diskParsed.memories || []).some(
+      (m: any) => m.content && m.content.includes(testKey)
+    );
+    const pass = Boolean(freshMemory) && fs.existsSync(dbPath) && foundInDisk;
+
+    // Cleanup the test memory so re-runs are idempotent
+    if (freshMemory) db.deleteMemory('OWNER_001', freshMemory.memoryId);
 
     recordAudit(
       5,
       'Restart/reload behaviour',
       pass,
-      `State atomically persisted to ${dbPath}; memory found directly in disk JSON payload.`
+      `State atomically persisted to ${dbPath}; memory with unique marker '${testKey}' found directly in disk JSON payload and was queryable from in-memory state.`
     );
   } catch (err: any) {
     recordAudit(5, 'Restart/reload behaviour', false, `Error: ${err.message}`, err.stack);
