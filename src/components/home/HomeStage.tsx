@@ -1,6 +1,12 @@
 // ===================================================================
-// HOME STAGE - Main home view (greeting + orb + actions + composer)
+// HOME STAGE — Cinematic hero: orb centred in the landscape
 // ===================================================================
+//
+// Layout is deliberately sparse so the photograph behind it does the
+// heavy lifting: greeting floats at the top with photographic text
+// shadows, the orb sits on the optical centre of the frame (slightly
+// above true centre, where the horizon glow is), and every control is a
+// pane of glass resting on the scene.
 
 import { motion, AnimatePresence } from 'motion/react';
 import { useEffect, useRef, useState, FormEvent } from 'react';
@@ -73,14 +79,17 @@ export function HomeStage({
     setChatInput('');
   };
 
+  // Orb scale — grows a touch while the voice session is live
+  const orbSize = isVoiceActive ? 320 : 288;
+
   return (
     <div className="relative h-full w-full flex flex-col">
-      {/* Top: Greeting + Weather strip */}
-      <div className="px-5 lg:px-8 pt-5 lg:pt-7 shrink-0">
+      {/* ---- Top: greeting, floating directly on the photograph ------ */}
+      <div className="px-5 lg:px-9 pt-5 lg:pt-8 shrink-0 text-cine">
         <GreetingBlock identityName={identity.name} role={identity.role} />
       </div>
 
-      {/* Center: Orb (collapses when conversation has started) */}
+      {/* ---- Centre: orb hero, or the conversation once it starts ---- */}
       <AnimatePresence mode="wait">
         {!hasMessages ? (
           <motion.div
@@ -91,17 +100,11 @@ export function HomeStage({
             transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
             className="flex-1 min-h-0 flex flex-col items-center justify-center px-5"
           >
-            <div className="relative w-full max-w-2xl flex flex-col items-center gap-5">
-              {/* Orb */}
+            <div className="relative w-full max-w-2xl flex flex-col items-center">
+              {/* Orb — sits on the optical centre of the frame */}
               <motion.div
                 ref={orbRef}
                 className="relative cursor-pointer"
-                animate={{ scale: isVoiceActive ? [1, 1.03, 1] : 1 }}
-                transition={{
-                  duration: 2.4,
-                  repeat: isVoiceActive ? Infinity : 0,
-                  ease: 'easeInOut',
-                }}
                 onClick={onToggleVoice}
                 role="button"
                 tabIndex={0}
@@ -112,41 +115,52 @@ export function HomeStage({
                   }
                 }}
                 aria-label="Toggle voice"
+                initial={{ opacity: 0, scale: 0.92, filter: 'blur(10px)' }}
+                animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
               >
                 <MadhuritaOrb
                   state={liveState}
-                  size={isVoiceActive ? 300 : 260}
+                  size={orbSize}
                   onClick={onToggleVoice}
+                  isThinking={isThinking}
+                  showStateLabel
                 />
+                {/* Discrete expanding shockwave each time the session ticks */}
                 {isVoiceActive && (
                   <motion.div
                     key={orbPulse}
                     className="absolute inset-0 rounded-full pointer-events-none"
-                    initial={{ opacity: 0.55, scale: 1 }}
-                    animate={{ opacity: 0, scale: 1.25 }}
-                    transition={{ duration: 1.6, ease: 'easeOut' }}
+                    initial={{ opacity: 0.45, scale: 0.72 }}
+                    animate={{ opacity: 0, scale: 1.3 }}
+                    transition={{ duration: 1.8, ease: 'easeOut' }}
                     style={{
                       background:
                         liveState === 'listening'
-                          ? 'radial-gradient(circle, rgba(96,165,250,0.35) 0%, transparent 60%)'
-                          : 'radial-gradient(circle, rgba(251,146,60,0.35) 0%, transparent 60%)',
+                          ? 'radial-gradient(circle, rgba(96,165,250,0) 52%, rgba(96,165,250,0.35) 68%, rgba(96,165,250,0) 78%)'
+                          : 'radial-gradient(circle, rgba(251,146,60,0) 52%, rgba(251,146,60,0.35) 68%, rgba(251,146,60,0) 78%)',
+                      mixBlendMode: 'screen',
                     }}
                   />
                 )}
               </motion.div>
 
-              {/* Voice pill */}
-              <VoicePill state={liveState} onToggle={onToggleVoice} disabled={false} />
+              {/* Voice pill — clears the orb's state label */}
+              <div className="mt-9">
+                <VoicePill state={liveState} onToggle={onToggleVoice} disabled={false} />
+              </div>
 
               {/* Quick action chips */}
-              <QuickActionChips onAction={onQuickAction} disabled={isThinking} />
+              <div className="mt-5 w-full">
+                <QuickActionChips onAction={onQuickAction} disabled={isThinking} />
+              </div>
 
               {/* Invitation to tune persona (owner only) */}
               {identity?.role === 'owner' && onOpenOnboarding && (
                 <motion.button
                   type="button"
                   onClick={onOpenOnboarding}
-                  className="mt-1 inline-flex items-center gap-1.5 text-[11.5px] text-amber-200/80 hover:text-amber-100 cursor-pointer press-scale"
+                  className="mt-4 inline-flex items-center gap-1.5 text-[11.5px] text-amber-200/80 hover:text-amber-100 cursor-pointer press-scale text-cine"
                   whileTap={{ scale: 0.97 }}
                 >
                   <Sparkles className="w-3 h-3" />
@@ -169,8 +183,8 @@ export function HomeStage({
         )}
       </AnimatePresence>
 
-      {/* Bottom: composer + info bar */}
-      <div className="px-5 lg:px-8 pb-4 pt-2 shrink-0 flex flex-col gap-3">
+      {/* ---- Bottom: composer + info bar ---------------------------- */}
+      <div className="px-5 lg:px-9 pb-4 pt-2 shrink-0 flex flex-col gap-2.5">
         <Composer
           value={chatInput}
           onChange={setChatInput}

@@ -1,6 +1,11 @@
 // ===================================================================
-// GLASS NAV RAIL - Left-side navigation rail + mobile bottom tab bar
+// GLASS NAV RAIL — Smoked-glass slab floating over the photograph
 // ===================================================================
+//
+// A single slab of cold, thick glass (`.cine-rail`) that visibly refracts
+// the landscape behind it. Active items get a bevelled glass pill, a
+// gradient edge indicator and a soft coloured bloom, so the rail reads as
+// a physical object lit by the scene rather than a flat panel.
 
 import { motion, AnimatePresence } from 'motion/react';
 import { useState } from 'react';
@@ -73,150 +78,224 @@ export function Sidebar({
 
   return (
     <>
-      {/* Desktop nav rail (≥1024px) */}
-      <aside className="hidden lg:flex flex-col w-[244px] shrink-0 h-full px-3 pt-4 pb-4 border-r border-white/10">
-        {/* Brand */}
-        <div className="px-3 mb-5 flex items-center gap-2.5">
-          <div className="relative w-8 h-8 rounded-xl bg-gradient-to-br from-orange-400/30 via-pink-400/30 to-violet-500/30 border border-white/15 flex items-center justify-center">
-            <Sparkles className="w-4 h-4 text-white" />
-            <motion.span
-              className="absolute inset-0 rounded-xl"
-              animate={{
-                boxShadow: [
-                  '0 0 0 0 rgba(255,138,101,0)',
-                  '0 0 16px 2px rgba(255,138,101,0.18)',
-                  '0 0 0 0 rgba(255,138,101,0)',
-                ],
-              }}
-              transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-            />
+      {/* ============ Desktop nav rail (>=1024px) ==================== */}
+      <aside className="hidden lg:flex flex-col w-[248px] shrink-0 my-3 ml-3 rounded-3xl cine-rail relative z-10 overflow-hidden">
+        {/* Light catching the inner left edge of the slab */}
+        <div
+          className="absolute inset-y-0 left-0 w-16 pointer-events-none"
+          style={{
+            background:
+              'linear-gradient(90deg, rgba(255,255,255,0.07) 0%, transparent 100%)',
+            mixBlendMode: 'screen',
+          }}
+        />
+        {/* Warm bounce from the horizon at the bottom of the rail */}
+        <div
+          className="absolute inset-x-0 bottom-0 h-40 pointer-events-none"
+          style={{
+            background:
+              'linear-gradient(0deg, rgba(255,168,120,0.07) 0%, transparent 100%)',
+            mixBlendMode: 'screen',
+          }}
+        />
+
+        <div className="relative flex flex-col h-full px-3 pt-4 pb-4">
+          {/* ---- Brand ------------------------------------------------ */}
+          <div className="px-2.5 mb-4 flex items-center gap-2.5">
+            <div className="relative w-9 h-9 rounded-2xl cine-chip flex items-center justify-center overflow-hidden">
+              <div
+                className="absolute inset-0"
+                style={{
+                  background:
+                    'linear-gradient(140deg, rgba(255,138,101,0.4), rgba(244,114,182,0.32) 48%, rgba(139,92,246,0.4))',
+                  mixBlendMode: 'screen',
+                }}
+              />
+              <Sparkles className="relative w-4 h-4 text-white drop-shadow" />
+              <motion.span
+                className="absolute inset-0 rounded-2xl"
+                animate={{
+                  boxShadow: [
+                    '0 0 0 0 rgba(255,138,101,0)',
+                    '0 0 20px 3px rgba(255,138,101,0.22)',
+                    '0 0 0 0 rgba(255,138,101,0)',
+                  ],
+                }}
+                transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut' }}
+              />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[14px] font-semibold text-white tracking-tight leading-tight text-cine">
+                Madhurita
+              </p>
+              <p className="text-[10px] text-white/45 leading-tight mt-0.5">
+                Your cognitive companion
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-[14px] font-semibold text-white tracking-tight leading-tight">
-              Madhurita
-            </p>
-            <p className="text-[10px] text-white/45 leading-tight mt-0.5">
-              Your cognitive companion
-            </p>
-          </div>
-        </div>
 
-        {/* Nav groups */}
-        <nav className="flex-1 overflow-y-auto custom-scrollbar -mx-1 px-1">
-          {groups.map((group) => {
-            const items = STAGES.filter((s) => s.group === group.key);
-            if (items.length === 0) return null;
-            return (
-              <div key={group.key} className="mb-5">
-                <p className="px-3 mb-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-white/35">
-                  {group.label}
-                </p>
-                <ul className="flex flex-col gap-0.5">
-                  {items.map((item) => {
-                    const Icon = ICONS[item.key];
-                    const active = activeNav === item.key;
+          <div className="cine-hairline mb-3.5" />
 
-                    // Show badge for tasks if there are pending tasks
-                    const showBadge = item.key === 'tasks' && metrics.activeTasks > 0;
-                    const badgeCount = item.key === 'tasks' ? metrics.activeTasks : 0;
+          {/* ---- Nav groups ------------------------------------------ */}
+          <nav className="flex-1 overflow-y-auto custom-scrollbar -mx-1 px-1">
+            {groups.map((group) => {
+              const items = STAGES.filter((s) => s.group === group.key);
+              if (items.length === 0) return null;
+              return (
+                <div key={group.key} className="mb-5">
+                  <p className="px-3 mb-1.5 text-[9.5px] font-semibold uppercase tracking-[0.2em] text-white/32">
+                    {group.label}
+                  </p>
+                  <ul className="flex flex-col gap-0.5">
+                    {items.map((item) => {
+                      const Icon = ICONS[item.key];
+                      const active = activeNav === item.key;
 
-                    return (
-                      <li key={item.key}>
-                        <button
-                          type="button"
-                          onClick={() => onNavigate(item.key)}
-                          className={`group relative w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-[13px] font-medium transition-all cursor-pointer press-scale ${
-                            active
-                              ? 'glass text-white border-white/20 shadow-[0_0_20px_rgba(255,255,255,0.05)]'
-                              : 'text-white/65 hover:text-white hover:bg-white/[0.04] border border-transparent'
-                          }`}
-                        >
-                          {active && (
-                            <motion.span
-                              layoutId="nav-active-indicator"
-                              className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-gradient-to-b from-orange-300 via-pink-300 to-violet-300"
-                              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                            />
-                          )}
-                          <Icon
-                            className={`w-[16px] h-[16px] shrink-0 transition-colors ${
+                      // Show badge for tasks if there are pending tasks
+                      const showBadge = item.key === 'tasks' && metrics.activeTasks > 0;
+                      const badgeCount = item.key === 'tasks' ? metrics.activeTasks : 0;
+
+                      return (
+                        <li key={item.key}>
+                          <button
+                            type="button"
+                            onClick={() => onNavigate(item.key)}
+                            className={`group relative w-full flex items-center gap-2.5 pl-3.5 pr-3 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 cursor-pointer press-scale overflow-hidden ${
                               active
-                                ? 'text-orange-200'
-                                : 'text-white/45 group-hover:text-white/75'
+                                ? 'cine-chip cine-bevel text-white'
+                                : 'text-white/62 hover:text-white hover:bg-white/[0.05] border border-transparent'
                             }`}
-                          />
-                          <span className="truncate">{item.label}</span>
-                          {showBadge && (
-                            <span className="ml-auto text-[9.5px] font-semibold tabular-nums px-1.5 py-0.5 rounded-full bg-indigo-400/25 text-indigo-100 border border-indigo-300/30">
-                              {badgeCount}
-                            </span>
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            );
-          })}
-        </nav>
+                          >
+                            {/* Coloured bloom behind the active pill */}
+                            {active && (
+                              <motion.span
+                                layoutId="nav-active-bloom"
+                                className="absolute inset-0 pointer-events-none"
+                                transition={{ type: 'spring', stiffness: 340, damping: 32 }}
+                                style={{
+                                  background:
+                                    'linear-gradient(100deg, rgba(255,138,101,0.20) 0%, rgba(244,114,182,0.12) 46%, rgba(139,92,246,0.18) 100%)',
+                                  mixBlendMode: 'screen',
+                                }}
+                              />
+                            )}
+                            {active && (
+                              <motion.span
+                                layoutId="nav-active-indicator"
+                                className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-gradient-to-b from-orange-300 via-pink-300 to-violet-300"
+                                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                                style={{ boxShadow: '0 0 12px rgba(255,150,110,0.6)' }}
+                              />
+                            )}
+                            <Icon
+                              className={`relative w-[16px] h-[16px] shrink-0 transition-colors ${
+                                active
+                                  ? 'text-orange-200'
+                                  : 'text-white/42 group-hover:text-white/75'
+                              }`}
+                              style={
+                                active
+                                  ? { filter: 'drop-shadow(0 0 6px rgba(255,170,120,0.55))' }
+                                  : undefined
+                              }
+                            />
+                            <span className="relative truncate">{item.label}</span>
+                            {showBadge && (
+                              <span className="relative ml-auto text-[9.5px] font-semibold tabular-nums px-1.5 py-0.5 rounded-full bg-indigo-400/25 text-indigo-100 border border-indigo-300/30">
+                                {badgeCount}
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
+          </nav>
 
-        {/* Active identity card */}
-        <div className="mt-auto">
-          <button
-            type="button"
-            onClick={onOpenIdentitySwitch}
-            className="w-full glass glass-hover rounded-2xl px-3 py-2.5 flex items-center gap-2.5 text-left cursor-pointer press-scale"
-          >
-            <span className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-300/30 via-pink-400/30 to-violet-500/30 border border-white/20 flex items-center justify-center text-[13px] font-semibold text-white shrink-0">
-              {identity.name?.charAt(0)?.toUpperCase() || 'G'}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[12.5px] font-semibold text-white truncate leading-tight">
-                {identity.name}
-              </span>
-              <span className="block text-[10px] text-white/50 truncate leading-tight mt-0.5">
-                {roleLabel} · Switch
-              </span>
-            </span>
-            <ChevronRight className="w-3.5 h-3.5 text-white/40 shrink-0" />
-          </button>
+          {/* ---- Active identity card -------------------------------- */}
+          <div className="mt-auto">
+            <div className="cine-hairline mb-3" />
 
-          {/* Voice status mini pill */}
-          <div
-            className={`mt-2.5 rounded-xl px-3 py-1.5 flex items-center gap-2 text-[11px] transition-colors ${
-              isVoiceActive
-                ? 'glass text-white border-indigo-300/30'
-                : 'bg-white/[0.04] border border-white/10 text-white/50'
-            }`}
-          >
-            <AudioLines
-              className={`w-3.5 h-3.5 ${
-                isVoiceActive ? 'text-indigo-200 animate-soft-glow' : 'text-white/40'
-              }`}
-            />
-            <span className="truncate">
-              {state === 'connecting'
-                ? 'Connecting…'
-                : state === 'listening'
-                ? 'Listening…'
-                : state === 'speaking'
-                ? 'Speaking…'
-                : 'Voice idle'}
-            </span>
-            <span
-              className={`ml-auto w-1.5 h-1.5 rounded-full ${
+            <button
+              type="button"
+              onClick={onOpenIdentitySwitch}
+              className="w-full cine-chip rounded-2xl px-3 py-2.5 flex items-center gap-2.5 text-left cursor-pointer press-scale transition-transform hover:brightness-110"
+            >
+              <span className="relative w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-semibold text-white shrink-0 overflow-hidden border border-white/20">
+                <span
+                  className="absolute inset-0"
+                  style={{
+                    background:
+                      'linear-gradient(140deg, rgba(253,186,116,0.42), rgba(244,114,182,0.38) 50%, rgba(139,92,246,0.45))',
+                  }}
+                />
+                <span className="relative">
+                  {identity.name?.charAt(0)?.toUpperCase() || 'G'}
+                </span>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[12.5px] font-semibold text-white truncate leading-tight">
+                  {identity.name}
+                </span>
+                <span className="block text-[10px] text-white/50 truncate leading-tight mt-0.5">
+                  {roleLabel} · Switch
+                </span>
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 text-white/40 shrink-0" />
+            </button>
+
+            {/* Voice status mini pill */}
+            <div
+              className={`mt-2.5 rounded-xl px-3 py-1.5 flex items-center gap-2 text-[11px] transition-all duration-300 border ${
                 isVoiceActive
-                  ? 'bg-emerald-300 shadow-[0_0_6px_rgba(52,211,153,0.7)]'
-                  : 'bg-slate-400'
+                  ? 'cine-chip text-white border-indigo-300/35'
+                  : 'bg-white/[0.035] border-white/10 text-white/50'
               }`}
-            />
+              style={
+                isVoiceActive
+                  ? { boxShadow: '0 0 22px -6px rgba(99,102,241,0.55)' }
+                  : undefined
+              }
+            >
+              <AudioLines
+                className={`w-3.5 h-3.5 ${
+                  isVoiceActive ? 'text-indigo-200 animate-soft-glow' : 'text-white/40'
+                }`}
+              />
+              <span className="truncate">
+                {state === 'connecting'
+                  ? 'Connecting…'
+                  : state === 'listening'
+                  ? 'Listening…'
+                  : state === 'speaking'
+                  ? 'Speaking…'
+                  : 'Voice idle'}
+              </span>
+              <span
+                className={`ml-auto w-1.5 h-1.5 rounded-full ${
+                  isVoiceActive
+                    ? 'bg-emerald-300 shadow-[0_0_6px_rgba(52,211,153,0.7)]'
+                    : 'bg-slate-400'
+                }`}
+              />
+            </div>
           </div>
         </div>
       </aside>
 
-      {/* Mobile bottom tab bar (<1024px) */}
-      <nav className="lg:hidden fixed bottom-3 left-3 right-3 z-30 glass-deep rounded-2xl border border-white/12 shadow-2xl shadow-black/40 px-2 py-2 flex items-center justify-around">
+      {/* ============ Mobile bottom tab bar (<1024px) ================ */}
+      <nav className="lg:hidden fixed bottom-3 left-3 right-3 z-30 cine-glass rounded-2xl px-2 py-2 flex items-center justify-around overflow-hidden">
+        {/* Top bevel highlight across the bar */}
+        <div
+          className="absolute inset-x-0 top-0 h-px pointer-events-none"
+          style={{
+            background:
+              'linear-gradient(90deg, transparent, rgba(255,255,255,0.28) 40%, rgba(255,255,255,0.28) 60%, transparent)',
+          }}
+        />
         {MOBILE_TABS.map((tab) => {
           if (tab.center) {
             // Center voice mic trigger
@@ -225,14 +304,18 @@ export function Sidebar({
                 key="voice-center"
                 type="button"
                 onClick={onVoiceTrigger}
-                className={`relative w-12 h-12 rounded-full flex items-center justify-center cursor-pointer press-scale transition-all ${
-                  isVoiceActive
-                    ? 'bg-gradient-to-br from-indigo-400 to-violet-500 text-white shadow-[0_0_22px_rgba(99,102,241,0.55)]'
-                    : 'bg-gradient-to-br from-orange-300 via-pink-400 to-violet-500 text-white shadow-[0_0_18px_rgba(255,138,101,0.45)]'
-                }`}
+                className="relative w-12 h-12 rounded-full flex items-center justify-center cursor-pointer press-scale transition-all overflow-hidden"
+                style={{
+                  background: isVoiceActive
+                    ? 'radial-gradient(circle at 36% 30%, rgba(199,210,254,0.95) 0%, #6366f1 45%, #4c1d95 100%)'
+                    : 'radial-gradient(circle at 36% 30%, rgba(255,237,213,0.95) 0%, #fb923c 40%, #a21caf 100%)',
+                  boxShadow: isVoiceActive
+                    ? '0 0 26px rgba(99,102,241,0.6), inset 0 1px 0 rgba(255,255,255,0.5), 0 10px 26px -10px rgba(0,0,0,0.8)'
+                    : '0 0 22px rgba(255,138,101,0.5), inset 0 1px 0 rgba(255,255,255,0.5), 0 10px 26px -10px rgba(0,0,0,0.8)',
+                }}
                 aria-label="Voice"
               >
-                <Mic className="w-5 h-5" />
+                <Mic className="relative w-5 h-5 text-white drop-shadow" />
                 {isVoiceActive && (
                   <motion.span
                     className="absolute inset-0 rounded-full border-2 border-white/40"
@@ -252,11 +335,18 @@ export function Sidebar({
               key={tab.key}
               type="button"
               onClick={() => onNavigate(tab.key as StageKey)}
-              className={`flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl cursor-pointer press-scale transition-colors ${
+              className={`relative flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl cursor-pointer press-scale transition-colors ${
                 active ? 'text-white' : 'text-white/55 hover:text-white/85'
               }`}
             >
-              <Icon className="w-[18px] h-[18px]" />
+              <Icon
+                className="w-[18px] h-[18px]"
+                style={
+                  active
+                    ? { filter: 'drop-shadow(0 0 7px rgba(255,170,120,0.6))' }
+                    : undefined
+                }
+              />
               <span className="text-[9.5px] font-medium uppercase tracking-wider">
                 {tab.label}
               </span>
@@ -264,6 +354,7 @@ export function Sidebar({
                 <motion.span
                   layoutId="mobile-tab-indicator"
                   className="absolute -top-0.5 w-1 h-1 rounded-full bg-gradient-to-r from-orange-300 to-violet-300"
+                  style={{ boxShadow: '0 0 8px rgba(255,150,110,0.8)' }}
                 />
               )}
             </button>

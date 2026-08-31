@@ -842,6 +842,44 @@
       },
       "createdAt": "2026-08-31T10:58:15.209Z",
       "updatedAt": "2026-08-31T10:58:15.209Z"
+    },
+    {
+      "id": "USER_045",
+      "name": "Test Safety User 1788188467034",
+      "role": "user",
+      "preferences": {
+        "personaAndVoice": {
+          "speakingStyle": "warm_conversational",
+          "tone": "friendly_warm",
+          "formality": "balanced",
+          "preferredLanguage": "Hinglish",
+          "hinglishBehavior": "natural_mix",
+          "voiceName": "Callirrhoe",
+          "responseLength": "balanced",
+          "conversationalStyle": "interactive_engaging"
+        }
+      },
+      "createdAt": "2026-08-31T15:01:07.034Z",
+      "updatedAt": "2026-08-31T15:01:07.034Z"
+    },
+    {
+      "id": "USER_046",
+      "name": "Test Safety User 1788188592046",
+      "role": "user",
+      "preferences": {
+        "personaAndVoice": {
+          "speakingStyle": "warm_conversational",
+          "tone": "friendly_warm",
+          "formality": "balanced",
+          "preferredLanguage": "Hinglish",
+          "hinglishBehavior": "natural_mix",
+          "voiceName": "Callirrhoe",
+          "responseLength": "balanced",
+          "conversationalStyle": "interactive_engaging"
+        }
+      },
+      "createdAt": "2026-08-31T15:03:12.046Z",
+      "updatedAt": "2026-08-31T15:03:12.046Z"
     }
   ],
   "memories": [
@@ -3757,6 +3795,334 @@
       "createdAtIST": "31 August 2026, 02:00:46 pm",
       "updatedAt": "2026-08-31T10:58:15.240Z",
       "updatedAtIST": "31 August 2026, 04:28:15 pm"
+    },
+    {
+      "memoryId": "MEM_1788188467038_3hww3",
+      "ownerId": "USER_045",
+      "content": "I love drinking green tea every morning at 7am",
+      "category": "habit",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:01:07.037Z",
+      "createdAtIST": "31 August 2026, 08:31:07 pm",
+      "updatedAt": "2026-08-31T15:01:07.043Z",
+      "updatedAtIST": "31 August 2026, 08:31:07 pm"
+    },
+    {
+      "memoryId": "MEM_1788188467046_dxm9n",
+      "ownerId": "USER_045",
+      "content": "My project Alpha is due next Friday in May",
+      "category": "project",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:01:07.045Z",
+      "createdAtIST": "31 August 2026, 08:31:07 pm",
+      "updatedAt": "2026-08-31T15:01:07.045Z",
+      "updatedAtIST": "31 August 2026, 08:31:07 pm"
+    },
+    {
+      "memoryId": "MEM_1788188467048_de0ky",
+      "ownerId": "USER_045",
+      "content": "My project Alpha budget is approved for $50k",
+      "category": "project",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:01:07.048Z",
+      "createdAtIST": "31 August 2026, 08:31:07 pm",
+      "updatedAt": "2026-08-31T15:01:07.048Z",
+      "updatedAtIST": "31 August 2026, 08:31:07 pm"
+    },
+    {
+      "memoryId": "MEM_1788188467050_af7h1",
+      "ownerId": "USER_045",
+      "content": "My project Beta has been cancelled",
+      "category": "project",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:01:07.050Z",
+      "createdAtIST": "31 August 2026, 08:31:07 pm",
+      "updatedAt": "2026-08-31T15:01:07.050Z",
+      "updatedAtIST": "31 August 2026, 08:31:07 pm"
+    },
+    {
+      "memoryId": "MEM_1788188467052_i87cn",
+      "ownerId": "USER_045",
+      "content": "Crucial note that should NOT be deleted",
+      "category": "fact",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:01:07.052Z",
+      "createdAtIST": "31 August 2026, 08:31:07 pm",
+      "updatedAt": "2026-08-31T15:01:07.052Z",
+      "updatedAtIST": "31 August 2026, 08:31:07 pm"
+    },
+    {
+      "memoryId": "MEM_1788188467059_epdxx",
+      "ownerId": "USER_045",
+      "content": "Dog name is Buster (Golden Retriever)",
+      "category": "fact",
+      "confidence": 0.95,
+      "importance": 0.8,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:01:07.059Z",
+      "createdAtIST": "31 August 2026, 08:31:07 pm",
+      "updatedAt": "2026-08-31T15:01:07.059Z",
+      "updatedAtIST": "31 August 2026, 08:31:07 pm",
+      "provenance": {
+        "sourceSessionIds": [
+          "sess_test_1788188467054"
+        ],
+        "derivedFrom": "user_explicit_statement",
+        "firstDerivedAtISO": "2026-08-31T15:01:07.059Z",
+        "lastDerivedAtISO": "2026-08-31T15:01:07.059Z"
+      },
+      "deletedAt": "2026-08-31T15:01:07.062Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "derived-from-deleted-session:sess_test_1788188467054"
+    },
+    {
+      "memoryId": "MEM_1788188467104_bqwda",
+      "ownerId": "USER_045",
+      "content": "Database backup encryption key stored in vault",
+      "category": "fact",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:01:07.104Z",
+      "createdAtIST": "31 August 2026, 08:31:07 pm",
+      "updatedAt": "2026-08-31T15:01:07.104Z",
+      "updatedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedAt": "2026-08-31T15:01:07.108Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045"
+    },
+    {
+      "memoryId": "MEM_1788188467106_l8glp",
+      "ownerId": "USER_045",
+      "content": "Database backup cron schedule set for midnight",
+      "category": "fact",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:01:07.106Z",
+      "createdAtIST": "31 August 2026, 08:31:07 pm",
+      "updatedAt": "2026-08-31T15:01:07.106Z",
+      "updatedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedAt": "2026-08-31T15:01:07.110Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045"
+    },
+    {
+      "memoryId": "MEM_1788188467112_2ar0i",
+      "ownerId": "USER_045",
+      "content": "Concurrent test memory",
+      "category": "fact",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:01:07.112Z",
+      "createdAtIST": "31 August 2026, 08:31:07 pm",
+      "updatedAt": "2026-08-31T15:01:07.112Z",
+      "updatedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedAt": "2026-08-31T15:01:07.114Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045"
+    },
+    {
+      "memoryId": "MEM_1788188467116_k9pw9",
+      "ownerId": "USER_045",
+      "content": "Secret agent codeword is NIGHTINGALE_77",
+      "category": "fact",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:01:07.116Z",
+      "createdAtIST": "31 August 2026, 08:31:07 pm",
+      "updatedAt": "2026-08-31T15:01:07.116Z",
+      "updatedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedAt": "2026-08-31T15:01:07.118Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045"
+    },
+    {
+      "memoryId": "MEM_1788188592050_25bks",
+      "ownerId": "USER_046",
+      "content": "I love drinking green tea every morning at 7am",
+      "category": "habit",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:03:12.050Z",
+      "createdAtIST": "31 August 2026, 08:33:12 pm",
+      "updatedAt": "2026-08-31T15:03:12.056Z",
+      "updatedAtIST": "31 August 2026, 08:33:12 pm"
+    },
+    {
+      "memoryId": "MEM_1788188592058_jo8m4",
+      "ownerId": "USER_046",
+      "content": "My project Alpha is due next Friday in May",
+      "category": "project",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:03:12.058Z",
+      "createdAtIST": "31 August 2026, 08:33:12 pm",
+      "updatedAt": "2026-08-31T15:03:12.058Z",
+      "updatedAtIST": "31 August 2026, 08:33:12 pm"
+    },
+    {
+      "memoryId": "MEM_1788188592060_igyn6",
+      "ownerId": "USER_046",
+      "content": "My project Alpha budget is approved for $50k",
+      "category": "project",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:03:12.060Z",
+      "createdAtIST": "31 August 2026, 08:33:12 pm",
+      "updatedAt": "2026-08-31T15:03:12.060Z",
+      "updatedAtIST": "31 August 2026, 08:33:12 pm"
+    },
+    {
+      "memoryId": "MEM_1788188592063_hol1f",
+      "ownerId": "USER_046",
+      "content": "My project Beta has been cancelled",
+      "category": "project",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:03:12.063Z",
+      "createdAtIST": "31 August 2026, 08:33:12 pm",
+      "updatedAt": "2026-08-31T15:03:12.063Z",
+      "updatedAtIST": "31 August 2026, 08:33:12 pm"
+    },
+    {
+      "memoryId": "MEM_1788188592065_kmeon",
+      "ownerId": "USER_046",
+      "content": "Crucial note that should NOT be deleted",
+      "category": "fact",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:03:12.065Z",
+      "createdAtIST": "31 August 2026, 08:33:12 pm",
+      "updatedAt": "2026-08-31T15:03:12.065Z",
+      "updatedAtIST": "31 August 2026, 08:33:12 pm"
+    },
+    {
+      "memoryId": "MEM_1788188592072_2mxjl",
+      "ownerId": "USER_046",
+      "content": "Dog name is Buster (Golden Retriever)",
+      "category": "fact",
+      "confidence": 0.95,
+      "importance": 0.8,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:03:12.072Z",
+      "createdAtIST": "31 August 2026, 08:33:12 pm",
+      "updatedAt": "2026-08-31T15:03:12.072Z",
+      "updatedAtIST": "31 August 2026, 08:33:12 pm",
+      "provenance": {
+        "sourceSessionIds": [
+          "sess_test_1788188592067"
+        ],
+        "derivedFrom": "user_explicit_statement",
+        "firstDerivedAtISO": "2026-08-31T15:03:12.072Z",
+        "lastDerivedAtISO": "2026-08-31T15:03:12.072Z"
+      },
+      "deletedAt": "2026-08-31T15:03:12.075Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "derived-from-deleted-session:sess_test_1788188592067"
+    },
+    {
+      "memoryId": "MEM_1788188592117_gyonk",
+      "ownerId": "USER_046",
+      "content": "Database backup encryption key stored in vault",
+      "category": "fact",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:03:12.116Z",
+      "createdAtIST": "31 August 2026, 08:33:12 pm",
+      "updatedAt": "2026-08-31T15:03:12.116Z",
+      "updatedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedAt": "2026-08-31T15:03:12.121Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046"
+    },
+    {
+      "memoryId": "MEM_1788188592119_dk5zl",
+      "ownerId": "USER_046",
+      "content": "Database backup cron schedule set for midnight",
+      "category": "fact",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:03:12.119Z",
+      "createdAtIST": "31 August 2026, 08:33:12 pm",
+      "updatedAt": "2026-08-31T15:03:12.119Z",
+      "updatedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedAt": "2026-08-31T15:03:12.123Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046"
+    },
+    {
+      "memoryId": "MEM_1788188592125_0p4dm",
+      "ownerId": "USER_046",
+      "content": "Concurrent test memory",
+      "category": "fact",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:03:12.125Z",
+      "createdAtIST": "31 August 2026, 08:33:12 pm",
+      "updatedAt": "2026-08-31T15:03:12.125Z",
+      "updatedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedAt": "2026-08-31T15:03:12.127Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046"
+    },
+    {
+      "memoryId": "MEM_1788188592130_ehaw6",
+      "ownerId": "USER_046",
+      "content": "Secret agent codeword is NIGHTINGALE_77",
+      "category": "fact",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "evidenceCount": 1,
+      "novelty": 1,
+      "createdAt": "2026-08-31T15:03:12.129Z",
+      "createdAtIST": "31 August 2026, 08:33:12 pm",
+      "updatedAt": "2026-08-31T15:03:12.129Z",
+      "updatedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedAt": "2026-08-31T15:03:12.132Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046"
     }
   ],
   "conversations": [
@@ -10651,12 +11017,220 @@
       "referencedPeople": [],
       "importantEvents": [],
       "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788188467054_fzbx",
+      "speaker": "Test Safety User 1788188467034",
+      "identityId": "USER_045",
+      "role": "user",
+      "content": "My dog name is Buster and he is a Golden Retriever",
+      "timestamp": "2026-08-31T15:01:07.054Z",
+      "istDate": "31 August 2026",
+      "istTime": "08:31:07 pm",
+      "timestampIST": "31 August 2026, 08:31:07 pm",
+      "sessionId": "sess_test_1788188467054",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true,
+      "deletedAt": "2026-08-31T15:01:07.062Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "test delete session"
+    },
+    {
+      "turnId": "TURN_1788188467064_rh2y",
+      "speaker": "Test Safety User 1788188467034",
+      "identityId": "USER_045",
+      "role": "user",
+      "content": "I prefer dark mode in all editors",
+      "timestamp": "2026-08-31T15:01:07.064Z",
+      "istDate": "31 August 2026",
+      "istTime": "08:31:07 pm",
+      "timestampIST": "31 August 2026, 08:31:07 pm",
+      "sessionId": "sess_multi_A_1788188467064",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true,
+      "deletedAt": "2026-08-31T15:01:07.075Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "delete sess A"
+    },
+    {
+      "turnId": "TURN_1788188467068_zeih",
+      "speaker": "Test Safety User 1788188467034",
+      "identityId": "USER_045",
+      "role": "user",
+      "content": "Dark mode is really great for my eyes",
+      "timestamp": "2026-08-31T15:01:07.068Z",
+      "istDate": "31 August 2026",
+      "istTime": "08:31:07 pm",
+      "timestampIST": "31 August 2026, 08:31:07 pm",
+      "sessionId": "sess_multi_B_1788188467064",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true,
+      "deletedAt": "2026-08-31T15:01:07.077Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "delete sess B"
+    },
+    {
+      "turnId": "TURN_1788188467364_v7y5",
+      "speaker": "User",
+      "identityId": "USER_INVARIANT_TEST",
+      "role": "user",
+      "content": "What are my fitness preferences?",
+      "timestamp": "2026-08-31T15:01:07.364Z",
+      "istDate": "31 August 2026",
+      "istTime": "08:31:07 pm",
+      "timestampIST": "31 August 2026, 08:31:07 pm",
+      "sessionId": "sess_loop_1788188467364",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788188467369_pb91",
+      "speaker": "Madhurita",
+      "identityId": "USER_INVARIANT_TEST",
+      "role": "assistant",
+      "content": "I'm running with reduced reasoning right now, so I can't fully answer \"What are my fitness preferences?\". Could you rephrase or try again shortly?",
+      "timestamp": "2026-08-31T15:01:07.369Z",
+      "istDate": "31 August 2026",
+      "istTime": "08:31:07 pm",
+      "timestampIST": "31 August 2026, 08:31:07 pm",
+      "sessionId": "sess_loop_1788188467364",
+      "turnOrder": 2,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788188592067_ot19",
+      "speaker": "Test Safety User 1788188592046",
+      "identityId": "USER_046",
+      "role": "user",
+      "content": "My dog name is Buster and he is a Golden Retriever",
+      "timestamp": "2026-08-31T15:03:12.067Z",
+      "istDate": "31 August 2026",
+      "istTime": "08:33:12 pm",
+      "timestampIST": "31 August 2026, 08:33:12 pm",
+      "sessionId": "sess_test_1788188592067",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true,
+      "deletedAt": "2026-08-31T15:03:12.075Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "test delete session"
+    },
+    {
+      "turnId": "TURN_1788188592077_ah4z",
+      "speaker": "Test Safety User 1788188592046",
+      "identityId": "USER_046",
+      "role": "user",
+      "content": "I prefer dark mode in all editors",
+      "timestamp": "2026-08-31T15:03:12.077Z",
+      "istDate": "31 August 2026",
+      "istTime": "08:33:12 pm",
+      "timestampIST": "31 August 2026, 08:33:12 pm",
+      "sessionId": "sess_multi_A_1788188592077",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true,
+      "deletedAt": "2026-08-31T15:03:12.088Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "delete sess A"
+    },
+    {
+      "turnId": "TURN_1788188592081_e4ln",
+      "speaker": "Test Safety User 1788188592046",
+      "identityId": "USER_046",
+      "role": "user",
+      "content": "Dark mode is really great for my eyes",
+      "timestamp": "2026-08-31T15:03:12.081Z",
+      "istDate": "31 August 2026",
+      "istTime": "08:33:12 pm",
+      "timestampIST": "31 August 2026, 08:33:12 pm",
+      "sessionId": "sess_multi_B_1788188592077",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true,
+      "deletedAt": "2026-08-31T15:03:12.090Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "delete sess B"
+    },
+    {
+      "turnId": "TURN_1788188592375_qy0o",
+      "speaker": "User",
+      "identityId": "USER_INVARIANT_TEST",
+      "role": "user",
+      "content": "What are my fitness preferences?",
+      "timestamp": "2026-08-31T15:03:12.375Z",
+      "istDate": "31 August 2026",
+      "istTime": "08:33:12 pm",
+      "timestampIST": "31 August 2026, 08:33:12 pm",
+      "sessionId": "sess_loop_1788188592375",
+      "turnOrder": 1,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
+    },
+    {
+      "turnId": "TURN_1788188592381_b8to",
+      "speaker": "Madhurita",
+      "identityId": "USER_INVARIANT_TEST",
+      "role": "assistant",
+      "content": "I'm running with reduced reasoning right now, so I can't fully answer \"What are my fitness preferences?\". Could you rephrase or try again shortly?",
+      "timestamp": "2026-08-31T15:03:12.381Z",
+      "istDate": "31 August 2026",
+      "istTime": "08:33:12 pm",
+      "timestampIST": "31 August 2026, 08:33:12 pm",
+      "sessionId": "sess_loop_1788188592375",
+      "turnOrder": 2,
+      "sessionDuration": "< 1 min",
+      "referencedPeople": [],
+      "importantEvents": [],
+      "isResolved": true
     }
   ],
   "worldAwareness": {
-    "lastSystemStartup": "2026-08-31T10:58:25.039Z",
-    "lastSystemStartupIST": "31 August 2026, 04:28:25 pm",
+    "lastSystemStartup": "2026-08-31T15:03:12.315Z",
+    "lastSystemStartupIST": "31 August 2026, 08:33:12 pm",
     "recentVisitors": [
+      {
+        "identityId": "USER_046",
+        "name": "Test Safety User 1788188592046",
+        "lastSeenISO": "2026-08-31T15:03:12.081Z",
+        "lastSeenIST": "31 August 2026, 08:33:12 pm",
+        "sessionCount": 3
+      },
+      {
+        "identityId": "USER_045",
+        "name": "Test Safety User 1788188467034",
+        "lastSeenISO": "2026-08-31T15:01:07.068Z",
+        "lastSeenIST": "31 August 2026, 08:31:07 pm",
+        "sessionCount": 3
+      },
       {
         "identityId": "USER_039",
         "name": "AuditDynamicUser",
@@ -10730,9 +11304,9 @@
       {
         "identityId": "USER_INVARIANT_TEST",
         "name": "User",
-        "lastSeenISO": "2026-08-31T10:58:25.112Z",
-        "lastSeenIST": "31 August 2026, 04:28:25 pm",
-        "sessionCount": 24
+        "lastSeenISO": "2026-08-31T15:03:12.381Z",
+        "lastSeenIST": "31 August 2026, 08:33:12 pm",
+        "sessionCount": 28
       },
       {
         "identityId": "USER_014",
@@ -10782,24 +11356,32 @@
         "lastSeenISO": "2026-08-31T05:10:59.024Z",
         "lastSeenIST": "31 August 2026, 10:40:59 am",
         "sessionCount": 3
-      },
-      {
-        "identityId": "USER_007",
-        "name": "Test Safety User 1788153022168",
-        "lastSeenISO": "2026-08-31T05:10:22.182Z",
-        "lastSeenIST": "31 August 2026, 10:40:22 am",
-        "sessionCount": 3
-      },
-      {
-        "identityId": "USER_006",
-        "name": "Madhurita",
-        "lastSeenISO": "2026-08-31T05:08:34.091Z",
-        "lastSeenIST": "31 August 2026, 10:38:34 am",
-        "sessionCount": 57
       }
     ],
     "recentInteractions": [],
     "openLoops": [
+      {
+        "id": "LOOP_1788188592402_1cdu",
+        "identityId": "USER_INVARIANT_TEST",
+        "name": "Check flight tickets",
+        "description": "Find tickets to Bangalore for next Friday",
+        "createdAtIST": "31 August 2026, 08:33:12 pm",
+        "createdAtISO": "2026-08-31T15:03:12.402Z",
+        "status": "resolved",
+        "resolvedAtISO": "2026-08-31T15:03:12.404Z",
+        "resolvedAtIST": "31 August 2026, 08:33:12 pm"
+      },
+      {
+        "id": "LOOP_1788188467389_glm5",
+        "identityId": "USER_INVARIANT_TEST",
+        "name": "Check flight tickets",
+        "description": "Find tickets to Bangalore for next Friday",
+        "createdAtIST": "31 August 2026, 08:31:07 pm",
+        "createdAtISO": "2026-08-31T15:01:07.389Z",
+        "status": "resolved",
+        "resolvedAtISO": "2026-08-31T15:01:07.392Z",
+        "resolvedAtIST": "31 August 2026, 08:31:07 pm"
+      },
       {
         "id": "LOOP_1788173905141_eiy3",
         "identityId": "USER_INVARIANT_TEST",
@@ -11801,6 +12383,36 @@
       "turnCount": 2,
       "referencedEntities": [],
       "unresolvedTopics": []
+    },
+    {
+      "sessionId": "sess_loop_1788188467364",
+      "identityId": "USER_INVARIANT_TEST",
+      "userName": "User",
+      "startedAt": "2026-08-31T15:01:07.364Z",
+      "startedAtIST": "31 August 2026, 08:31:07 pm",
+      "lastActiveAt": "2026-08-31T15:01:07.369Z",
+      "lastActiveAtIST": "31 August 2026, 08:31:07 pm",
+      "durationMs": 5,
+      "durationHuman": "< 1 min",
+      "topicsDiscussed": [],
+      "turnCount": 2,
+      "referencedEntities": [],
+      "unresolvedTopics": []
+    },
+    {
+      "sessionId": "sess_loop_1788188592375",
+      "identityId": "USER_INVARIANT_TEST",
+      "userName": "User",
+      "startedAt": "2026-08-31T15:03:12.375Z",
+      "startedAtIST": "31 August 2026, 08:33:12 pm",
+      "lastActiveAt": "2026-08-31T15:03:12.381Z",
+      "lastActiveAtIST": "31 August 2026, 08:33:12 pm",
+      "durationMs": 6,
+      "durationHuman": "< 1 min",
+      "topicsDiscussed": [],
+      "turnCount": 2,
+      "referencedEntities": [],
+      "unresolvedTopics": []
     }
   ],
   "systemVoiceConfig": {
@@ -11891,11 +12503,11 @@
       "updatedAt": "2026-08-30T20:36:57.832Z",
       "dueAt": "2026-08-30T20:35:57.832Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.861Z",
-      "executionCount": 3,
+      "lastEvaluatedAt": "2026-08-31T13:59:43.249Z",
+      "executionCount": 4,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
-      "lastTriggeredAt": "2026-08-31T07:16:52.861Z"
+      "lastTriggeredAt": "2026-08-31T13:59:43.249Z"
     },
     {
       "id": "TASK_1788122243282_rp5k",
@@ -11906,11 +12518,11 @@
       "updatedAt": "2026-08-30T20:37:23.282Z",
       "dueAt": "2026-08-30T20:36:23.282Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.864Z",
-      "executionCount": 3,
+      "lastEvaluatedAt": "2026-08-31T13:59:43.260Z",
+      "executionCount": 4,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
-      "lastTriggeredAt": "2026-08-31T07:16:52.864Z"
+      "lastTriggeredAt": "2026-08-31T13:59:43.260Z"
     },
     {
       "id": "TASK_1788124649221_eq3l",
@@ -11921,11 +12533,11 @@
       "updatedAt": "2026-08-30T21:17:29.221Z",
       "dueAt": "2026-08-30T21:16:29.221Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.866Z",
-      "executionCount": 2,
+      "lastEvaluatedAt": "2026-08-31T13:59:43.269Z",
+      "executionCount": 3,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
-      "lastTriggeredAt": "2026-08-31T07:16:52.866Z"
+      "lastTriggeredAt": "2026-08-31T13:59:43.269Z"
     },
     {
       "id": "TASK_1788152833099_sre1",
@@ -11935,7 +12547,7 @@
       "createdAt": "2026-08-31T05:07:13.099Z",
       "updatedAt": "2026-08-31T05:07:13.099Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.860Z",
+      "lastEvaluatedAt": "2026-08-31T13:59:43.237Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
@@ -11951,7 +12563,7 @@
       "createdAt": "2026-08-31T05:08:34.097Z",
       "updatedAt": "2026-08-31T05:08:34.097Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.860Z",
+      "lastEvaluatedAt": "2026-08-31T13:59:43.237Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
@@ -11967,7 +12579,7 @@
       "createdAt": "2026-08-31T05:10:22.190Z",
       "updatedAt": "2026-08-31T05:10:22.190Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.860Z",
+      "lastEvaluatedAt": "2026-08-31T13:59:43.237Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
@@ -11983,7 +12595,7 @@
       "createdAt": "2026-08-31T05:10:59.029Z",
       "updatedAt": "2026-08-31T05:10:59.029Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.860Z",
+      "lastEvaluatedAt": "2026-08-31T13:59:43.237Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
@@ -11999,7 +12611,7 @@
       "createdAt": "2026-08-31T05:11:33.149Z",
       "updatedAt": "2026-08-31T05:11:33.149Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.860Z",
+      "lastEvaluatedAt": "2026-08-31T13:59:43.237Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
@@ -12015,7 +12627,7 @@
       "createdAt": "2026-08-31T05:13:16.100Z",
       "updatedAt": "2026-08-31T05:13:16.100Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.860Z",
+      "lastEvaluatedAt": "2026-08-31T13:59:43.237Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
@@ -12031,7 +12643,7 @@
       "createdAt": "2026-08-31T05:15:56.772Z",
       "updatedAt": "2026-08-31T05:15:56.772Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.860Z",
+      "lastEvaluatedAt": "2026-08-31T13:59:43.237Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
@@ -12047,7 +12659,7 @@
       "createdAt": "2026-08-31T06:16:19.654Z",
       "updatedAt": "2026-08-31T06:16:19.654Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.860Z",
+      "lastEvaluatedAt": "2026-08-31T13:59:43.237Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
@@ -12063,7 +12675,7 @@
       "createdAt": "2026-08-31T06:20:28.974Z",
       "updatedAt": "2026-08-31T06:20:28.974Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.860Z",
+      "lastEvaluatedAt": "2026-08-31T13:59:43.237Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
@@ -12079,7 +12691,7 @@
       "createdAt": "2026-08-31T07:15:05.779Z",
       "updatedAt": "2026-08-31T07:15:05.779Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.860Z",
+      "lastEvaluatedAt": "2026-08-31T13:59:43.237Z",
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
@@ -12096,11 +12708,11 @@
       "updatedAt": "2026-08-31T07:16:52.859Z",
       "dueAt": "2026-08-31T07:15:52.859Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:16:52.869Z",
-      "executionCount": 1,
+      "lastEvaluatedAt": "2026-08-31T13:59:43.277Z",
+      "executionCount": 2,
       "lastExecutionResult": "pending",
       "source": "user_explicit",
-      "lastTriggeredAt": "2026-08-31T07:16:52.869Z"
+      "lastTriggeredAt": "2026-08-31T13:59:43.277Z"
     },
     {
       "id": "TASK_1788160788213_v0ok",
@@ -12111,10 +12723,11 @@
       "updatedAt": "2026-08-31T07:19:48.213Z",
       "dueAt": "2026-08-31T08:19:48.212Z",
       "priority": "high",
-      "lastEvaluatedAt": "2026-08-31T07:19:48.213Z",
-      "executionCount": 0,
+      "lastEvaluatedAt": "2026-08-31T13:59:43.284Z",
+      "executionCount": 1,
       "lastExecutionResult": "pending",
-      "source": "user_explicit"
+      "source": "user_explicit",
+      "lastTriggeredAt": "2026-08-31T13:59:43.284Z"
     },
     {
       "id": "TASK_1788160849610_a3zl",
@@ -12419,6 +13032,66 @@
       "executionCount": 0,
       "lastExecutionResult": "pending",
       "source": "user_explicit"
+    },
+    {
+      "id": "TASK_1788188467080_4ofd",
+      "identityId": "USER_045",
+      "title": "Complete tax filing for Q3",
+      "status": "pending",
+      "createdAt": "2026-08-31T15:01:07.080Z",
+      "updatedAt": "2026-08-31T15:01:07.080Z",
+      "priority": "high",
+      "lastEvaluatedAt": "2026-08-31T15:01:07.080Z",
+      "executionCount": 0,
+      "lastExecutionResult": "pending",
+      "source": "user_explicit",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "task done"
+    },
+    {
+      "id": "TASK_1788188467382_0m8n",
+      "identityId": "USER_INVARIANT_TEST",
+      "title": "Complete system verification audit",
+      "status": "completed",
+      "createdAt": "2026-08-31T15:01:07.382Z",
+      "updatedAt": "2026-08-31T15:01:07.387Z",
+      "dueAt": "2026-08-31T16:01:07.382Z",
+      "priority": "high",
+      "lastEvaluatedAt": "2026-08-31T15:01:07.382Z",
+      "executionCount": 0,
+      "lastExecutionResult": "pending",
+      "source": "user_explicit"
+    },
+    {
+      "id": "TASK_1788188592093_x1kf",
+      "identityId": "USER_046",
+      "title": "Complete tax filing for Q3",
+      "status": "pending",
+      "createdAt": "2026-08-31T15:03:12.093Z",
+      "updatedAt": "2026-08-31T15:03:12.093Z",
+      "priority": "high",
+      "lastEvaluatedAt": "2026-08-31T15:03:12.093Z",
+      "executionCount": 0,
+      "lastExecutionResult": "pending",
+      "source": "user_explicit",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "task done"
+    },
+    {
+      "id": "TASK_1788188592394_wmr7",
+      "identityId": "USER_INVARIANT_TEST",
+      "title": "Complete system verification audit",
+      "status": "completed",
+      "createdAt": "2026-08-31T15:03:12.394Z",
+      "updatedAt": "2026-08-31T15:03:12.399Z",
+      "dueAt": "2026-08-31T16:03:12.394Z",
+      "priority": "high",
+      "lastEvaluatedAt": "2026-08-31T15:03:12.394Z",
+      "executionCount": 0,
+      "lastExecutionResult": "pending",
+      "source": "user_explicit"
     }
   ],
   "relationships": [],
@@ -12652,8 +13325,9 @@
         "port": 3000
       },
       "importance": 40,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788124057634_2_9omty",
@@ -12668,8 +13342,9 @@
         "overdue": true
       },
       "importance": 95,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788124057641_3_05xm7",
@@ -12684,8 +13359,9 @@
         "overdue": true
       },
       "importance": 95,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788124649218_1_7mr7b",
@@ -12699,8 +13375,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788124649223_2_x17ct",
@@ -12715,8 +13392,9 @@
         "overdue": true
       },
       "importance": 95,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788124649226_3_soce0",
@@ -12731,8 +13409,9 @@
         "taskTitle": "Test urgent task"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788124649229_4_pkou8",
@@ -12747,8 +13426,9 @@
         "description": "Test loop"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788124649232_5_y9fd5",
@@ -12762,8 +13442,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788153059054_1_yc32w",
@@ -12778,8 +13459,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788153093173_1_cdd5p",
@@ -12794,8 +13476,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788153196125_1_a7jk7",
@@ -12810,8 +13493,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788153356797_1_gx3te",
@@ -12826,8 +13510,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788156979680_1_oz4rd",
@@ -12842,8 +13527,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788157229010_1_l6ji1",
@@ -12858,8 +13544,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160505806_1_ovufc",
@@ -12874,8 +13561,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160612856_1_mkgl1",
@@ -12889,8 +13577,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160612860_2_ha4xu",
@@ -12905,8 +13594,9 @@
         "overdue": true
       },
       "importance": 95,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160612863_3_nrczg",
@@ -12921,8 +13611,9 @@
         "overdue": true
       },
       "importance": 95,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160612865_4_jdco9",
@@ -12937,8 +13628,9 @@
         "overdue": true
       },
       "importance": 95,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160612867_5_k5yqf",
@@ -12953,8 +13645,9 @@
         "overdue": true
       },
       "importance": 95,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160612870_6_huss3",
@@ -12969,8 +13662,9 @@
         "taskTitle": "Test urgent task"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160612874_7_z8ei2",
@@ -12985,8 +13679,9 @@
         "description": "Test loop"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160612882_8_c2dmu",
@@ -13000,8 +13695,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160880576_1_acj5u",
@@ -13015,8 +13711,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160967743_1_p59ae",
@@ -13030,8 +13727,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160967775_2_wbmlc",
@@ -13046,8 +13744,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160967777_3_frv8x",
@@ -13062,8 +13761,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160967778_4_wl9hw",
@@ -13078,8 +13778,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160967779_5_eqn78",
@@ -13094,8 +13795,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160967781_6_21oqy",
@@ -13110,8 +13812,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788160967782_7_omju4",
@@ -13125,8 +13828,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161005016_1_kbp8p",
@@ -13141,8 +13845,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161005280_1_9fisz",
@@ -13156,8 +13861,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161005308_2_vxhhj",
@@ -13172,8 +13878,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161005309_3_xrrpw",
@@ -13188,8 +13895,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161005311_4_bqw0j",
@@ -13204,8 +13912,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161005312_5_vpfoo",
@@ -13220,8 +13929,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161005313_6_3jqqt",
@@ -13236,8 +13946,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161005314_7_fmjx6",
@@ -13251,8 +13962,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161038103_1_1xti3",
@@ -13267,8 +13979,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161038364_1_ri1g4",
@@ -13282,8 +13995,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161038391_2_zqd1t",
@@ -13298,8 +14012,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161038393_3_cxcoh",
@@ -13314,8 +14029,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161038394_4_2lbnp",
@@ -13330,8 +14046,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161038396_5_7ogv6",
@@ -13346,8 +14063,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161038397_6_al5v4",
@@ -13362,8 +14080,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161038399_7_yl1ej",
@@ -13377,8 +14096,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161064406_1_rjm5h",
@@ -13393,8 +14113,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161064724_1_kzb13",
@@ -13408,8 +14129,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161064752_2_jvdwm",
@@ -13424,8 +14146,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161064754_3_qb1e9",
@@ -13440,8 +14163,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161064756_4_r4awj",
@@ -13456,8 +14180,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161064757_5_l2kvc",
@@ -13472,8 +14197,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161064758_6_jgs72",
@@ -13488,8 +14214,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161064760_7_9c2yz",
@@ -13503,8 +14230,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161125354_1_t85ex",
@@ -13519,8 +14247,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161125689_1_thzbo",
@@ -13534,8 +14263,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161125717_2_ftq6v",
@@ -13550,8 +14280,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161125719_3_hu42g",
@@ -13566,8 +14297,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161125720_4_9uq6m",
@@ -13582,8 +14314,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161125722_5_810mw",
@@ -13598,8 +14331,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161125724_6_rwwor",
@@ -13614,8 +14348,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161125726_7_8srbz",
@@ -13629,8 +14364,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161381863_1_w3bwu",
@@ -13645,8 +14381,9 @@
         "taskTitle": "Complete tax filing for Q3"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161382142_1_0kzdy",
@@ -13660,8 +14397,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161382172_2_13unk",
@@ -13676,8 +14414,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161382175_3_cy2bc",
@@ -13692,8 +14431,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161382177_4_p9ssj",
@@ -13708,8 +14448,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161382178_5_gea1y",
@@ -13724,8 +14465,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161382180_6_jwy9y",
@@ -13740,8 +14482,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161382182_7_x0da6",
@@ -13755,8 +14498,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161706706_1_984ze",
@@ -13771,8 +14515,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161706708_2_h9ltq",
@@ -13787,8 +14532,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161706710_3_imswc",
@@ -13803,8 +14549,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161706712_4_uelqn",
@@ -13819,8 +14566,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161706714_5_wg3xz",
@@ -13835,8 +14583,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161706716_6_b1cvv",
@@ -13850,8 +14599,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161727001_1_afh8m",
@@ -13866,8 +14616,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161727003_2_41gzs",
@@ -13882,8 +14633,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161727005_3_hm268",
@@ -13898,8 +14650,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161727007_4_y9fpz",
@@ -13914,8 +14667,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161727009_5_k8d1e",
@@ -13930,8 +14684,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788161727011_6_f8ivy",
@@ -13945,8 +14700,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788165046347_1_dulab",
@@ -13961,8 +14717,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788165046349_2_9lh3v",
@@ -13977,8 +14734,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788165046352_3_cpz3m",
@@ -13993,8 +14751,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788165046354_4_wpbvc",
@@ -14009,8 +14768,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788165046356_5_s55j2",
@@ -14025,8 +14785,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788165046358_6_dl4jn",
@@ -14040,8 +14801,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788171787533_1_bsyy8",
@@ -14055,8 +14817,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788171787566_2_rduau",
@@ -14071,8 +14834,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788171787569_3_pugl3",
@@ -14087,8 +14851,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788171787571_4_lf3tl",
@@ -14103,8 +14868,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788171787574_5_8w66x",
@@ -14119,8 +14885,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788171787577_6_dcy2r",
@@ -14135,8 +14902,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788171787580_7_y8kq1",
@@ -14150,8 +14918,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172577883_1_zcell",
@@ -14166,8 +14935,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172577886_2_m7vs4",
@@ -14182,8 +14952,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172577888_3_x4qj5",
@@ -14198,8 +14969,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172577890_4_wuwq4",
@@ -14214,8 +14986,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172577892_5_4sapz",
@@ -14230,8 +15003,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172577894_6_b121a",
@@ -14245,8 +15019,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172595167_1_ivqkt",
@@ -14261,8 +15036,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172595169_2_aoh34",
@@ -14277,8 +15053,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172595171_3_6uycs",
@@ -14293,8 +15070,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172595173_4_tbjum",
@@ -14309,8 +15087,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172595175_5_j70im",
@@ -14325,8 +15104,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788172595177_6_ciy8m",
@@ -14340,8 +15120,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173895256_1_l1vwf",
@@ -14356,8 +15137,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173895259_2_bilv4",
@@ -14372,8 +15154,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173895262_3_0w68v",
@@ -14388,8 +15171,9 @@
         "taskTitle": "Execute system backup verification"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173895265_4_d6zgs",
@@ -14404,8 +15188,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173895267_5_0cco9",
@@ -14420,8 +15205,9 @@
         "description": "Verify SSL cert renewal"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173895270_6_qiswz",
@@ -14435,8 +15221,9 @@
         "resolvedHow": "explicitly_resolved"
       },
       "importance": 60,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173905148_1_5jxh8",
@@ -14450,8 +15237,9 @@
         "isReturningUser": false
       },
       "importance": 75,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173905196_2_ygeap",
@@ -14466,8 +15254,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173905199_3_9xmrs",
@@ -14482,8 +15271,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173905202_4_f1nm6",
@@ -14498,8 +15288,9 @@
         "taskTitle": "Complete system verification audit"
       },
       "importance": 45,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173905205_5_9t8hx",
@@ -14514,8 +15305,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173905209_6_sx4s9",
@@ -14530,8 +15322,9 @@
         "description": "Check flight tickets"
       },
       "importance": 55,
-      "processed": false,
-      "cognitionTriggered": false
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
     },
     {
       "eventId": "event_1788173905212_7_elmly",
@@ -14541,6 +15334,370 @@
       "identityId": "USER_INVARIANT_TEST",
       "payload": {
         "loopId": "LOOP_1788173905141_eiy3",
+        "description": "Check flight tickets",
+        "resolvedHow": "explicitly_resolved"
+      },
+      "importance": 60,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788184267776_1_4ktpn",
+      "eventType": "environment_change",
+      "timestamp": "2026-08-31T13:51:07.776Z",
+      "timestampIST": "31/8/2026, 19:21:07",
+      "payload": {
+        "changeType": "system_startup",
+        "description": "Madhurita cognitive system started",
+        "version": "1.0.0",
+        "port": 3000
+      },
+      "importance": 40,
+      "processed": true,
+      "cognitionTriggered": true,
+      "triggeredActions": []
+    },
+    {
+      "eventId": "event_1788184723241_1_9midx",
+      "eventType": "environment_change",
+      "timestamp": "2026-08-31T13:58:43.240Z",
+      "timestampIST": "31/8/2026, 19:28:43",
+      "payload": {
+        "changeType": "system_startup",
+        "description": "Madhurita cognitive system started",
+        "version": "1.0.0",
+        "port": 3000
+      },
+      "importance": 40,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788184783238_2_wih7j",
+      "eventType": "task_due",
+      "timestamp": "2026-08-31T13:59:43.238Z",
+      "timestampIST": "31/8/2026, 19:29:43",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788122217832_7s04",
+        "taskTitle": "Test urgent task",
+        "dueAt": "2026-08-30T20:35:57.832Z",
+        "overdue": true
+      },
+      "importance": 95,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788184783255_3_e8qut",
+      "eventType": "task_due",
+      "timestamp": "2026-08-31T13:59:43.255Z",
+      "timestampIST": "31/8/2026, 19:29:43",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788122243282_rp5k",
+        "taskTitle": "Test urgent task",
+        "dueAt": "2026-08-30T20:36:23.282Z",
+        "overdue": true
+      },
+      "importance": 95,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788184783265_4_pbhzg",
+      "eventType": "task_due",
+      "timestamp": "2026-08-31T13:59:43.265Z",
+      "timestampIST": "31/8/2026, 19:29:43",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788124649221_eq3l",
+        "taskTitle": "Test urgent task",
+        "dueAt": "2026-08-30T21:16:29.221Z",
+        "overdue": true
+      },
+      "importance": 95,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788184783273_5_ajegh",
+      "eventType": "task_due",
+      "timestamp": "2026-08-31T13:59:43.273Z",
+      "timestampIST": "31/8/2026, 19:29:43",
+      "identityId": "TEST_USER",
+      "payload": {
+        "taskId": "TASK_1788160612859_qqk6",
+        "taskTitle": "Test urgent task",
+        "dueAt": "2026-08-31T07:15:52.859Z",
+        "overdue": true
+      },
+      "importance": 95,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788184783280_6_i0fis",
+      "eventType": "task_due",
+      "timestamp": "2026-08-31T13:59:43.280Z",
+      "timestampIST": "31/8/2026, 19:29:43",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "taskId": "TASK_1788160788213_v0ok",
+        "taskTitle": "Complete system verification audit",
+        "dueAt": "2026-08-31T08:19:48.212Z",
+        "overdue": true
+      },
+      "importance": 95,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188467121_1_rle58",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T15:01:07.121Z",
+      "timestampIST": "31/8/2026, 20:31:07",
+      "identityId": "USER_045",
+      "payload": {
+        "taskId": "TASK_1788188467080_4ofd",
+        "previousState": "none",
+        "newState": "pending",
+        "taskTitle": "Complete tax filing for Q3"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188467394_1_jblxj",
+      "eventType": "user_arrival",
+      "timestamp": "2026-08-31T15:01:07.394Z",
+      "timestampIST": "31/8/2026, 20:31:07",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "name": "Invariant Tester",
+        "channel": "text",
+        "isReturningUser": false
+      },
+      "importance": 75,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188467425_2_i4xuo",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T15:01:07.425Z",
+      "timestampIST": "31/8/2026, 20:31:07",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "taskId": "TASK_1788188467382_0m8n",
+        "previousState": "none",
+        "newState": "completed",
+        "taskTitle": "Complete system verification audit"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188467428_3_361dc",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T15:01:07.428Z",
+      "timestampIST": "31/8/2026, 20:31:07",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "taskId": "TASK_1788188467382_0m8n",
+        "previousState": "pending",
+        "newState": "in_progress",
+        "taskTitle": "Complete system verification audit"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188467429_4_rbfo5",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T15:01:07.429Z",
+      "timestampIST": "31/8/2026, 20:31:07",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "taskId": "TASK_1788188467382_0m8n",
+        "previousState": "in_progress",
+        "newState": "completed",
+        "taskTitle": "Complete system verification audit"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188467432_5_8v4rw",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-31T15:01:07.431Z",
+      "timestampIST": "31/8/2026, 20:31:07",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "loopId": "LOOP_1788188467389_glm5",
+        "previousState": "none",
+        "newState": "open",
+        "description": "Check flight tickets"
+      },
+      "importance": 55,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188467434_6_uf7ul",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-31T15:01:07.433Z",
+      "timestampIST": "31/8/2026, 20:31:07",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "loopId": "LOOP_1788188467389_glm5",
+        "previousState": "open",
+        "newState": "resolved",
+        "description": "Check flight tickets"
+      },
+      "importance": 55,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188467436_7_b7r5k",
+      "eventType": "loop_resolved",
+      "timestamp": "2026-08-31T15:01:07.436Z",
+      "timestampIST": "31/8/2026, 20:31:07",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "loopId": "LOOP_1788188467389_glm5",
+        "description": "Check flight tickets",
+        "resolvedHow": "explicitly_resolved"
+      },
+      "importance": 60,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188592134_1_ddoh3",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T15:03:12.134Z",
+      "timestampIST": "31/8/2026, 20:33:12",
+      "identityId": "USER_046",
+      "payload": {
+        "taskId": "TASK_1788188592093_x1kf",
+        "previousState": "none",
+        "newState": "pending",
+        "taskTitle": "Complete tax filing for Q3"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188592406_1_0uavt",
+      "eventType": "user_arrival",
+      "timestamp": "2026-08-31T15:03:12.406Z",
+      "timestampIST": "31/8/2026, 20:33:12",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "name": "Invariant Tester",
+        "channel": "text",
+        "isReturningUser": false
+      },
+      "importance": 75,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188592435_2_uyffr",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T15:03:12.435Z",
+      "timestampIST": "31/8/2026, 20:33:12",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "taskId": "TASK_1788188592394_wmr7",
+        "previousState": "none",
+        "newState": "completed",
+        "taskTitle": "Complete system verification audit"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188592438_3_h8m63",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T15:03:12.438Z",
+      "timestampIST": "31/8/2026, 20:33:12",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "taskId": "TASK_1788188592394_wmr7",
+        "previousState": "pending",
+        "newState": "in_progress",
+        "taskTitle": "Complete system verification audit"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188592440_4_npnv2",
+      "eventType": "task_state_change",
+      "timestamp": "2026-08-31T15:03:12.440Z",
+      "timestampIST": "31/8/2026, 20:33:12",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "taskId": "TASK_1788188592394_wmr7",
+        "previousState": "in_progress",
+        "newState": "completed",
+        "taskTitle": "Complete system verification audit"
+      },
+      "importance": 45,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188592442_5_7uv7p",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-31T15:03:12.442Z",
+      "timestampIST": "31/8/2026, 20:33:12",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "loopId": "LOOP_1788188592402_1cdu",
+        "previousState": "none",
+        "newState": "open",
+        "description": "Check flight tickets"
+      },
+      "importance": 55,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188592444_6_tko8i",
+      "eventType": "loop_state_change",
+      "timestamp": "2026-08-31T15:03:12.444Z",
+      "timestampIST": "31/8/2026, 20:33:12",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "loopId": "LOOP_1788188592402_1cdu",
+        "previousState": "open",
+        "newState": "resolved",
+        "description": "Check flight tickets"
+      },
+      "importance": 55,
+      "processed": false,
+      "cognitionTriggered": false
+    },
+    {
+      "eventId": "event_1788188592446_7_w7qmk",
+      "eventType": "loop_resolved",
+      "timestamp": "2026-08-31T15:03:12.446Z",
+      "timestampIST": "31/8/2026, 20:33:12",
+      "identityId": "USER_INVARIANT_TEST",
+      "payload": {
+        "loopId": "LOOP_1788188592402_1cdu",
         "description": "Check flight tickets",
         "resolvedHow": "explicitly_resolved"
       },
@@ -20005,13 +21162,687 @@
       "originalId": "sess_audit_1788173895174",
       "binId": "BIN_1788173895191_4ycin",
       "expiresAt": "2026-09-30T10:58:15.191Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "conversation_turn",
+      "payload": {
+        "turnId": "TURN_1788188467054_fzbx",
+        "speaker": "Test Safety User 1788188467034",
+        "identityId": "USER_045",
+        "role": "user",
+        "content": "My dog name is Buster and he is a Golden Retriever",
+        "timestamp": "2026-08-31T15:01:07.054Z",
+        "istDate": "31 August 2026",
+        "istTime": "08:31:07 pm",
+        "timestampIST": "31 August 2026, 08:31:07 pm",
+        "sessionId": "sess_test_1788188467054",
+        "turnOrder": 1,
+        "sessionDuration": "< 1 min",
+        "referencedPeople": [],
+        "importantEvents": [],
+        "isResolved": true
+      },
+      "preview": "My dog name is Buster and he is a Golden Retriever",
+      "deletedAt": "2026-08-31T15:01:07.062Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "test delete session",
+      "originalId": "TURN_1788188467054_fzbx",
+      "binId": "BIN_1788188467062_bh3xm",
+      "expiresAt": "2026-09-30T15:01:07.062Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "session",
+      "payload": {
+        "sessionId": "sess_test_1788188467054",
+        "identityId": "USER_045",
+        "userName": "Test Safety User 1788188467034",
+        "startedAt": "2026-08-31T15:01:07.055Z",
+        "startedAtIST": "31 August 2026, 08:31:07 pm",
+        "lastActiveAt": "2026-08-31T15:01:07.055Z",
+        "lastActiveAtIST": "31 August 2026, 08:31:07 pm",
+        "durationMs": 0,
+        "durationHuman": "< 1 min",
+        "topicsDiscussed": [],
+        "turnCount": 1,
+        "referencedEntities": [],
+        "unresolvedTopics": []
+      },
+      "preview": "Session: sess_test_1788188467054",
+      "deletedAt": "2026-08-31T15:01:07.062Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "test delete session",
+      "originalId": "sess_test_1788188467054",
+      "binId": "BIN_1788188467062_u9lvx",
+      "expiresAt": "2026-09-30T15:01:07.062Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "memory",
+      "payload": {
+        "memoryId": "MEM_1788188467059_epdxx",
+        "ownerId": "USER_045",
+        "content": "Dog name is Buster (Golden Retriever)",
+        "category": "fact",
+        "confidence": 0.95,
+        "importance": 0.8,
+        "evidenceCount": 1,
+        "novelty": 1,
+        "createdAt": "2026-08-31T15:01:07.059Z",
+        "createdAtIST": "31 August 2026, 08:31:07 pm",
+        "updatedAt": "2026-08-31T15:01:07.059Z",
+        "updatedAtIST": "31 August 2026, 08:31:07 pm",
+        "provenance": {
+          "sourceSessionIds": [
+            "sess_test_1788188467054"
+          ],
+          "derivedFrom": "user_explicit_statement",
+          "firstDerivedAtISO": "2026-08-31T15:01:07.059Z",
+          "lastDerivedAtISO": "2026-08-31T15:01:07.059Z"
+        }
+      },
+      "preview": "Dog name is Buster (Golden Retriever)",
+      "deletedAt": "2026-08-31T15:01:07.062Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "derived-from-deleted-session:sess_test_1788188467054",
+      "originalId": "MEM_1788188467059_epdxx",
+      "binId": "BIN_1788188467062_q3eb1",
+      "expiresAt": "2026-09-30T15:01:07.062Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "conversation_turn",
+      "payload": {
+        "turnId": "TURN_1788188467064_rh2y",
+        "speaker": "Test Safety User 1788188467034",
+        "identityId": "USER_045",
+        "role": "user",
+        "content": "I prefer dark mode in all editors",
+        "timestamp": "2026-08-31T15:01:07.064Z",
+        "istDate": "31 August 2026",
+        "istTime": "08:31:07 pm",
+        "timestampIST": "31 August 2026, 08:31:07 pm",
+        "sessionId": "sess_multi_A_1788188467064",
+        "turnOrder": 1,
+        "sessionDuration": "< 1 min",
+        "referencedPeople": [],
+        "importantEvents": [],
+        "isResolved": true
+      },
+      "preview": "I prefer dark mode in all editors",
+      "deletedAt": "2026-08-31T15:01:07.075Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "delete sess A",
+      "originalId": "TURN_1788188467064_rh2y",
+      "binId": "BIN_1788188467075_xmpz6",
+      "expiresAt": "2026-09-30T15:01:07.075Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "session",
+      "payload": {
+        "sessionId": "sess_multi_A_1788188467064",
+        "identityId": "USER_045",
+        "userName": "Test Safety User 1788188467034",
+        "startedAt": "2026-08-31T15:01:07.064Z",
+        "startedAtIST": "31 August 2026, 08:31:07 pm",
+        "lastActiveAt": "2026-08-31T15:01:07.064Z",
+        "lastActiveAtIST": "31 August 2026, 08:31:07 pm",
+        "durationMs": 0,
+        "durationHuman": "< 1 min",
+        "topicsDiscussed": [],
+        "turnCount": 1,
+        "referencedEntities": [],
+        "unresolvedTopics": []
+      },
+      "preview": "Session: sess_multi_A_1788188467064",
+      "deletedAt": "2026-08-31T15:01:07.075Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "delete sess A",
+      "originalId": "sess_multi_A_1788188467064",
+      "binId": "BIN_1788188467075_mibb3",
+      "expiresAt": "2026-09-30T15:01:07.075Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "conversation_turn",
+      "payload": {
+        "turnId": "TURN_1788188467068_zeih",
+        "speaker": "Test Safety User 1788188467034",
+        "identityId": "USER_045",
+        "role": "user",
+        "content": "Dark mode is really great for my eyes",
+        "timestamp": "2026-08-31T15:01:07.068Z",
+        "istDate": "31 August 2026",
+        "istTime": "08:31:07 pm",
+        "timestampIST": "31 August 2026, 08:31:07 pm",
+        "sessionId": "sess_multi_B_1788188467064",
+        "turnOrder": 1,
+        "sessionDuration": "< 1 min",
+        "referencedPeople": [],
+        "importantEvents": [],
+        "isResolved": true
+      },
+      "preview": "Dark mode is really great for my eyes",
+      "deletedAt": "2026-08-31T15:01:07.077Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "delete sess B",
+      "originalId": "TURN_1788188467068_zeih",
+      "binId": "BIN_1788188467077_tcbw4",
+      "expiresAt": "2026-09-30T15:01:07.077Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "session",
+      "payload": {
+        "sessionId": "sess_multi_B_1788188467064",
+        "identityId": "USER_045",
+        "userName": "Test Safety User 1788188467034",
+        "startedAt": "2026-08-31T15:01:07.068Z",
+        "startedAtIST": "31 August 2026, 08:31:07 pm",
+        "lastActiveAt": "2026-08-31T15:01:07.068Z",
+        "lastActiveAtIST": "31 August 2026, 08:31:07 pm",
+        "durationMs": 0,
+        "durationHuman": "< 1 min",
+        "topicsDiscussed": [],
+        "turnCount": 1,
+        "referencedEntities": [],
+        "unresolvedTopics": []
+      },
+      "preview": "Session: sess_multi_B_1788188467064",
+      "deletedAt": "2026-08-31T15:01:07.077Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "delete sess B",
+      "originalId": "sess_multi_B_1788188467064",
+      "binId": "BIN_1788188467077_5ovk6",
+      "expiresAt": "2026-09-30T15:01:07.077Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "pattern",
+      "payload": {
+        "id": "PAT_1788188467073_lg7v5",
+        "identityId": "USER_045",
+        "category": "preference",
+        "description": "Prefers dark mode theme in all interfaces",
+        "confidence": 0.85,
+        "evidenceCount": 1,
+        "firstObservedAt": "2026-08-31T15:01:07.073Z",
+        "firstObservedAtIST": "31 August 2026, 08:31:07 pm",
+        "lastObservedAt": "2026-08-31T15:01:07.073Z",
+        "lastObservedAtIST": "31 August 2026, 08:31:07 pm",
+        "createdAt": "2026-08-31T15:01:07.073Z",
+        "updatedAt": "2026-08-31T15:01:07.073Z",
+        "provenance": {
+          "sourceTurnIds": [],
+          "sourceSessionIds": [
+            "sess_multi_B_1788188467064"
+          ],
+          "sourceMemoryIds": [],
+          "extractedBy": "test",
+          "lastDerivedAtISO": "2026-08-31T15:01:07.075Z"
+        }
+      },
+      "preview": "Prefers dark mode theme in all interfaces",
+      "deletedAt": "2026-08-31T15:01:07.077Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "deleteReason": "derived-from-deleted-session:sess_multi_B_1788188467064",
+      "originalId": "PAT_1788188467073_lg7v5",
+      "binId": "BIN_1788188467077_6nthi",
+      "expiresAt": "2026-09-30T15:01:07.077Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "memory",
+      "payload": {
+        "memoryId": "MEM_1788188467104_bqwda",
+        "ownerId": "USER_045",
+        "content": "Database backup encryption key stored in vault",
+        "category": "fact",
+        "confidence": 0.9,
+        "importance": 0.9,
+        "evidenceCount": 1,
+        "novelty": 1,
+        "createdAt": "2026-08-31T15:01:07.104Z",
+        "createdAtIST": "31 August 2026, 08:31:07 pm",
+        "updatedAt": "2026-08-31T15:01:07.104Z",
+        "updatedAtIST": "31 August 2026, 08:31:07 pm"
+      },
+      "preview": "Database backup encryption key stored in vault",
+      "deletedAt": "2026-08-31T15:01:07.108Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "originalId": "MEM_1788188467104_bqwda",
+      "binId": "BIN_1788188467108_jhy8m",
+      "expiresAt": "2026-09-30T15:01:07.108Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "memory",
+      "payload": {
+        "memoryId": "MEM_1788188467106_l8glp",
+        "ownerId": "USER_045",
+        "content": "Database backup cron schedule set for midnight",
+        "category": "fact",
+        "confidence": 0.9,
+        "importance": 0.9,
+        "evidenceCount": 1,
+        "novelty": 1,
+        "createdAt": "2026-08-31T15:01:07.106Z",
+        "createdAtIST": "31 August 2026, 08:31:07 pm",
+        "updatedAt": "2026-08-31T15:01:07.106Z",
+        "updatedAtIST": "31 August 2026, 08:31:07 pm"
+      },
+      "preview": "Database backup cron schedule set for midnight",
+      "deletedAt": "2026-08-31T15:01:07.110Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "originalId": "MEM_1788188467106_l8glp",
+      "binId": "BIN_1788188467110_51zhr",
+      "expiresAt": "2026-09-30T15:01:07.110Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "memory",
+      "payload": {
+        "memoryId": "MEM_1788188467112_2ar0i",
+        "ownerId": "USER_045",
+        "content": "Concurrent test memory",
+        "category": "fact",
+        "confidence": 0.9,
+        "importance": 0.9,
+        "evidenceCount": 1,
+        "novelty": 1,
+        "createdAt": "2026-08-31T15:01:07.112Z",
+        "createdAtIST": "31 August 2026, 08:31:07 pm",
+        "updatedAt": "2026-08-31T15:01:07.112Z",
+        "updatedAtIST": "31 August 2026, 08:31:07 pm"
+      },
+      "preview": "Concurrent test memory",
+      "deletedAt": "2026-08-31T15:01:07.114Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "originalId": "MEM_1788188467112_2ar0i",
+      "binId": "BIN_1788188467114_l4xv6",
+      "expiresAt": "2026-09-30T15:01:07.114Z"
+    },
+    {
+      "ownerId": "USER_045",
+      "type": "memory",
+      "payload": {
+        "memoryId": "MEM_1788188467116_k9pw9",
+        "ownerId": "USER_045",
+        "content": "Secret agent codeword is NIGHTINGALE_77",
+        "category": "fact",
+        "confidence": 0.95,
+        "importance": 0.9,
+        "evidenceCount": 1,
+        "novelty": 1,
+        "createdAt": "2026-08-31T15:01:07.116Z",
+        "createdAtIST": "31 August 2026, 08:31:07 pm",
+        "updatedAt": "2026-08-31T15:01:07.116Z",
+        "updatedAtIST": "31 August 2026, 08:31:07 pm"
+      },
+      "preview": "Secret agent codeword is NIGHTINGALE_77",
+      "deletedAt": "2026-08-31T15:01:07.118Z",
+      "deletedAtIST": "31 August 2026, 08:31:07 pm",
+      "deletedBy": "USER_045",
+      "originalId": "MEM_1788188467116_k9pw9",
+      "binId": "BIN_1788188467119_nwffd",
+      "expiresAt": "2026-09-30T15:01:07.119Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "conversation_turn",
+      "payload": {
+        "turnId": "TURN_1788188592067_ot19",
+        "speaker": "Test Safety User 1788188592046",
+        "identityId": "USER_046",
+        "role": "user",
+        "content": "My dog name is Buster and he is a Golden Retriever",
+        "timestamp": "2026-08-31T15:03:12.067Z",
+        "istDate": "31 August 2026",
+        "istTime": "08:33:12 pm",
+        "timestampIST": "31 August 2026, 08:33:12 pm",
+        "sessionId": "sess_test_1788188592067",
+        "turnOrder": 1,
+        "sessionDuration": "< 1 min",
+        "referencedPeople": [],
+        "importantEvents": [],
+        "isResolved": true
+      },
+      "preview": "My dog name is Buster and he is a Golden Retriever",
+      "deletedAt": "2026-08-31T15:03:12.075Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "test delete session",
+      "originalId": "TURN_1788188592067_ot19",
+      "binId": "BIN_1788188592075_wfy38",
+      "expiresAt": "2026-09-30T15:03:12.075Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "session",
+      "payload": {
+        "sessionId": "sess_test_1788188592067",
+        "identityId": "USER_046",
+        "userName": "Test Safety User 1788188592046",
+        "startedAt": "2026-08-31T15:03:12.067Z",
+        "startedAtIST": "31 August 2026, 08:33:12 pm",
+        "lastActiveAt": "2026-08-31T15:03:12.067Z",
+        "lastActiveAtIST": "31 August 2026, 08:33:12 pm",
+        "durationMs": 0,
+        "durationHuman": "< 1 min",
+        "topicsDiscussed": [],
+        "turnCount": 1,
+        "referencedEntities": [],
+        "unresolvedTopics": []
+      },
+      "preview": "Session: sess_test_1788188592067",
+      "deletedAt": "2026-08-31T15:03:12.075Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "test delete session",
+      "originalId": "sess_test_1788188592067",
+      "binId": "BIN_1788188592075_s8z3v",
+      "expiresAt": "2026-09-30T15:03:12.075Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "memory",
+      "payload": {
+        "memoryId": "MEM_1788188592072_2mxjl",
+        "ownerId": "USER_046",
+        "content": "Dog name is Buster (Golden Retriever)",
+        "category": "fact",
+        "confidence": 0.95,
+        "importance": 0.8,
+        "evidenceCount": 1,
+        "novelty": 1,
+        "createdAt": "2026-08-31T15:03:12.072Z",
+        "createdAtIST": "31 August 2026, 08:33:12 pm",
+        "updatedAt": "2026-08-31T15:03:12.072Z",
+        "updatedAtIST": "31 August 2026, 08:33:12 pm",
+        "provenance": {
+          "sourceSessionIds": [
+            "sess_test_1788188592067"
+          ],
+          "derivedFrom": "user_explicit_statement",
+          "firstDerivedAtISO": "2026-08-31T15:03:12.072Z",
+          "lastDerivedAtISO": "2026-08-31T15:03:12.072Z"
+        }
+      },
+      "preview": "Dog name is Buster (Golden Retriever)",
+      "deletedAt": "2026-08-31T15:03:12.075Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "derived-from-deleted-session:sess_test_1788188592067",
+      "originalId": "MEM_1788188592072_2mxjl",
+      "binId": "BIN_1788188592075_foqom",
+      "expiresAt": "2026-09-30T15:03:12.075Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "conversation_turn",
+      "payload": {
+        "turnId": "TURN_1788188592077_ah4z",
+        "speaker": "Test Safety User 1788188592046",
+        "identityId": "USER_046",
+        "role": "user",
+        "content": "I prefer dark mode in all editors",
+        "timestamp": "2026-08-31T15:03:12.077Z",
+        "istDate": "31 August 2026",
+        "istTime": "08:33:12 pm",
+        "timestampIST": "31 August 2026, 08:33:12 pm",
+        "sessionId": "sess_multi_A_1788188592077",
+        "turnOrder": 1,
+        "sessionDuration": "< 1 min",
+        "referencedPeople": [],
+        "importantEvents": [],
+        "isResolved": true
+      },
+      "preview": "I prefer dark mode in all editors",
+      "deletedAt": "2026-08-31T15:03:12.088Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "delete sess A",
+      "originalId": "TURN_1788188592077_ah4z",
+      "binId": "BIN_1788188592088_vq3dv",
+      "expiresAt": "2026-09-30T15:03:12.088Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "session",
+      "payload": {
+        "sessionId": "sess_multi_A_1788188592077",
+        "identityId": "USER_046",
+        "userName": "Test Safety User 1788188592046",
+        "startedAt": "2026-08-31T15:03:12.077Z",
+        "startedAtIST": "31 August 2026, 08:33:12 pm",
+        "lastActiveAt": "2026-08-31T15:03:12.077Z",
+        "lastActiveAtIST": "31 August 2026, 08:33:12 pm",
+        "durationMs": 0,
+        "durationHuman": "< 1 min",
+        "topicsDiscussed": [],
+        "turnCount": 1,
+        "referencedEntities": [],
+        "unresolvedTopics": []
+      },
+      "preview": "Session: sess_multi_A_1788188592077",
+      "deletedAt": "2026-08-31T15:03:12.088Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "delete sess A",
+      "originalId": "sess_multi_A_1788188592077",
+      "binId": "BIN_1788188592088_xzu9l",
+      "expiresAt": "2026-09-30T15:03:12.088Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "conversation_turn",
+      "payload": {
+        "turnId": "TURN_1788188592081_e4ln",
+        "speaker": "Test Safety User 1788188592046",
+        "identityId": "USER_046",
+        "role": "user",
+        "content": "Dark mode is really great for my eyes",
+        "timestamp": "2026-08-31T15:03:12.081Z",
+        "istDate": "31 August 2026",
+        "istTime": "08:33:12 pm",
+        "timestampIST": "31 August 2026, 08:33:12 pm",
+        "sessionId": "sess_multi_B_1788188592077",
+        "turnOrder": 1,
+        "sessionDuration": "< 1 min",
+        "referencedPeople": [],
+        "importantEvents": [],
+        "isResolved": true
+      },
+      "preview": "Dark mode is really great for my eyes",
+      "deletedAt": "2026-08-31T15:03:12.090Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "delete sess B",
+      "originalId": "TURN_1788188592081_e4ln",
+      "binId": "BIN_1788188592090_wwl1j",
+      "expiresAt": "2026-09-30T15:03:12.090Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "session",
+      "payload": {
+        "sessionId": "sess_multi_B_1788188592077",
+        "identityId": "USER_046",
+        "userName": "Test Safety User 1788188592046",
+        "startedAt": "2026-08-31T15:03:12.081Z",
+        "startedAtIST": "31 August 2026, 08:33:12 pm",
+        "lastActiveAt": "2026-08-31T15:03:12.081Z",
+        "lastActiveAtIST": "31 August 2026, 08:33:12 pm",
+        "durationMs": 0,
+        "durationHuman": "< 1 min",
+        "topicsDiscussed": [],
+        "turnCount": 1,
+        "referencedEntities": [],
+        "unresolvedTopics": []
+      },
+      "preview": "Session: sess_multi_B_1788188592077",
+      "deletedAt": "2026-08-31T15:03:12.090Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "delete sess B",
+      "originalId": "sess_multi_B_1788188592077",
+      "binId": "BIN_1788188592090_wu47x",
+      "expiresAt": "2026-09-30T15:03:12.090Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "pattern",
+      "payload": {
+        "id": "PAT_1788188592086_ljelk",
+        "identityId": "USER_046",
+        "category": "preference",
+        "description": "Prefers dark mode theme in all interfaces",
+        "confidence": 0.85,
+        "evidenceCount": 1,
+        "firstObservedAt": "2026-08-31T15:03:12.086Z",
+        "firstObservedAtIST": "31 August 2026, 08:33:12 pm",
+        "lastObservedAt": "2026-08-31T15:03:12.086Z",
+        "lastObservedAtIST": "31 August 2026, 08:33:12 pm",
+        "createdAt": "2026-08-31T15:03:12.086Z",
+        "updatedAt": "2026-08-31T15:03:12.086Z",
+        "provenance": {
+          "sourceTurnIds": [],
+          "sourceSessionIds": [
+            "sess_multi_B_1788188592077"
+          ],
+          "sourceMemoryIds": [],
+          "extractedBy": "test",
+          "lastDerivedAtISO": "2026-08-31T15:03:12.088Z"
+        }
+      },
+      "preview": "Prefers dark mode theme in all interfaces",
+      "deletedAt": "2026-08-31T15:03:12.090Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "deleteReason": "derived-from-deleted-session:sess_multi_B_1788188592077",
+      "originalId": "PAT_1788188592086_ljelk",
+      "binId": "BIN_1788188592090_ovrks",
+      "expiresAt": "2026-09-30T15:03:12.090Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "memory",
+      "payload": {
+        "memoryId": "MEM_1788188592117_gyonk",
+        "ownerId": "USER_046",
+        "content": "Database backup encryption key stored in vault",
+        "category": "fact",
+        "confidence": 0.9,
+        "importance": 0.9,
+        "evidenceCount": 1,
+        "novelty": 1,
+        "createdAt": "2026-08-31T15:03:12.116Z",
+        "createdAtIST": "31 August 2026, 08:33:12 pm",
+        "updatedAt": "2026-08-31T15:03:12.116Z",
+        "updatedAtIST": "31 August 2026, 08:33:12 pm"
+      },
+      "preview": "Database backup encryption key stored in vault",
+      "deletedAt": "2026-08-31T15:03:12.121Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "originalId": "MEM_1788188592117_gyonk",
+      "binId": "BIN_1788188592121_scaob",
+      "expiresAt": "2026-09-30T15:03:12.121Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "memory",
+      "payload": {
+        "memoryId": "MEM_1788188592119_dk5zl",
+        "ownerId": "USER_046",
+        "content": "Database backup cron schedule set for midnight",
+        "category": "fact",
+        "confidence": 0.9,
+        "importance": 0.9,
+        "evidenceCount": 1,
+        "novelty": 1,
+        "createdAt": "2026-08-31T15:03:12.119Z",
+        "createdAtIST": "31 August 2026, 08:33:12 pm",
+        "updatedAt": "2026-08-31T15:03:12.119Z",
+        "updatedAtIST": "31 August 2026, 08:33:12 pm"
+      },
+      "preview": "Database backup cron schedule set for midnight",
+      "deletedAt": "2026-08-31T15:03:12.123Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "originalId": "MEM_1788188592119_dk5zl",
+      "binId": "BIN_1788188592123_2oa2q",
+      "expiresAt": "2026-09-30T15:03:12.123Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "memory",
+      "payload": {
+        "memoryId": "MEM_1788188592125_0p4dm",
+        "ownerId": "USER_046",
+        "content": "Concurrent test memory",
+        "category": "fact",
+        "confidence": 0.9,
+        "importance": 0.9,
+        "evidenceCount": 1,
+        "novelty": 1,
+        "createdAt": "2026-08-31T15:03:12.125Z",
+        "createdAtIST": "31 August 2026, 08:33:12 pm",
+        "updatedAt": "2026-08-31T15:03:12.125Z",
+        "updatedAtIST": "31 August 2026, 08:33:12 pm"
+      },
+      "preview": "Concurrent test memory",
+      "deletedAt": "2026-08-31T15:03:12.127Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "originalId": "MEM_1788188592125_0p4dm",
+      "binId": "BIN_1788188592127_1q8xh",
+      "expiresAt": "2026-09-30T15:03:12.127Z"
+    },
+    {
+      "ownerId": "USER_046",
+      "type": "memory",
+      "payload": {
+        "memoryId": "MEM_1788188592130_ehaw6",
+        "ownerId": "USER_046",
+        "content": "Secret agent codeword is NIGHTINGALE_77",
+        "category": "fact",
+        "confidence": 0.95,
+        "importance": 0.9,
+        "evidenceCount": 1,
+        "novelty": 1,
+        "createdAt": "2026-08-31T15:03:12.129Z",
+        "createdAtIST": "31 August 2026, 08:33:12 pm",
+        "updatedAt": "2026-08-31T15:03:12.129Z",
+        "updatedAtIST": "31 August 2026, 08:33:12 pm"
+      },
+      "preview": "Secret agent codeword is NIGHTINGALE_77",
+      "deletedAt": "2026-08-31T15:03:12.132Z",
+      "deletedAtIST": "31 August 2026, 08:33:12 pm",
+      "deletedBy": "USER_046",
+      "originalId": "MEM_1788188592130_ehaw6",
+      "binId": "BIN_1788188592132_ccqs1",
+      "expiresAt": "2026-09-30T15:03:12.132Z"
     }
   ],
   "binPolicy": {
     "retentionDays": 30,
     "sweepIntervalMinutes": 60,
-    "lastSweepAt": "2026-08-31T07:29:41.838Z",
-    "lastSweepAtIST": "31 August 2026, 12:59:41 pm",
+    "lastSweepAt": "2026-08-31T15:03:12.105Z",
+    "lastSweepAtIST": "31 August 2026, 08:33:12 pm",
     "lastSweepRemoved": 1
   }
 }

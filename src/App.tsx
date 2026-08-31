@@ -1169,7 +1169,7 @@ export default function App() {
             />
 
             {/* Main content column */}
-            <div className="flex-1 flex flex-col min-w-0 relative pb-20 lg:pb-0">
+            <main className="flex-1 flex flex-col min-w-0 relative pb-20 lg:pb-0">
               {/* Error Banner */}
               <AnimatePresence>
                 {errorMessage && (
@@ -1205,7 +1205,7 @@ export default function App() {
               </AnimatePresence>
 
               {/* Home stage (centered hero / conversation stream) */}
-              <main className="flex-1 min-h-0 overflow-hidden">
+              <div className="flex-1 min-h-0 overflow-hidden">
                 <HomeStage
                   identity={identity}
                   authToken={authToken}
@@ -1217,8 +1217,8 @@ export default function App() {
                   onQuickAction={handleSendChatMessage}
                   onOpenOnboarding={() => setIsOwnerAuthOpen(true)}
                 />
-              </main>
-            </div>
+              </div>
+            </main>
 
             {/* Right: contextual panel overlay */}
             <ContextPanel
