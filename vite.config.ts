@@ -1,42 +1,34 @@
-import tailwindcss from '@tailwindcss/vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
-import {defineConfig} from 'vite';
+import path from 'node:path';
 
-export default defineConfig(() => {
-  return {
-    plugins: [react(), tailwindcss()],
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './'),
+      '@client': path.resolve(__dirname, './src'),
+      '@server': path.resolve(__dirname, './server'),
+      '@tests': path.resolve(__dirname, './tests'),
+    },
+  },
+  server: {
+    port: 5173,
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'ws://localhost:3000',
+        ws: true,
       },
     },
-    build: {
-      target: 'es2022',
-      cssCodeSplit: true,
-      minify: 'esbuild',
-      sourcemap: false,
-      chunkSizeWarningLimit: 800,
-      rollupOptions: {
-        output: {
-          manualChunks(id) {
-            if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
-              return 'vendor-react';
-            }
-            if (id.includes('node_modules/motion')) {
-              return 'vendor-motion';
-            }
-            if (id.includes('node_modules/lucide-react')) {
-              return 'vendor-lucide';
-            }
-          },
-        },
-      },
-    },
-    server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      hmr: process.env.DISABLE_HMR !== 'true',
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
-    },
-  };
+  },
+  build: {
+    outDir: 'dist/client',
+    sourcemap: true,
+  },
 });

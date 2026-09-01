@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "book": "docs/MADHURITA_BUILD_BOOK.md",
+  "currentPhase": "P15",
+  "currentMilestone": "M11",
+  "lastCheckpoint": "M11",
+  "lastCommit": "P14-P15-executor-loop-manager-verified",
+  "lastVerifiedAt": "2026-09-02T00:18:00Z",
+  "openFailures": [],
+  "activeFeatureFlags": [],
+  "notes": "P14/M11 TaskExecutor VERIFIED: Durable scheduled tasks with atomic claiming, exponential backoff retry (retryBaseMs*2^attempt capped at retryMaxMs), maxAttempts enforcement, and domain events (task.scheduled/claimed/completed/failed/cancelled/retry_scheduled). Supports four TaskKind: reminder (onReminder handler), recurring, one_shot, background. Integrates with ActionPipeline + ToolRegistry for non-reminder kinds. P15/M11 LoopManager VERIFIED: Evaluates open loops on EventBus events + periodic tick (default 15min, tests use 50ms) + explicit evaluateAll(). TriggerSpec types: event (with filter), schedule (intervalMs), condition (async check). Mandatory deduplication via TriggerState cooldown (1000ms) and nextRunAt for schedules. Persists loop in open_loop + specs in loop_metadata side table (migration 0005_loop_metadata.sql). Migrations added: 0005_loop_metadata.sql, 0006_task_executor_columns.sql. All 172 tests pass (7 new P14-P15 tests + 165 existing). ESLint 0 errors, tsc --noEmit 0 errors. Next: P16 Learning Pipeline + P17 Proactive Engine (M12)."
+}

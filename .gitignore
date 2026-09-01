@@ -1,8 +1,33 @@
+# Dependencies
 node_modules/
-build/
+.pnpm-store/
+
+# Production builds
 dist/
+build/
 coverage/
-.DS_Store
-*.log
-.env*
+
+# Environment files
+.env
+.env.local
+.env.*.local
 !.env.example
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+*.log
+*.tsbuildinfo
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# SQLite Database & Runtime artifacts
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
+!data/.gitkeep
