@@ -39,7 +39,7 @@ export interface MemoryProvenance {
   /** When extraction occurred (epoch ms) */
   extractedAt: number;
   /** Who proposed the extraction */
-  extractor: 'rule' | 'llm';
+  extractor: 'rule' | 'llm' | 'legacy_import';
   /** Confidence of the extraction */
   confidence: number;
   /** How the extraction was validated */

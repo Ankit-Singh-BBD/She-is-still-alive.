@@ -150,6 +150,7 @@ describe('TaskExecutor (P14)', () => {
       kind: 'one_shot',
       payload: { kind: 'one_shot', toolId: 'tool:always_fail', input: {}, runAt: now },
       maxAttempts: 1, // Only 1 attempt allowed
+      dueAt: now,
     });
 
     await executor.tick(now);

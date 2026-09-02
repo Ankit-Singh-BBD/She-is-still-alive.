@@ -1,0 +1,87 @@
+--- server/realtime/flow.ts
++++ server/realtime/flow.ts
+@@ -10,7 +10,8 @@
+   private subscribers = new Map<
+     string,
+     {
+       sub: Subscriber;
+       queue: Map<string, BroadcastMessage>; // coalesceKey -> message
+-      isDraining: boolean;
++      drainTimer: NodeJS.Timeout | null;
+     }
+   >();
+ 
+@@ -37,7 +38,10 @@
+     this.subscribers.set(subscriber.id, {
+       sub: subscriber,
+       queue: new Map(),
+-      isDraining: false,
++      drainTimer: null,
+     });
+   }
+ 
+@@ -45,6 +49,10 @@
+-  public unsubscribe(subscriberId: string): void {
+-    this.subscribers.delete(subscriberId);
+-  }
++  public unsubscribe(subscriberId: string): void {
++    const state = this.subscribers.get(subscriberId);
++    if (state && state.drainTimer) clearTimeout(state.drainTimer);
++    this.subscribers.delete(subscriberId);
++  }
+ 
+@@ -82,14 +89,14 @@
+       state.queue.set(key, message); // Overwrite if same coalesceKey exists (coalescing)
+ 
+-      // Defer drain to next microtask so synchronous burst coalesces before first send.
+-      if (!state.isDraining) {
+-        state.isDraining = true;
+-        queueMicrotask(() => {
++      // Coalescing: 50ms window for consecutive updates to the same field
++      if (!state.drainTimer) {
++        state.drainTimer = setTimeout(() => {
++          state.drainTimer = null;
+           this.drainQueue(id).catch((err) => {
+             console.error(`Failed to drain queue for subscriber ${id}:`, err);
+           });
+-        });
++        }, 50);
+       }
+     }
+   }
+ 
+@@ -99,23 +106,12 @@
+ 
+-    try {
+-      while (state.queue.size > 0) {
+-        // Get the oldest message based on insertion order logic of Map
+-        const firstKey = state.queue.keys().next().value;
+-        if (!firstKey) break;
+-
+-        const message = state.queue.get(firstKey);
+-        state.queue.delete(firstKey);
+-
+-        if (message) {
+-          await state.sub.send(message);
+-        }
+-      }
+-    } finally {
+-      state.isDraining = false;
+-      // If messages arrived while draining that didn't get caught in the loop:
+-      // Also handles messages added synchronously after the last delete but before isDraining=false
+-      const current = this.subscribers.get(subscriberId);
+-      if (current && current.queue.size > 0 && !current.isDraining) {
+-        current.isDraining = true;
+-        queueMicrotask(() => {
+-          this.drainQueue(subscriberId).catch(console.error);
+-        });
+-      }
+-    }
++    const messages = Array.from(state.queue.values());
++    state.queue.clear();
++    
++    for (const message of messages) {
++      await state.sub.send(message);
++    }
+   }
+ }

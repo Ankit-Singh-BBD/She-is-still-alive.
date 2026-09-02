@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node', // Default wrapper is node, we can override to jsdom in specific files using a pragma
+    setupFiles: ['./tests/setup-jsdom.ts'],
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     coverage: {
       provider: 'v8',

@@ -142,7 +142,7 @@ export interface AuthorizedLearningDelta {
       sourceConversationId: string;
       sourceMessageIds: string[];
       extractedAt: number;
-      extractor: 'rule' | 'llm';
+      extractor: 'rule' | 'llm' | 'legacy_import';
       confidence: number;
       validatedBy: 'app_rule' | 'owner_confirmation' | 'auto_policy';
     };

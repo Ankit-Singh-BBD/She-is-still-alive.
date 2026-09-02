@@ -1,12 +1,12 @@
 {
   "version": 1,
   "book": "docs/MADHURITA_BUILD_BOOK.md",
-  "currentPhase": "P15",
-  "currentMilestone": "M11",
-  "lastCheckpoint": "M11",
-  "lastCommit": "P14-P15-executor-loop-manager-verified",
-  "lastVerifiedAt": "2026-09-02T00:18:00Z",
+  "currentPhase": "P28",
+  "currentMilestone": "M18",
+  "lastCheckpoint": "M18-P28",
+  "lastCommit": "P28-rollout-migration-verified",
+  "lastVerifiedAt": "2026-09-02T12:40:10Z",
   "openFailures": [],
   "activeFeatureFlags": [],
-  "notes": "P14/M11 TaskExecutor VERIFIED: Durable scheduled tasks with atomic claiming, exponential backoff retry (retryBaseMs*2^attempt capped at retryMaxMs), maxAttempts enforcement, and domain events (task.scheduled/claimed/completed/failed/cancelled/retry_scheduled). Supports four TaskKind: reminder (onReminder handler), recurring, one_shot, background. Integrates with ActionPipeline + ToolRegistry for non-reminder kinds. P15/M11 LoopManager VERIFIED: Evaluates open loops on EventBus events + periodic tick (default 15min, tests use 50ms) + explicit evaluateAll(). TriggerSpec types: event (with filter), schedule (intervalMs), condition (async check). Mandatory deduplication via TriggerState cooldown (1000ms) and nextRunAt for schedules. Persists loop in open_loop + specs in loop_metadata side table (migration 0005_loop_metadata.sql). Migrations added: 0005_loop_metadata.sql, 0006_task_executor_columns.sql. All 172 tests pass (7 new P14-P15 tests + 165 existing). ESLint 0 errors, tsc --noEmit 0 errors. Next: P16 Learning Pipeline + P17 Proactive Engine (M12)."
+  "notes": "M18 VERIFIED (P28): Rollout & Migration — Build Book Part XXV.2 / Phase P28 complete. (1) Migration script `scripts/migrate/import_legacy.ts`: dry-run scan, ownerConfirmed gate, dual-DB isolation (readonly handle or shared), atomic transaction, provenance stamping (extractor='legacy_import', validatedBy='owner_confirmation', confidence=1), sensitivity mapping per Knowledge Retrieval Policy (owner→owner_only, person/guest→person_shared), domain routing (category='preference'→preference table, else→semantic_memory), id remapping via ULID. (2) TypeScript: widened MemoryProvenance.extractor to include 'legacy_import' in server/memory/types.ts and server/cognition/types.ts (AuthorizedLearningDelta). (3) Tests: tests/p28/migration.test.ts 5 tests — dry-run (scan only, no mutation), validated import (owner confirmation required, provenance & sensitivity applied), owner confirmation failure, rollback test (trigger failure mid-transaction, verifies atomic rollback of both identities and memories), dual-DB archive preservation (legacy DB untouched, no new tables). (4) Docs: docs/MIGRATION_GUIDE.md created per Files: scripts/migrate/, docs/. Typecheck clean. All 30 test files / 386 tests pass. Ready for next phase (or end of rebuild per Rollback: n/a final)."
 }
