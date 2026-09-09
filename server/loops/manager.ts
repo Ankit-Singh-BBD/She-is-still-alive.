@@ -72,12 +72,24 @@ export interface LoopEvaluation {
 export interface LoopManagerOptions {
   /** Evaluation tick interval (default 15 min). */
   pollIntervalMs?: number;
+  /**
+   * Minimum gap between two task creations from the same trigger. Guards
+   * against an event storm producing one task per event.
+   */
+  triggerCooldownMs?: number;
 }
 
 interface TriggerState {
   loopId: string;
   lastSatisfiedAt: number | null;
   lastEvaluatedAt: number | null;
+  /**
+   * Last time this trigger actually produced a task. The dedup cooldown is
+   * measured against this, not `lastSatisfiedAt` — an event handler sets
+   * `lastSatisfiedAt` to `now` immediately before evaluating, so comparing
+   * against it made every event-triggered loop dedup itself away.
+   */
+  lastFiredAt: number | null;
   // For event triggers: the event payload that last satisfied
   lastEventPayload: unknown | null;
   // For schedule triggers: the next scheduled run time
@@ -89,6 +101,7 @@ export class LoopManager {
   private readonly eventBus: EventBus;
   private readonly taskExecutor: TaskExecutor;
   private readonly pollIntervalMs: number;
+  private readonly triggerCooldownMs: number;
 
   private running = false;
   private stopRequested = false;
@@ -107,6 +120,7 @@ export class LoopManager {
     this.eventBus = eventBus;
     this.taskExecutor = taskExecutor;
     this.pollIntervalMs = options.pollIntervalMs ?? 900_000; // 15 minutes
+    this.triggerCooldownMs = options.triggerCooldownMs ?? 1000;
   }
 
   start(): void {
@@ -195,6 +209,7 @@ export class LoopManager {
       loopId: id,
       lastSatisfiedAt: null,
       lastEvaluatedAt: null,
+      lastFiredAt: null,
       lastEventPayload: null,
       nextRunAt: input.triggerSpec.type === 'schedule' ? Date.now() + input.triggerSpec.intervalMs : null,
     });
@@ -386,15 +401,13 @@ export class LoopManager {
       return this.makeEval(loop, false, null, reason);
     }
 
-    // Dedup check: if we already created a task for this trigger satisfaction,
-    // don't create another. We track lastSatisfiedAt.
-    if (triggerState.lastSatisfiedAt !== null) {
-      // For schedule triggers, the nextRunAt already moved forward.
-      // For event triggers, check if this is a new event (different payload or later time).
-      // For simplicity, we use a cooldown: don't fire again within 1 second of last satisfaction.
-      const cooldownMs = 1000;
-      if (now - triggerState.lastSatisfiedAt < cooldownMs) {
-        return this.makeEval(loop, false, null, 'dedup cooldown');
+    // Dedup: don't create a second task for the same trigger firing. Measured
+    // from the last time a task was actually created (`lastFiredAt`), because
+    // the event path sets `lastSatisfiedAt = now` right before calling here.
+    if (triggerState.lastFiredAt !== null) {
+      const cooldownMs = this.triggerCooldownMs;
+      if (now - triggerState.lastFiredAt < cooldownMs) {
+        return this.makeEval(loop, true, null, 'dedup cooldown');
       }
     }
 
@@ -415,6 +428,7 @@ export class LoopManager {
 
     // Update trigger state
     triggerState.lastSatisfiedAt = now;
+    triggerState.lastFiredAt = now;
     if (triggerSpec.type === 'schedule') {
       triggerState.nextRunAt = now + triggerSpec.intervalMs;
     }

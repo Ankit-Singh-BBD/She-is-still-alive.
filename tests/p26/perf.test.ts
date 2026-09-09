@@ -1,5 +1,11 @@
+// P26 NOTE — the "Visual Performance (DPR cap / particle scaling / quality tiers)"
+// and "Quality Tier Adaptive Downgrade" suites that used to live in this file were
+// removed with the UI implementation reset: they asserted against
+// src/components/visual/QualityManager.ts and PerformanceMonitor.ts, which no longer
+// exist. The Part XXII.2 visual performance BUDGETS remain requirements and must be
+// re-covered by tests when the new UI is built. Nothing server-side was weakened;
+// the three suites below are unchanged.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { QualityManager } from '@client/components/visual/QualityManager.js';
 import { RealtimeFlow } from '@server/realtime/flow.js';
 import { EventBus } from '@server/events/event-bus.js';
 import { Database } from '@server/persistence/db.js';
@@ -84,62 +90,6 @@ function createMockSubscriber(id: string): Subscriber & { messages: BroadcastMes
 }
 
 describe('P26: Performance Pass (Part XXII.2 / XXII.3)', () => {
-  describe('Visual Performance — DPR Cap, Particle Scaling, Quality Tiers', () => {
-    it('selectInitialTier respects mobile and tablet viewports to aggressively scale down', () => {
-      expect(QualityManager.selectInitialTier('mobile')).toBe('LOW');
-      expect(QualityManager.selectInitialTier('tablet')).toBe('MEDIUM');
-      expect(QualityManager.selectInitialTier('desktop')).toBe('HIGH');
-    });
-
-    it('DPR cap strictly limits to <= 2.0 based on tier (P26 requirement)', () => {
-      expect(QualityManager.getTierConfig('ULTRA').dprCap).toBe(2.0);
-      expect(QualityManager.getTierConfig('HIGH').dprCap).toBe(1.75);
-      expect(QualityManager.getTierConfig('MEDIUM').dprCap).toBe(1.5);
-      expect(QualityManager.getTierConfig('LOW').dprCap).toBe(1.25);
-    });
-
-    it('particle scaling reduces particleCount based on prefersReducedMotion (0.3x)', () => {
-      const ultraNormal = QualityManager.getTierConfig('ULTRA', false);
-      const ultraReduced = QualityManager.getTierConfig('ULTRA', true);
-
-      expect(ultraNormal.particleCount).toBe(150);
-      expect(ultraReduced.particleCount).toBe(Math.floor(150 * 0.3)); // 45
-
-      const highNormal = QualityManager.getTierConfig('HIGH', false);
-      const highReduced = QualityManager.getTierConfig('HIGH', true);
-
-      expect(highNormal.particleCount).toBe(100);
-      expect(highReduced.particleCount).toBe(Math.floor(100 * 0.3)); // 30
-
-      const lowNormal = QualityManager.getTierConfig('LOW', false);
-      const lowReduced = QualityManager.getTierConfig('LOW', true);
-
-      expect(lowNormal.particleCount).toBe(25);
-      // Math.max(10, Math.floor(25 * 0.3)) => Math.max(10, 7) => 10
-      expect(lowReduced.particleCount).toBe(10);
-
-      // Also verifies postEnabled and shadowEnabled toggle nicely based on tier
-      expect(ultraNormal.postEnabled).toBe(true);
-      expect(ultraReduced.postEnabled).toBe(false);
-      expect(highNormal.shadowEnabled).toBe(true);
-      expect(highReduced.shadowEnabled).toBe(true); // shadows remain on HIGH
-    });
-
-    it('QualityManager gracefully degrades the tier on performance breach', () => {
-      expect(QualityManager.downgradeTier('ULTRA')).toBe('HIGH');
-      expect(QualityManager.downgradeTier('HIGH')).toBe('MEDIUM');
-      expect(QualityManager.downgradeTier('MEDIUM')).toBe('LOW');
-      expect(QualityManager.downgradeTier('LOW')).toBe('LOW');
-    });
-
-    it('mobile tier enforces simplified water quality and no post-processing', () => {
-      const mobileConfig = QualityManager.getTierConfig('LOW', false);
-      expect(mobileConfig.waterQuality).toBe('simplified');
-      expect(mobileConfig.postEnabled).toBe(false);
-      expect(mobileConfig.shadowEnabled).toBe(false);
-    });
-  });
-
   describe('Realtime Coalescing — 50ms Sliding Window', () => {
     let eventBus: EventBus;
     let flow: RealtimeFlow;
@@ -279,7 +229,6 @@ describe('P26: Performance Pass (Part XXII.2 / XXII.3)', () => {
 
     it('TokenBudgetManager truncates large payloads to fit within stage maxInputTokens', () => {
       const mgr = new TokenBudgetManager();
-      const budget = mgr.getBudget('UNDERSTAND'); // maxInputTokens: 1024 => 4096 chars
       const exactFit = 'x'.repeat(4096);
       const overflow = 'x'.repeat(5000);
 
@@ -287,7 +236,6 @@ describe('P26: Performance Pass (Part XXII.2 / XXII.3)', () => {
       expect(mgr.truncateToBudget('UNDERSTAND', overflow)).toBe(exactFit + '... [TRUNCATED]');
 
       // Test with different stage (REASON has 2048 maxInputTokens = 8192 chars)
-      const reasonBudget = mgr.getBudget('REASON');
       const reasonExact = 'y'.repeat(8192);
       const reasonOverflow = 'y'.repeat(9000);
       expect(mgr.truncateToBudget('REASON', reasonExact)).toBe(reasonExact);
@@ -306,42 +254,6 @@ describe('P26: Performance Pass (Part XXII.2 / XXII.3)', () => {
 
       // Unmodified stages fall back to defaults
       expect(mgr.getBudget('REASON').maxInputTokens).toBe(2048);
-    });
-  });
-
-  describe('Quality Tier Adaptive Downgrade', () => {
-    it('suggestNextTier returns downgraded tier when monitor signals breach', async () => {
-      const { PerformanceMonitor, suggestNextTier } = await import('@client/components/visual/PerformanceMonitor.js');
-      const monitor = new PerformanceMonitor();
-
-      monitor.onFrame(100); // initialize
-
-      // Simulate 12 consecutive breached frames (> FRAME_BUDGET_MS)
-      for (let i = 1; i <= 12; i++) {
-        monitor.onFrame(100 + i * 20); // 20ms per frame = 50fps (below 55fps budget)
-      }
-
-      expect(monitor.shouldDowngrade()).toBe(true);
-
-      const next = suggestNextTier('ULTRA', monitor, QualityManager.downgradeTier);
-      expect(next).toBe('HIGH');
-    });
-
-    it('suggestNextTier maintains tier when monitor is healthy', async () => {
-      const { PerformanceMonitor, suggestNextTier } = await import('@client/components/visual/PerformanceMonitor.js');
-      const monitor = new PerformanceMonitor();
-
-      monitor.onFrame(100); // initialize
-
-      // Simulate healthy frames
-      for (let i = 1; i <= 10; i++) {
-        monitor.onFrame(100 + i * 16); // 16ms per frame = 62.5fps (above 55fps budget)
-      }
-
-      expect(monitor.shouldDowngrade()).toBe(false);
-
-      const next = suggestNextTier('HIGH', monitor, QualityManager.downgradeTier);
-      expect(next).toBe('HIGH');
     });
   });
 });

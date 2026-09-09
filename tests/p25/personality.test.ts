@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { PersonalityRegistry } from '@server/personality/registry.js';
 import { PersonalityEngine } from '@server/personality/engine.js';
-import { DEFAULT_PERSONALITY_FLAGS, type PersonalityFlagMap, type Persona } from '@server/personality/types.js';
+import { DEFAULT_PERSONALITY_FLAGS, type PersonalityFlagMap } from '@server/personality/types.js';
 
 function allEnabled(): PersonalityFlagMap {
   return {

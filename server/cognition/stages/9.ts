@@ -277,6 +277,28 @@ interface DisclosureVerdict {
 }
 
 /**
+ * Whether one item in working context may be spoken to this caller.
+ *
+ * Exported so the language faculty can decline to put non-disclosable memories
+ * into a prompt in the first place. That matters because redaction below matches
+ * *literal strings*: a model that was shown an owner-only fact and paraphrased
+ * it would walk straight past the filter. Not showing it is the stronger
+ * guarantee, and `applyDisclosurePolicy` remains the authority over whatever is
+ * drafted — this is the same predicate rather than a second copy of it, so the
+ * prompt filter and the output gate cannot drift apart.
+ */
+export function mayDiscloseToCaller(
+  item: ScopedMemoryItem,
+  caller: {
+    identityId: string;
+    identityKind: string;
+    callerPermissions: { mayReadMemories: boolean };
+  },
+): boolean {
+  return disclosability(item, caller.identityId, caller.identityKind, caller).disclosable;
+}
+
+/**
  * Deterministic per-item disclosure decision. Independent of retrieval: an item
  * that should never have been loaded is still not speakable.
  */
@@ -285,8 +307,7 @@ function disclosability(
   callerId: string,
   callerKind: string,
   caller: { callerPermissions: { mayReadMemories: boolean } },
-): DisclosureVerdict {
-  if (item.sensitivity === 'system_internal') {
+): DisclosureVerdict {  if (item.sensitivity === 'system_internal') {
     return {
       disclosable: false,
       policy: 'system_internal_redaction',

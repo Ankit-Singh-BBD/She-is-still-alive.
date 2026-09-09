@@ -7,7 +7,9 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev": "tsx server.ts",
+    "start": "tsx server/main.ts",
+    "dev:server": "tsx watch server/main.ts",
+    "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
@@ -34,6 +36,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.3.0",
+    "@playwright/test": "^1.62.1",
     "@testing-library/dom": "^10.1.0",
     "@testing-library/jest-dom": "^6.4.5",
     "@testing-library/react": "^15.0.7",

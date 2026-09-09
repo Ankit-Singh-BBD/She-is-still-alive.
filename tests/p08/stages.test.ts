@@ -658,7 +658,12 @@ describe('Phase P08: Stages 1-6 (PERCEIVE..DECIDE)', () => {
 
       expect(cycle.stages[3]!.error).toBe('faculty offline');
       expect(cycle.stages).toHaveLength(12);
-      expect(cycle.status).toBe('completed');
+      // The cycle ran all 12 stages and produced a response, but UNDERSTAND
+      // threw and was replaced by its fallback. `degraded` is that outcome:
+      // answered, but not cleanly. Reporting 'completed' here would be a claim
+      // this test's own first assertion contradicts.
+      expect(cycle.status).toBe('degraded');
+      expect(cycle.error).toContain('UNDERSTAND: faculty offline');
       // Rollback contract: stages 4-6 degrade to a default decision.
       const decision = cycle.authorizedDecision as { proposal: DecisionProposal };
       expect(decision.proposal.action).toBe('respond');

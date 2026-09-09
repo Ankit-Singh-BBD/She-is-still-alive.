@@ -25,6 +25,16 @@ export interface LearningCandidate {
   importance: number;
   /** Reasoning from LLM about why this should be learned */
   reasoning: string;
+  /**
+   * Which kind of extractor produced this, recorded in the memory's provenance.
+   *
+   * Optional because a candidate can be built by hand (a test, a seeder) and
+   * there is no honest answer for one that does not say. `persistNew` treats an
+   * absent value as `rule`: provenance naming a model where no model ran would
+   * have a later reader attribute a regular expression's output to her
+   * judgement, which is the more damaging of the two mistakes.
+   */
+  extractor?: 'rule' | 'llm';
 }
 
 /** Result of applying the Scoped Guest Learning Policy */
@@ -59,6 +69,15 @@ export interface LearningResult {
   learned: boolean;
   /** Number of memories created/updated */
   count: number;
+  /**
+   * Set when the pipeline declined to run at all, with the reason.
+   *
+   * Distinct from `learned: false` with an empty `details`, which means it ran
+   * and found nothing worth keeping. The two look identical from the outside
+   * otherwise, and "she learned nothing" and "she was not asked to learn" are
+   * different facts about a cycle.
+   */
+  skipped?: string;
   /** Details per candidate */
   details: Array<{
     candidate: LearningCandidate;
@@ -77,6 +96,21 @@ export interface LearningPipelineOptions {
   importanceThreshold?: number;
   /** Maximum memories to extract per cycle (default 5) */
   maxExtractionsPerCycle?: number;
+  /**
+   * Whether to process a cycle that already wrote memories of its own.
+   *
+   * False by default, and the default matters. Cognitive stage 10 proposes
+   * extractions and stage 11 writes them *inside* the cycle, so a cycle that ran
+   * the full twelve stages has already learned. This pipeline is the out-of-band
+   * path — for cycles that ran without it, or for a later consolidation pass —
+   * and running both over the same cycle writes the same fact twice.
+   *
+   * The dedupe engine does not save us: it matches `preference`, `habit`,
+   * `relationship` and `learned_pattern`, and has no branch for `episodic` or
+   * `semantic`. Those two would insert a duplicate row every time, and a memory
+   * she holds twice is a memory she is more confident about for no reason.
+   */
+  relearnCycles?: boolean;
 }
 
 /** Default options */
@@ -84,6 +118,7 @@ export const DEFAULT_LEARNING_OPTIONS: Required<LearningPipelineOptions> = {
   confidenceThreshold: 0.7,
   importanceThreshold: 0.5,
   maxExtractionsPerCycle: 5,
+  relearnCycles: false,
 };
 
 /** Provenance for a learning extraction */

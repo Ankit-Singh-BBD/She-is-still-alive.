@@ -1,6 +1,7 @@
 import { ulid } from 'ulid';
 import fs from 'node:fs';
 import path from 'node:path';
+import DatabaseConstructor from 'better-sqlite3';
 import type { Database } from '../persistence/db.js';
 import { deriveOwnerKey, generateSalt, encryptWithKey, decryptWithKey, sha256 } from '../security/secrets.js';
 
@@ -201,7 +202,6 @@ async function dumpDatabaseToBuffer(dbPath: string): Promise<Buffer> {
   const tempDbPath = path.join(tempDir, 'dump.sqlite');
 
   try {
-    const DatabaseConstructor = require('better-sqlite3');
     const sourceDb = new DatabaseConstructor(dbPath);
     await sourceDb.backup(tempDbPath);
     sourceDb.close();

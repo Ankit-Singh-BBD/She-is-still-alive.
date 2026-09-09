@@ -19,6 +19,7 @@
 import type { ToolRegistry } from './registry.js';
 import type { Database } from '@server/persistence/db.js';
 import { ulid } from 'ulid';
+import type { Identity } from "@server/identity/types.js";
 import type { EventBus } from '@server/events/event-bus.js';
 
 export interface PipelineContext {
@@ -27,7 +28,7 @@ export interface PipelineContext {
   identityId: string;
   cycleId: string;
   causationId: string;
-  caller: any; // Identity
+  caller: Identity;
 }
 
 export interface PipelineResult {
@@ -270,10 +271,19 @@ export class ActionPipeline {
       new Date().toISOString(),
     );
 
-    // Emit domain event
+    // Emit domain event.
+    //
+    // The type reflects what happened. This published `action.executed`
+    // unconditionally with `success` buried in the payload, which left
+    // `action.failed` declared in the event union and never once published: a
+    // subscriber that asked for failures heard nothing, and one that asked for
+    // executions was handed the failures too. A tool that ran but whose
+    // postconditions were not met also did not do its job, so it belongs on the
+    // failure side — the payload keeps the distinction between "threw" and
+    // "returned something we could not verify".
     if (this.eventBus) {
       await this.eventBus.publish({
-        type: 'action.executed',
+        type: success && verified ? 'action.executed' : 'action.failed',
         payload: {
           toolId: context.toolId,
           success,
@@ -312,12 +322,28 @@ export class ActionPipeline {
   }
 
   /**
-   * Register a postcondition verifier for a tool (P13).
+   * Registers a postcondition verifier for one tool.
+   *
+   * Only meaningful when this pipeline is using its own `DefaultVerifierRegistry`.
+   * When a caller has supplied a verifier of their own — as the composition root
+   * does, with the registry shared with cognitive stage 8 — there is nowhere here
+   * to put the registration, and it used to be dropped silently: the tool went on
+   * verifying through the injected registry, which had never heard of it, and
+   * reported `postconditionsMet: false` forever with no clue as to why.
+   *
+   * So it throws. A verifier that cannot be installed is a verifier that will not
+   * run, and that has to be a loud failure at wiring time rather than a quiet
+   * `verified = 0` in every row afterwards.
    */
   registerVerifier(toolId: string, verifier: (input: unknown, output: unknown, db: Database) => Promise<{ postconditionsMet: boolean; discrepancies: string[] }>): void {
-    if (this.verifier instanceof DefaultVerifierRegistry) {
-      this.verifier.register(toolId, verifier);
+    if (!(this.verifier instanceof DefaultVerifierRegistry)) {
+      throw new Error(
+        `Cannot register a verifier for '${toolId}' on this pipeline: it was constructed with a ` +
+          `verifier of its own, so registrations belong there. Register the postcondition with ` +
+          `that registry instead (see server/tools/verification.ts).`,
+      );
     }
+    this.verifier.register(toolId, verifier);
   }
 }
 

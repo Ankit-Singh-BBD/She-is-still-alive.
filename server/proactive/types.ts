@@ -26,6 +26,16 @@ export interface ProactiveCandidate {
   interruptionCost: number; // 0..1
   contextCompatibility: number; // 0..1
   reasoning?: string;
+  /**
+   * How many times this candidate has already been deferred. Set by the engine
+   * when it replays a candidate off the deferral queue; a fresh proposal leaves
+   * it absent, which reads as 0.
+   *
+   * The decision tree needs it because a candidate that keeps deferring is not
+   * being scheduled, it is being abandoned slowly — past the configured limit
+   * the tree says so instead of promising another "later".
+   */
+  deferCount?: number;
 }
 
 export type ProactiveAction = 'emit' | 'defer' | 'suppress' | 'reject';
@@ -39,6 +49,14 @@ export interface ProactiveDecisionOutcome {
   novelty: number;
   interruptionCost: number;
   contextCompatibility: number;
+  /**
+   * ms epoch at which a deferred candidate becomes due for re-evaluation.
+   *
+   * Present exactly when `action === 'defer'`. A deferral without this is the
+   * bug this field exists to make unrepresentable: the engine used to record
+   * "defer" with no time attached and no queue to sit in, so "later" was never.
+   */
+  deferUntil?: number;
 }
 
 export interface QuietHoursConfig {
@@ -55,6 +73,21 @@ export interface ProactiveEngineOptions {
   quietHours?: QuietHoursConfig;
   enabled?: boolean;
   disabledTopics?: string[];
+  /**
+   * How long to wait before re-evaluating a candidate deferred for a reason
+   * that is not a clock window (an interruption cost above threshold, say —
+   * that depends on what the owner is doing, which no config can predict).
+   * Doubles per deferral so a candidate that is never welcome stops asking
+   * every quarter hour.
+   */
+  deferBackoffMs?: number;
+  /**
+   * Deferrals allowed before the tree stops deferring and suppresses instead.
+   * A candidate that has been put off this many times is not waiting for a
+   * better moment, it is unwanted — and saying so is more honest than a fourth
+   * promise of "later".
+   */
+  maxDeferrals?: number;
 }
 
 export interface UserContext {
@@ -76,4 +109,6 @@ export const DEFAULT_PROACTIVE_OPTIONS: Required<ProactiveEngineOptions> = {
   quietHours: { startHour: 22, endHour: 7 },
   enabled: true,
   disabledTopics: [],
+  deferBackoffMs: 900000, // 15 minutes, doubling: 15m, 30m, 1h, then give up
+  maxDeferrals: 3,
 };

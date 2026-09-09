@@ -100,4 +100,65 @@ describe('Phase P03: Session Management & Expiry', () => {
 
     expect(repo.validateSession(validSession.id)).not.toBeNull();
   });
+
+  describe('bearer tokens', () => {
+    it('stores only a hash, so a database read yields nothing replayable', () => {
+      const session = repo.createSession(ownerId, Date.now() + 3600_000);
+
+      expect(session.token).not.toBe(session.id);
+      expect(session.token.length).toBeGreaterThanOrEqual(43); // 256 bits, base64url
+
+      const row = db.raw
+        .prepare(`SELECT token_hash FROM session WHERE id = ?`)
+        .get(session.id) as { token_hash: string };
+      expect(row.token_hash).toMatch(/^[0-9a-f]{64}$/);
+      expect(row.token_hash).not.toContain(session.token);
+
+      // Nothing anywhere in the row is the token itself.
+      const full = JSON.stringify(
+        db.raw.prepare(`SELECT * FROM session WHERE id = ?`).get(session.id),
+      );
+      expect(full).not.toContain(session.token);
+    });
+
+    it('authenticates the token it issued, and nothing else', () => {
+      const session = repo.createSession(ownerId, Date.now() + 3600_000);
+
+      const authed = repo.authenticateSessionToken(session.token);
+      expect(authed?.id).toBe(session.id);
+      expect(authed?.identityId).toBe(ownerId);
+
+      expect(repo.authenticateSessionToken('not-a-real-token')).toBeNull();
+      expect(repo.authenticateSessionToken('')).toBeNull();
+    });
+
+    it('refuses the session id as a credential', () => {
+      // The regression this pins: `id` used to *be* the token. It is a public
+      // handle now, and a public handle must not authenticate.
+      const session = repo.createSession(ownerId, Date.now() + 3600_000);
+      expect(repo.authenticateSessionToken(session.id)).toBeNull();
+    });
+
+    it('issues a distinct token per session', () => {
+      const a = repo.createSession(ownerId, Date.now() + 3600_000);
+      const b = repo.createSession(ownerId, Date.now() + 3600_000);
+      expect(a.token).not.toBe(b.token);
+      expect(repo.authenticateSessionToken(a.token)?.id).toBe(a.id);
+      expect(repo.authenticateSessionToken(b.token)?.id).toBe(b.id);
+    });
+
+    it('applies expiry and revocation to the token path too', () => {
+      const expired = repo.createSession(ownerId, Date.now() - 1000);
+      expect(repo.authenticateSessionToken(expired.token)).toBeNull();
+
+      const live = repo.createSession(ownerId, Date.now() + 3600_000);
+      expect(repo.authenticateSessionToken(live.token)).not.toBeNull();
+      repo.revokeSession(live.id);
+      expect(repo.authenticateSessionToken(live.token)).toBeNull();
+
+      const bulk = repo.createSession(ownerId, Date.now() + 3600_000);
+      repo.revokeAllSessions(ownerId);
+      expect(repo.authenticateSessionToken(bulk.token)).toBeNull();
+    });
+  });
 });

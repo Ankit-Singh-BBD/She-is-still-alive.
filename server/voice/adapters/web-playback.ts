@@ -57,12 +57,14 @@ export class WebAudioPlayback implements AudioPlayback {
     }
 
     if (!this.audioContext || this.audioContext.state === 'closed') {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioCtx: typeof AudioContext | undefined =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) throw new Error('Web Audio API not supported');
 
       try {
         this.audioContext = this.config.sampleRate ? new AudioCtx({ sampleRate: this.config.sampleRate }) : new AudioCtx();
-      } catch (e) {
+      } catch {
         this.audioContext = new AudioCtx();
       }
 
@@ -180,7 +182,7 @@ export class WebAudioPlayback implements AudioPlayback {
       try {
         source.stop();
         source.disconnect();
-      } catch (e) {
+      } catch {
         // ignore already stopped
       }
     }
@@ -232,7 +234,7 @@ export class WebAudioPlayback implements AudioPlayback {
 
   public getWaveformData(targetArray: Uint8Array): void {
     if (!this.analyser || !this.isSpeaking) {
-      targetArray.fill(128); // @ts-ignore
+      targetArray.fill(128);
       return;
     }
     this.analyser.getByteTimeDomainData(targetArray as Uint8Array<ArrayBuffer>);

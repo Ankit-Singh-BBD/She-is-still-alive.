@@ -86,17 +86,66 @@ describe('Phase P03: Bootstrap Ceremony & Identity', () => {
     });
 
     const authedByPass = await repo.verifyOwnerPassphrase('my-super-secret-passphrase');
-    expect(authedByPass).not.toBeNull();
-    expect(authedByPass?.displayName).toBe('Ankit');
+    expect(authedByPass.ok).toBe(true);
+    expect(authedByPass.ok && authedByPass.identity.displayName).toBe('Ankit');
 
     const failedPass = await repo.verifyOwnerPassphrase('wrong-passphrase');
-    expect(failedPass).toBeNull();
+    expect(failedPass).toMatchObject({ ok: false, reason: 'wrong_credential', failedCount: 1 });
 
     const authedByRecovery = await repo.verifyRecoveryCode('secret-recovery-1234');
-    expect(authedByRecovery).not.toBeNull();
-    expect(authedByRecovery?.displayName).toBe('Ankit');
+    expect(authedByRecovery.ok).toBe(true);
+    expect(authedByRecovery.ok && authedByRecovery.identity.displayName).toBe('Ankit');
 
     const failedRecovery = await repo.verifyRecoveryCode('wrong-recovery-code');
-    expect(failedRecovery).toBeNull();
+    expect(failedRecovery).toMatchObject({ ok: false, reason: 'wrong_credential' });
+  });
+
+  it('locks out repeated wrong passphrases, and says so instead of reporting a wrong one', async () => {
+    const bootstrapped = await executeBootstrap(repo, {
+      displayName: 'Ankit',
+      passphrase: 'my-super-secret-passphrase',
+      recoveryCode: 'secret-recovery-1234',
+    });
+    const ownerId = bootstrapped.owner!.id;
+
+    // Four failures stay inside the budget: still 'wrong', no lock yet.
+    for (let i = 1; i <= 4; i++) {
+      const attempt = await repo.verifyOwnerPassphrase('wrong');
+      expect(attempt).toMatchObject({ ok: false, reason: 'wrong_credential', failedCount: i });
+      expect(repo.getAuthLockout(`passphrase:${ownerId}`)).toBeNull();
+    }
+
+    // The fifth trips the lockout.
+    const fifth = await repo.verifyOwnerPassphrase('wrong');
+    expect(fifth).toMatchObject({ ok: false, reason: 'wrong_credential', failedCount: 5 });
+    expect(fifth.ok === false && fifth.lockedUntil).toBeGreaterThan(Date.now());
+
+    // While locked, even the correct passphrase is refused — and reported as a
+    // lockout, not as a wrong credential.
+    const duringLock = await repo.verifyOwnerPassphrase('my-super-secret-passphrase');
+    expect(duringLock).toMatchObject({ ok: false, reason: 'locked_out' });
+
+    // The recovery path has its own counter: locking the passphrase must not
+    // lock the owner out of recovering.
+    const recovery = await repo.verifyRecoveryCode('secret-recovery-1234');
+    expect(recovery.ok).toBe(true);
+  });
+
+  it('clears the failure streak once a correct passphrase is given', async () => {
+    const bootstrapped = await executeBootstrap(repo, {
+      displayName: 'Ankit',
+      passphrase: 'my-super-secret-passphrase',
+    });
+    const ownerId = bootstrapped.owner!.id;
+
+    await repo.verifyOwnerPassphrase('wrong');
+    await repo.verifyOwnerPassphrase('wrong');
+
+    const good = await repo.verifyOwnerPassphrase('my-super-secret-passphrase');
+    expect(good.ok).toBe(true);
+
+    const next = await repo.verifyOwnerPassphrase('wrong');
+    expect(next).toMatchObject({ ok: false, failedCount: 1 });
+    expect(repo.getAuthLockout(`passphrase:${ownerId}`)).toBeNull();
   });
 });

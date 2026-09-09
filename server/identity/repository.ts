@@ -1,14 +1,34 @@
 import type { Database } from '@server/persistence/db.js';
 import { getDatabase } from '@server/persistence/db.js';
+import type { EventBus } from '@server/events/event-bus.js';
 import { ulid } from 'ulid';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type {
+  AuthOutcome,
   Identity,
   IdentityKind,
   IdentityStatus,
+  IssuedSession,
   PermissionSet,
   Session,
 } from './types.js';
 import { hashPassphrase, verifyPassphrase } from './crypto.js';
+
+/**
+ * Credential throttling policy.
+ *
+ * Argon2 already makes a single guess expensive; these bounds make a *stream* of
+ * guesses pointless, and stop an attacker from spending our CPU to do it. The
+ * lockout grows so a forgetful owner is inconvenienced for seconds while an
+ * attacker is stalled for a quarter of an hour per attempt.
+ */
+const AUTH_MAX_ATTEMPTS = 5;
+const AUTH_LOCKOUT_BASE_MS = 30_000;
+const AUTH_LOCKOUT_MAX_MS = 15 * 60_000;
+
+/** Bytes of CSPRNG output behind a session token. */
+const SESSION_TOKEN_BYTES = 32;
+
 
 /**
  * Default permission sets per identity kind.
@@ -48,9 +68,24 @@ export const DEFAULT_PERMISSIONS: Record<IdentityKind, PermissionSet> = {
 
 export class IdentityRepository {
   private db: Database;
+  private readonly eventBus: EventBus | undefined;
 
-  constructor(db?: Database) {
+  /**
+   * The event bus is optional so that tests and scripts can construct a
+   * repository over a bare database. When the composition root passes one,
+   * enrolment becomes observable to the rest of the application instead of
+   * being a silent row: `identity.enrolled` is published after the
+   * transaction commits.
+   *
+   * There is deliberately no `identity.revoked` publish here. That event has
+   * no publish site because the *operation* does not exist — this repository
+   * revokes sessions, never identities. Adding the publish without the
+   * operation would be the same class of lie as an event type declared in the
+   * union and never emitted.
+   */
+  constructor(db?: Database, eventBus?: EventBus) {
     this.db = db ?? getDatabase();
+    this.eventBus = eventBus;
   }
 
   /**
@@ -134,6 +169,27 @@ export class IdentityRepository {
           .run(identity.id, passphraseHash, recoveryCodeHash);
       }
     });
+
+    // Published after the commit, never inside it: the event row belongs to
+    // the bus's own write, and a subscriber must not be able to roll back an
+    // enrolment that already succeeded.
+    if (this.eventBus) {
+      await this.eventBus.publish({
+        type: 'identity.enrolled',
+        payload: {
+          identityId: identity.id,
+          kind: identity.kind,
+          displayName: identity.displayName,
+          hasCredential: passphraseHash !== null,
+        },
+        identityId: identity.id,
+        cycleId: undefined,
+        timestamp: identity.enrolledAt,
+        causationId: undefined,
+        correlationId: undefined,
+        version: 1,
+      });
+    }
 
     return identity;
   }
@@ -256,84 +312,220 @@ export class IdentityRepository {
   }
 
   /**
-   * Validates owner passphrase.
+   * Validates the owner passphrase, subject to the lockout policy.
+   *
+   * Returns an `AuthOutcome` rather than `Identity | null` because a refused
+   * attempt and a wrong passphrase are different facts, and the old signature
+   * could only report them as the same one. A locked-out attempt does not run
+   * Argon2 at all — refusing before the expensive part is what makes the
+   * throttle protect us as well as the credential.
    */
-  async verifyOwnerPassphrase(passphrase: string): Promise<Identity | null> {
+  async verifyOwnerPassphrase(passphrase: string): Promise<AuthOutcome> {
     const owner = this.getOwner();
-    if (!owner) return null;
+    if (!owner) return { ok: false, reason: 'no_owner' };
 
-    const credRow = this.db.raw
-      .prepare(
-        `
-      SELECT passphrase_hash FROM identity_credential WHERE identity_id = ?
-    `
-      )
-      .get(owner.id) as { passphrase_hash: string } | undefined;
-
-    if (!credRow?.passphrase_hash) return null;
-
-    const valid = await verifyPassphrase(passphrase, credRow.passphrase_hash);
-    if (!valid) return null;
-
-    this.updateLastSeen(owner.id);
-    return owner;
+    return this.checkCredential(`passphrase:${owner.id}`, owner, passphrase, () => {
+      const credRow = this.db.raw
+        .prepare(`SELECT passphrase_hash FROM identity_credential WHERE identity_id = ?`)
+        .get(owner.id) as { passphrase_hash: string | null } | undefined;
+      return credRow?.passphrase_hash ?? null;
+    });
   }
 
   /**
-   * Validates recovery code.
+   * Validates the owner recovery code, subject to its own lockout counter.
+   *
+   * Counted separately from the passphrase on purpose: locking the recovery path
+   * because the passphrase was mistyped would lock the owner out of the thing
+   * that exists to recover from exactly that.
    */
-  async verifyRecoveryCode(recoveryCode: string): Promise<Identity | null> {
+  async verifyRecoveryCode(recoveryCode: string): Promise<AuthOutcome> {
     const owner = this.getOwner();
-    if (!owner) return null;
+    if (!owner) return { ok: false, reason: 'no_owner' };
 
-    const credRow = this.db.raw
-      .prepare(
-        `
-      SELECT recovery_code_hash FROM identity_credential WHERE identity_id = ?
-    `
-      )
-      .get(owner.id) as { recovery_code_hash: string | null } | undefined;
-
-    if (!credRow?.recovery_code_hash) return null;
-
-    const valid = await verifyPassphrase(recoveryCode, credRow.recovery_code_hash);
-    if (!valid) return null;
-
-    this.updateLastSeen(owner.id);
-    return owner;
+    return this.checkCredential(`recovery:${owner.id}`, owner, recoveryCode, () => {
+      const credRow = this.db.raw
+        .prepare(`SELECT recovery_code_hash FROM identity_credential WHERE identity_id = ?`)
+        .get(owner.id) as { recovery_code_hash: string | null } | undefined;
+      return credRow?.recovery_code_hash ?? null;
+    });
   }
 
   /**
-   * Creates a new session for an identity.
+   * Shared throttle + verify path for every stored credential.
+   *
+   * `loadHash` is a thunk so the stored hash is not even read when the scope is
+   * locked out.
    */
-  createSession(identityId: string, expiresAt: number): Session {
-    const id = ulid();
-    const now = Date.now();
+  private async checkCredential(
+    scope: string,
+    identity: Identity,
+    secret: string,
+    loadHash: () => string | null,
+  ): Promise<AuthOutcome> {
+    const lock = this.getAuthLockout(scope);
+    if (lock) {
+      return {
+        ok: false,
+        reason: 'locked_out',
+        failedCount: lock.failedCount,
+        lockedUntil: lock.lockedUntil,
+      };
+    }
 
-    const session: Session = {
-      id,
-      identityId,
-      issuedAt: now,
-      expiresAt,
-      revokedAt: undefined,
-    };
+    const storedHash = loadHash();
+    if (!storedHash) return { ok: false, reason: 'no_credential' };
+
+    const valid = await verifyPassphrase(secret, storedHash);
+    if (!valid) {
+      const state = this.recordAuthFailure(scope);
+      return {
+        ok: false,
+        reason: 'wrong_credential',
+        failedCount: state.failedCount,
+        lockedUntil: state.lockedUntil,
+      };
+    }
+
+    this.clearAuthFailures(scope);
+    this.updateLastSeen(identity.id);
+    return { ok: true, identity };
+  }
+
+  /**
+   * Reports an active lockout for a scope, or null when attempts are allowed.
+   * `scope` is `passphrase:<identityId>` or `recovery:<identityId>`.
+   */
+  getAuthLockout(scope: string): { failedCount: number; lockedUntil: number } | null {
+    const row = this.db.raw
+      .prepare(`SELECT failed_count, locked_until FROM auth_attempt WHERE scope = ?`)
+      .get(scope) as { failed_count: number; locked_until: string | null } | undefined;
+
+    if (!row?.locked_until) return null;
+    const lockedUntil = new Date(row.locked_until).getTime();
+    if (Number.isNaN(lockedUntil) || lockedUntil <= Date.now()) return null;
+
+    return { failedCount: row.failed_count, lockedUntil };
+  }
+
+  private recordAuthFailure(scope: string): { failedCount: number; lockedUntil: number | undefined } {
+    const nowIso = new Date().toISOString();
+    const row = this.db.raw
+      .prepare(`SELECT failed_count FROM auth_attempt WHERE scope = ?`)
+      .get(scope) as { failed_count: number } | undefined;
+
+    const failedCount = (row?.failed_count ?? 0) + 1;
+
+    // Every failure past the threshold extends the wait, doubling each time and
+    // capped so the owner is never locked out permanently by someone else's
+    // guessing.
+    let lockedUntil: number | undefined;
+    if (failedCount >= AUTH_MAX_ATTEMPTS) {
+      const over = failedCount - AUTH_MAX_ATTEMPTS;
+      const waitMs = Math.min(AUTH_LOCKOUT_BASE_MS * 2 ** over, AUTH_LOCKOUT_MAX_MS);
+      lockedUntil = Date.now() + waitMs;
+    }
 
     this.db.raw
       .prepare(
-        `
-      INSERT INTO session (id, identity_id, issued_at, expires_at)
-      VALUES (?, ?, ?, ?)
-    `
+        `INSERT INTO auth_attempt (scope, failed_count, first_failed_at, last_failed_at, locked_until)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(scope) DO UPDATE SET
+           failed_count = excluded.failed_count,
+           last_failed_at = excluded.last_failed_at,
+           locked_until = excluded.locked_until`,
       )
       .run(
-        session.id,
-        session.identityId,
-        new Date(session.issuedAt).toISOString(),
-        new Date(session.expiresAt).toISOString()
+        scope,
+        failedCount,
+        nowIso,
+        nowIso,
+        lockedUntil === undefined ? null : new Date(lockedUntil).toISOString(),
       );
+
+    return { failedCount, lockedUntil };
+  }
+
+  /** Clears the counter after a success; a valid credential ends the streak. */
+  private clearAuthFailures(scope: string): void {
+    this.db.raw.prepare(`DELETE FROM auth_attempt WHERE scope = ?`).run(scope);
+  }
+
+
+  /**
+   * Creates a session and issues its bearer token.
+   *
+   * The returned `token` is the credential and exists only here — the database
+   * stores its sha256. `id` is a non-secret handle for revoking and auditing.
+   * The two were previously the same ULID, which meant read access to the
+   * database file was read access to every live session.
+   */
+  createSession(identityId: string, expiresAt: number): IssuedSession {
+    const id = ulid();
+    const now = Date.now();
+    const token = randomBytes(SESSION_TOKEN_BYTES).toString('base64url');
+
+    this.db.raw
+      .prepare(
+        `INSERT INTO session (id, identity_id, issued_at, expires_at, token_hash)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        identityId,
+        new Date(now).toISOString(),
+        new Date(expiresAt).toISOString(),
+        hashSessionToken(token),
+      );
+
+    return { id, identityId, issuedAt: now, expiresAt, revokedAt: undefined, token };
+  }
+
+  /**
+   * Authenticates a bearer token: the only function that turns a credential into
+   * a session. Applies the same expiry and revocation checks as
+   * `validateSession`, which by design cannot authenticate anything.
+   */
+  authenticateSessionToken(token: string): Session | null {
+    if (!token) return null;
+
+    const row = this.db.raw
+      .prepare(
+        `SELECT id, identity_id, issued_at, expires_at, revoked_at, token_hash
+           FROM session
+          WHERE token_hash = ?`,
+      )
+      .get(hashSessionToken(token)) as
+      | {
+          id: string;
+          identity_id: string;
+          issued_at: string;
+          expires_at: string;
+          revoked_at: string | null;
+          token_hash: string;
+        }
+      | undefined;
+
+    if (!row) return null;
+    // Indexed lookup already required an exact match; the constant-time compare
+    // is here so the shape of this function does not invite a later change to a
+    // scan-and-compare that would leak the hash a byte at a time.
+    if (!constantTimeEquals(row.token_hash, hashSessionToken(token))) return null;
+
+    const session: Session = {
+      id: row.id,
+      identityId: row.identity_id,
+      issuedAt: new Date(row.issued_at).getTime(),
+      expiresAt: new Date(row.expires_at).getTime(),
+      revokedAt: row.revoked_at ? new Date(row.revoked_at).getTime() : undefined,
+    };
+
+    if (session.expiresAt < Date.now()) return null;
+    if (session.revokedAt !== undefined) return null;
 
     return session;
   }
+
 
   /**
    * Gets a session by ID.
@@ -369,7 +561,12 @@ export class IdentityRepository {
   }
 
   /**
-   * Validates a session (checks expiry and revocation).
+   * Checks a session *record* by its non-secret id: not expired, not revoked.
+   *
+   * This is not authentication and must never be reached from a transport with
+   * a caller-supplied value — `id` is a public handle, so accepting it as proof
+   * of identity would undo the point of hashing the token. Use
+   * `authenticateSessionToken()` for anything that arrived over the wire.
    */
   validateSession(sessionId: string): Session | null {
     const session = this.getSession(sessionId);
@@ -465,6 +662,18 @@ export function getIdentityRepository(db?: Database): IdentityRepository {
   return new IdentityRepository(db);
 }
 
-export function closeIdentityRepository(): void {
-  // No-op for now, uses shared DB
+/**
+ * sha256 of a session token. Fast on purpose: the token is 256 bits of CSPRNG
+ * output, so there is no dictionary for a slow KDF to defend against, and this
+ * runs on every authenticated request.
+ */
+function hashSessionToken(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+function constantTimeEquals(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
 }

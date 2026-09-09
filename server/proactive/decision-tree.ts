@@ -135,20 +135,22 @@ export class ProactiveDecisionTree {
       this.isWithinQuietHours(userContext?.currentHour ?? new Date().getHours(), this.options.quietHours);
 
     if (inQuietHours) {
-      return {
-        ...baseOutcome,
-        action: 'defer',
-        reason: 'Candidate deferred due to quiet hours window',
-      };
+      return this.deferOrGiveUp(
+        baseOutcome,
+        candidate,
+        'Candidate deferred due to quiet hours window',
+        this.quietHoursEndAt(now, this.options.quietHours),
+      );
     }
 
     // 6. Interruption Cost Check
     if (candidate.interruptionCost > this.options.interruptionCostThreshold) {
-      return {
-        ...baseOutcome,
-        action: 'defer',
-        reason: `Interruption cost ${candidate.interruptionCost} exceeds threshold ${this.options.interruptionCostThreshold}`,
-      };
+      return this.deferOrGiveUp(
+        baseOutcome,
+        candidate,
+        `Interruption cost ${candidate.interruptionCost} exceeds threshold ${this.options.interruptionCostThreshold}`,
+        now + this.backoffFor(candidate.deferCount ?? 0),
+      );
     }
 
     // 7. User Context Compatibility Check
@@ -179,5 +181,57 @@ export class ProactiveDecisionTree {
     }
     // e.g. 01:00 to 06:00
     return currentHour >= startHour && currentHour < endHour;
+  }
+
+  /**
+   * Defers with a due time, or stops deferring and says why.
+   *
+   * Every deferral carries the moment it becomes due, because a deferral without
+   * one cannot be re-evaluated and is therefore a suppression wearing a kinder
+   * word. And a candidate deferred `maxDeferrals` times is suppressed outright:
+   * three postponements in a row is not scheduling, and reporting it as another
+   * "later" would hide that this candidate is simply never going to be welcome.
+   */
+  private deferOrGiveUp(
+    baseOutcome: Omit<ProactiveDecisionOutcome, 'action' | 'reason'>,
+    candidate: ProactiveCandidate,
+    reason: string,
+    deferUntil: number,
+  ): ProactiveDecisionOutcome {
+    const deferCount = candidate.deferCount ?? 0;
+
+    if (deferCount >= this.options.maxDeferrals) {
+      return {
+        ...baseOutcome,
+        action: 'suppress',
+        reason: `Deferred ${deferCount} times without a suitable window (${reason}); abandoning rather than deferring again`,
+      };
+    }
+
+    return { ...baseOutcome, action: 'defer', reason, deferUntil };
+  }
+
+  /**
+   * The next moment the quiet-hours window is over.
+   *
+   * `endHour` today if that is still ahead of us, otherwise tomorrow — which is
+   * correct for a window that wraps midnight (22:00–07:00 defers to 07:00
+   * tomorrow) and for one that does not (01:00–06:00 at 03:00 defers to 06:00
+   * today). If a caller asserted `isQuietHours` that our config disagrees with,
+   * the config is still the only thing that knows when quiet hours end, so this
+   * is the best answer available.
+   */
+  private quietHoursEndAt(now: number, config: QuietHoursConfig): number {
+    const end = new Date(now);
+    end.setHours(config.endHour, 0, 0, 0);
+    if (end.getTime() <= now) {
+      end.setDate(end.getDate() + 1);
+    }
+    return end.getTime();
+  }
+
+  /** Backoff for a non-clock deferral, doubling per prior deferral. */
+  private backoffFor(deferCount: number): number {
+    return this.options.deferBackoffMs * 2 ** deferCount;
   }
 }

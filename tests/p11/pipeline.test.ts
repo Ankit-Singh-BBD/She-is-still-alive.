@@ -73,7 +73,8 @@ describe('Action Pipeline (P11-P13)', () => {
       // Register postcondition verifier for math:add (P13)
       pipeline.registerVerifier('math:add', async (_input, output) => {
         // Read-only tool has trivial postconditions
-        return { postconditionsMet: (output as any).result === 5, discrepancies: [] };
+        const out = output as { result: number } | undefined;
+        return { postconditionsMet: out?.result === 5, discrepancies: [] };
       });
 
       const result = await pipeline.execute({
@@ -86,14 +87,14 @@ describe('Action Pipeline (P11-P13)', () => {
       });
 
       expect(result.success).toBe(true);
-      expect((result.output as any).result).toBe(5);
+      expect((result.output as { result: number }).result).toBe(5);
       expect(result.verified).toBe(true);
 
       // Verify persistence in action_result table (P11 requirement)
-      const row = db.raw.prepare(`SELECT * FROM action_result WHERE id = ?`).get(result.actionResultId) as any;
+      const row = db.raw.prepare(`SELECT * FROM action_result WHERE id = ?`).get(result.actionResultId) as { tool_id: string; verified: number } | undefined;
       expect(row).toBeDefined();
-      expect(row.tool_id).toBe('math:add');
-      expect(row.verified).toBe(1);
+      expect(row?.tool_id).toBe('math:add');
+      expect(row?.verified).toBe(1);
     });
 
     it('rejects unauthorized tool calls at Stage 3 (AUTHORIZE)', async () => {
@@ -271,8 +272,8 @@ describe('Action Pipeline (P11-P13)', () => {
       expect(result.verified).toBe(false);
 
       // Check action_result row in SQLite
-      const row = db.raw.prepare(`SELECT verified FROM action_result WHERE id = ?`).get(result.actionResultId) as any;
-      expect(row.verified).toBe(0);
+      const row = db.raw.prepare(`SELECT verified FROM action_result WHERE id = ?`).get(result.actionResultId) as { verified: number } | undefined;
+      expect(row?.verified).toBe(0);
     });
 
     it('marks action verified when state change is confirmed by re-reading DB', async () => {
@@ -315,8 +316,86 @@ describe('Action Pipeline (P11-P13)', () => {
       expect(result.success).toBe(true);
       expect(result.verified).toBe(true);
 
-      const row = db.raw.prepare(`SELECT verified FROM action_result WHERE id = ?`).get(result.actionResultId) as any;
-      expect(row.verified).toBe(1);
+      const row = db.raw.prepare(`SELECT verified FROM action_result WHERE id = ?`).get(result.actionResultId) as { verified: number } | undefined;
+      expect(row?.verified).toBe(1);
+    });
+  });
+
+  describe('domain events name the outcome', () => {
+    /**
+     * The regression this pins: PERSIST published `action.executed` for every
+     * run and put the verdict in the payload, so `action.failed` sat in the
+     * event union having never been published once. A subscriber asking for
+     * failures heard silence; one asking for executions was handed the failures
+     * too.
+     */
+    const collect = (): string[] => {
+      const seen: string[] = [];
+      eventBus.subscribe((evt) => {
+        seen.push(evt.type);
+      });
+      return seen;
+    };
+
+    const register = (id: string, execute: () => Promise<unknown>): void => {
+      registry.register({
+        id,
+        name: id,
+        description: id,
+        inputSchema: z.object({}),
+        clearanceRequired: 'safe',
+        retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 1 },
+        timeoutMs: 1000,
+        execute,
+      });
+    };
+
+    const run = (toolId: string): ReturnType<typeof pipeline.execute> =>
+      pipeline.execute({
+        toolId,
+        input: {},
+        identityId: owner.id,
+        cycleId: 'cycle1',
+        causationId: 'cycle1',
+        caller: owner,
+      });
+
+    it('publishes action.executed only when the tool ran and verified', async () => {
+      const seen = collect();
+      register('probe:ok', async () => ({ ok: true }));
+      pipeline.registerVerifier('probe:ok', async () => ({ postconditionsMet: true, discrepancies: [] }));
+
+      expect((await run('probe:ok')).success).toBe(true);
+      expect(seen).toContain('action.executed');
+      expect(seen).not.toContain('action.failed');
+    });
+
+    it('publishes action.failed when the tool throws', async () => {
+      const seen = collect();
+      register('probe:throws', async () => {
+        throw new Error('nope');
+      });
+
+      expect((await run('probe:throws')).success).toBe(false);
+      expect(seen).toContain('action.failed');
+      expect(seen).not.toContain('action.executed');
+    });
+
+    it('publishes action.failed when the tool ran but postconditions were not met', async () => {
+      const seen = collect();
+      register('probe:unverified', async () => ({ ok: true }));
+      pipeline.registerVerifier('probe:unverified', async () => ({
+        postconditionsMet: false,
+        discrepancies: ['nothing was written'],
+      }));
+
+      // A tool whose postconditions failed did not do its job, whatever it
+      // returned — so it is not an execution to be trusted downstream.
+      const result = await run('probe:unverified');
+      expect(result.success).toBe(true);
+      expect(result.verified).toBe(false);
+      expect(seen).toContain('action.failed');
+      expect(seen).not.toContain('action.executed');
     });
   });
 });

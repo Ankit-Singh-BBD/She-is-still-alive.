@@ -20,6 +20,11 @@
  *   4. `audit_log` — every disclosure decision collected into the cycle's
  *      `CycleAuditBuffer` by stage 9, persisted with the rest of the cycle
  *      so a cycle never splits its audit story across two writes.
+ *   5. `message` — the conversation's turns: what was said to her, and the
+ *      response stage 9 authorized. Here rather than in a writer of its own for
+ *      the same reason as the audit entries: a cycle that committed its trace
+ *      and lost its transcript would leave her remembering that she answered
+ *      without any record of what she answered.
  *
  * P10 rollback contract: with no learning delta, no action results, and no
  * audit entries, persist reports `eventsEmitted: 1` (the cycle.completed
@@ -29,8 +34,11 @@
  */
 
 import { ulid } from 'ulid';
+import { appendTurns, type TurnDraft } from '@server/conversations/messages.js';
 import type { Database } from '@server/persistence/db.js';
 import type { EventBus } from '@server/events/event-bus.js';
+import type { DomainEventType, PersistedDomainEvent } from '@server/events/types.js';
+import { appendAuditEntries } from '@server/security/audit.js';
 import type {
   ActionResult,
   AuditEntry,
@@ -51,7 +59,7 @@ export interface PersistOptions {
 }
 
 export interface DomainEvent {
-  type: string;
+  type: DomainEventType;
   payload: Record<string, unknown>;
   identityId?: string | undefined;
   cycleId?: string | undefined;
@@ -60,8 +68,29 @@ export interface DomainEvent {
 export interface PersistInput {
   cycleId: string;
   status: CycleStatus;
+  /**
+   * Stage failures the cycle survived via fallback, joined into one string.
+   * Persisted on `cycle_record.error` so a `degraded` row says what degraded.
+   */
+  error?: string | undefined;
   completedAt: number;
   identityId: string;
+  /**
+   * The conversation this cycle belongs to, already resolved by the runtime.
+   *
+   * Required, and not read off the stimulus: `message.conversation_id` is a
+   * foreign key, and the stimulus is allowed to arrive without a conversation
+   * (the runtime opens one). Taking the resolved id here is what stops the
+   * transcript being written against a guess.
+   */
+  conversationId: string;
+  /**
+   * What was said and what she answered, in order. Written inside this stage's
+   * transaction. Empty when the stimulus carried no text and no response was
+   * authorized — a system trigger, say — which is a cycle with nothing to
+   * transcribe rather than a failure.
+   */
+  turns: readonly TurnDraft[];
   /** Action results to record as `action_result` domain events (one per tool). */
   actionResults: ActionResult[];
   /** Authorized decision — used to record the `cycle.decided` event payload. */
@@ -87,11 +116,37 @@ export async function persist(
   if (!db) {
     // Without a database the persist stage is a no-op; the rollback contract
     // still wants us to report the attempt rather than throw.
-    return { cycleRecordId: input.cycleId, committedAt: Date.now(), eventsEmitted: 0 };
+    return {
+      cycleRecordId: input.cycleId,
+      committedAt: Date.now(),
+      eventsEmitted: 0,
+      turnsWritten: 0,
+    };
   }
 
   const events: DomainEvent[] = buildDomainEvents(input);
   const eventsEmitted = events.length;
+  let turnsWritten = 0;
+  /**
+   * The identity and sequence number each event actually landed with, in the
+   * order they were written.
+   *
+   * Collected inside the transaction because that is the only place they exist:
+   * `seq` is `domain_event`'s `INTEGER PRIMARY KEY`, so it is assigned by the
+   * insert and is not knowable before it. The in-process re-dispatch below used
+   * to invent `seq: -1` and a fresh `ulid()` instead of reading these back,
+   * which broke two things that both look like they work:
+   *
+   *  - `RealtimeFlow` sets `RuntimeState.version = event.seq`, so every cycle
+   *    drove the version *backwards* to -1 — a counter documented as monotonic
+   *    that was not.
+   *  - `SseSubscriber` writes `id: <seq>`, which is what `EventSource` echoes as
+   *    `Last-Event-ID`. With -1 on the wire a reconnecting client asked to be
+   *    replayed from -1, `replayMissed` read that as "no useful cursor" and sent
+   *    nothing, and the client silently lost every event of the cycle it
+   *    disconnected during. The comment below promised exactly that recovery.
+   */
+  const written: { id: string; seq: number }[] = [];
 
   // One transaction: cycle close + audit entries + domain event stream. If any
   // insert throws, none of them land; the cycle keeps its `running` row and a
@@ -101,10 +156,15 @@ export async function persist(
     db.raw
       .prepare(
         `UPDATE cycle_record
-            SET status = ?, completed_at = ?
+            SET status = ?, completed_at = ?, error = ?
           WHERE id = ?`,
       )
-      .run(input.status, new Date(input.completedAt).toISOString(), input.cycleId);
+      .run(
+        input.status,
+        new Date(input.completedAt).toISOString(),
+        input.error ?? null,
+        input.cycleId,
+      );
 
     // 2. Persist stage traces.
     const insertTrace = db.raw.prepare(
@@ -127,25 +187,35 @@ export async function persist(
     }
 
     // 3. Append audit log entries from the cycle's buffer.
-    const insertAudit = db.raw.prepare(
-      `INSERT INTO audit_log
-         (id, actor_id, action, resource, decision, reason, metadata_json, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    //
+    // Through `appendAuditEntries`, not a local INSERT: this stage used to
+    // write eight columns and leave `seq`/`prev_hash`/`entry_hash` NULL, so
+    // every disclosure decision a cycle recorded was unchained — no tamper
+    // evidence, and `verifyIntegrity()` reports it as an error. The helper
+    // requires the open transaction we are already inside, which is what keeps
+    // the cycle's audit entries committed together with its other artifacts.
+    appendAuditEntries(
+      db,
+      input.audit.map((entry) => ({
+        actorId: entry.actorId,
+        action: entry.action,
+        resource: entry.resource,
+        decision: entry.decision,
+        reason: entry.reason ?? null,
+        metadata: entry.metadata ?? null,
+        timestamp: entry.at,
+      })),
     );
-    for (const entry of input.audit) {
-      insertAudit.run(
-        ulid(),
-        entry.actorId,
-        entry.action,
-        entry.resource,
-        entry.decision,
-        entry.reason ?? null,
-        entry.metadata ? JSON.stringify(entry.metadata) : null,
-        new Date(entry.at).toISOString(),
-      );
-    }
 
-    // 4. Append domain events to the ordered stream.
+    // 4. Append the conversation's turns.
+    //
+    // Inside this transaction, through the transcript module's own writer, so
+    // the SQL lives next to the reader stage 3 uses rather than being spelled
+    // out twice. `appendTurns` skips an empty line and returns what it wrote, so
+    // the count below is rows and not intentions.
+    turnsWritten = appendTurns(db, input.conversationId, input.turns).length;
+
+    // 5. Append domain events to the ordered stream.
     const insertEvent = db.raw.prepare(
       `INSERT INTO domain_event
          (id, type, payload_json, identity_id, cycle_id, timestamp,
@@ -153,8 +223,9 @@ export async function persist(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const ev of events) {
-      insertEvent.run(
-        ulid(),
+      const id = ulid();
+      const result = insertEvent.run(
+        id,
         ev.type,
         JSON.stringify(ev.payload),
         ev.identityId ?? null,
@@ -164,21 +235,29 @@ export async function persist(
         null,
         1,
       );
+      written.push({ id, seq: Number(result.lastInsertRowid) });
     }
   })();
 
-  // 4. Best-effort in-process delivery — never inside the transaction. The
+  // 6. Best-effort in-process delivery — never inside the transaction. The
   //    rows are already committed above; we just re-dispatch to in-memory
   //    subscribers. Delivery is explicitly separated from persistence so this
   //    stage does not double-insert into `domain_event` (EventBus.publish
   //    performs its own INSERT). A failed dispatch must not roll back the
   //    persisted record.
+  //
+  //    What is dispatched is the row, not a copy of the intention: the `id` and
+  //    `seq` are the ones the insert assigned, so a subscriber that keeps
+  //    `lastMutation.eventId` names a row that exists and a client that echoes
+  //    `Last-Event-ID` names a cursor `EventBus.replay` can honour.
   if (opts.eventBus) {
     for (let i = 0; i < events.length; i++) {
       const ev = events[i]!;
-      const persisted = {
-        id: ulid(),
-        type: ev.type as any,
+      const row = written[i];
+      if (row === undefined) continue;
+      const persisted: PersistedDomainEvent = {
+        id: row.id,
+        type: ev.type,
         payload: ev.payload,
         identityId: ev.identityId,
         cycleId: ev.cycleId,
@@ -186,8 +265,8 @@ export async function persist(
         causationId: undefined,
         correlationId: undefined,
         version: 1 as const,
-        seq: -1,
-      } as any;
+        seq: row.seq,
+      };
       try {
         await opts.eventBus.deliver(persisted);
       } catch {
@@ -201,6 +280,7 @@ export async function persist(
     cycleRecordId: input.cycleId,
     committedAt: Date.now(),
     eventsEmitted,
+    turnsWritten,
   };
 }
 
@@ -273,7 +353,15 @@ function buildDomainEvents(input: PersistInput): DomainEvent[] {
   }
 
   events.push({
-    type: input.status === 'completed' ? 'cycle.completed' : 'cycle.failed',
+    // 'degraded' is a real outcome, not a success: the cycle answered, but a
+    // stage failed on the way. It reports as `cycle.degraded` so subscribers
+    // (and she herself) can tell the difference.
+    type:
+      input.status === 'completed'
+        ? 'cycle.completed'
+        : input.status === 'degraded'
+          ? 'cycle.degraded'
+          : 'cycle.failed',
     payload: {
       status: input.status,
       completedAt: input.completedAt,

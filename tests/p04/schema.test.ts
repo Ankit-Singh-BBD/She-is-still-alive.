@@ -93,4 +93,42 @@ describe('Phase P04: Domain Schema', () => {
     expect(convoFk?.table).toBe('conversation');
     expect(convoFk?.on_delete).toBe('CASCADE');
   });
+
+  describe('cycle_record.status is constrained, not just commented', () => {
+    beforeEach(() => {
+      db.raw.prepare(`INSERT INTO identity (id, kind, display_name) VALUES ('id-1', 'owner', 'Owner')`).run();
+      db.raw.prepare(`INSERT INTO conversation (id, identity_id) VALUES ('conv-1', 'id-1')`).run();
+    });
+
+    const write = (status: string): void => {
+      db.raw
+        .prepare(`INSERT INTO cycle_record (id, conversation_id, status) VALUES (?, 'conv-1', ?)`)
+        .run(`cycle-${status}`, status);
+    };
+
+    it('accepts every status the runtime actually writes', () => {
+      // 'degraded' is the one 0003's comment omitted: a cycle that answered but
+      // had a stage fail and fall back.
+      for (const status of ['running', 'completed', 'degraded', 'interrupted', 'failed']) {
+        expect(() => write(status)).not.toThrow();
+      }
+    });
+
+    it('rejects a status nothing defines, on insert and on update', () => {
+      expect(() => write('finished')).toThrow(/invalid cycle_record.status/);
+
+      write('running');
+      expect(() =>
+        db.raw
+          .prepare(`UPDATE cycle_record SET status = 'succeeded' WHERE id = 'cycle-running'`)
+          .run(),
+      ).toThrow(/invalid cycle_record.status/);
+
+      // The row still holds the value it was written with.
+      const row = db.raw
+        .prepare(`SELECT status FROM cycle_record WHERE id = 'cycle-running'`)
+        .get() as { status: string };
+      expect(row.status).toBe('running');
+    });
+  });
 });

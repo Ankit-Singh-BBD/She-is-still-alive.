@@ -150,6 +150,11 @@ describe('Cognitive Loop - Stages 10-12 (LEARN .. PERSIST)', () => {
         status: 'completed' as const,
         completedAt: Date.now(),
         identityId: ownerId,
+        conversationId: 'conv1',
+        turns: [
+          { role: 'user' as const, text: 'remember I prefer dark mode' },
+          { role: 'assistant' as const, text: 'noted' },
+        ],
         actionResults: [],
         decision: defaultDecision,
         response: defaultResponse,
@@ -162,20 +167,21 @@ describe('Cognitive Loop - Stages 10-12 (LEARN .. PERSIST)', () => {
       const result = await persist(persistInput, { db });
       expect(result.cycleRecordId).toBe(cycleId);
       expect(result.eventsEmitted).toBeGreaterThan(0);
+      expect(result.turnsWritten).toBe(2);
 
       // Verify cycle record status
-      const cycle = db.raw.prepare(`SELECT status FROM cycle_record WHERE id = ?`).get(cycleId) as any;
-      expect(cycle.status).toBe('completed');
+      const cycle = db.raw.prepare(`SELECT status FROM cycle_record WHERE id = ?`).get(cycleId) as { status: string } | undefined;
+      expect(cycle?.status).toBe('completed');
 
       // Verify audit logic
-      const audits = db.raw.prepare(`SELECT * FROM audit_log WHERE actor_id = ?`).all(ownerId) as any[];
+      const audits = db.raw.prepare(`SELECT * FROM audit_log WHERE actor_id = ?`).all(ownerId) as Array<{ action: string }>;
       expect(audits.length).toBe(1);
-      expect(audits[0].action).toBe('disclosure:redact');
+      expect(audits[0]?.action).toBe('disclosure:redact');
 
       // Verify domain events
-      const events = db.raw.prepare(`SELECT * FROM domain_event WHERE cycle_id = ? ORDER BY seq`).all(cycleId) as any[];
+      const events = db.raw.prepare(`SELECT * FROM domain_event WHERE cycle_id = ? ORDER BY seq`).all(cycleId) as Array<{ type: string }>;
       expect(events.length).toBeGreaterThan(0);
-      expect(events[events.length - 1].type).toBe('cycle.completed');
+      expect(events[events.length - 1]?.type).toBe('cycle.completed');
     });
   });
 });

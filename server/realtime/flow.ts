@@ -12,6 +12,24 @@ export interface QueuedMessage {
 
 export interface RealtimeFlowOptions {
   coalesceWindowMs?: number;
+  /**
+   * Refreshes the *domain* fields of `RuntimeState` after an event.
+   *
+   * Without this, `_applyEventToState` sets `version` and `lastMutation` and
+   * nothing else — so `memory`, `tasks`, `loops`, `presence`, `cognitive` and
+   * `environment` keep whatever the initial state was constructed with, forever,
+   * while the version number keeps climbing and telling a subscriber it is up to
+   * date. A UI bound to `getSnapshot()` would show six zeroes after a thousand
+   * memories were written.
+   *
+   * It is a hook rather than a repository dependency because this class is a
+   * fan-out component: it must stay usable with a hand-written state and no
+   * database, which is how every test in `tests/p20` drives it. When absent the
+   * behaviour is exactly what it was before the hook existed.
+   *
+   * The implementation lives in `server/http/state.ts` as `RuntimeStateProjector`.
+   */
+  project?: ((previous: RuntimeState, event: PersistedDomainEvent) => RuntimeState) | undefined;
 }
 
 export class RealtimeFlow {
@@ -28,6 +46,7 @@ export class RealtimeFlow {
   private currentState: RuntimeState;
   private eventBusUnsubscribe?: (() => void) | undefined;
   private coalesceWindowMs: number;
+  private project: ((previous: RuntimeState, event: PersistedDomainEvent) => RuntimeState) | undefined;
 
   constructor(
     private eventBus: EventBus,
@@ -36,6 +55,7 @@ export class RealtimeFlow {
   ) {
     this.currentState = initialState;
     this.coalesceWindowMs = options.coalesceWindowMs ?? 50; // default to 50ms per Part XXII.2
+    this.project = options.project;
   }
 
   public start(): void {
@@ -98,7 +118,7 @@ export class RealtimeFlow {
   }
 
   private _applyEventToState(event: PersistedDomainEvent): void {
-    this.currentState = {
+    const withMutation: RuntimeState = {
       ...this.currentState,
       version: event.seq, // version increments monotonically based on persistence
       lastMutation: {
@@ -107,6 +127,14 @@ export class RealtimeFlow {
         timestamp: event.timestamp,
       },
     };
+
+    // The projection runs *after* version and lastMutation are set, so it sees a
+    // state already stamped with the event it is projecting and cannot be the
+    // thing that forgets to advance the version. A throwing projector is not
+    // caught: it would mean the authoritative read behind it failed, and
+    // broadcasting a state that silently kept stale counts is the dishonesty
+    // this hook exists to remove.
+    this.currentState = this.project ? this.project(withMutation, event) : withMutation;
   }
 
   public broadcast(message: BroadcastMessage): void {

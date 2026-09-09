@@ -2,6 +2,7 @@
 
 import type { IdentityKind, PermissionSet } from '@server/identity/types.js';
 import type { ScopedMemoryItem } from '@server/memory/types.js';
+import type { ConversationTurn } from '@server/conversations/messages.js';
 
 // ── Common ──
 export type StageNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
@@ -16,7 +17,14 @@ export interface StageTrace {
   error?: string | undefined;
 }
 
-export type CycleStatus = 'running' | 'completed' | 'interrupted' | 'failed';
+/**
+ * `degraded` means the cycle ran to completion but at least one stage threw and
+ * was replaced by its documented fallback. It exists so a cycle can never report
+ * clean success over a stage that actually failed — see Part II, "action is
+ * proven, not claimed". `failed` is reserved for a cycle that could not produce
+ * a response at all.
+ */
+export type CycleStatus = 'running' | 'completed' | 'degraded' | 'interrupted' | 'failed';
 
 export interface CycleRecord {
   id: string;
@@ -61,6 +69,16 @@ export interface RecalledContext {
   habits: ScopedMemoryItem[];
   relationships: ScopedMemoryItem[];
   learnedPatterns: ScopedMemoryItem[];
+  /**
+   * The turns of this conversation before the current one, oldest first.
+   *
+   * Optional, and the two empty cases are deliberately distinguishable:
+   * `undefined` means no transcript was loaded at all (no reader was wired, or
+   * the stimulus named no conversation), while `[]` means one was loaded and
+   * this is genuinely the first thing said. A prompt that cannot tell those
+   * apart would claim she is starting fresh when in fact nobody looked.
+   */
+  recentTurns?: readonly ConversationTurn[] | undefined;
   retrievedAt: number;
 }
 
@@ -142,7 +160,7 @@ export interface AuthorizedLearningDelta {
       sourceConversationId: string;
       sourceMessageIds: string[];
       extractedAt: number;
-      extractor: 'rule' | 'llm' | 'legacy_import';
+      extractor: 'rule' | 'llm';
       confidence: number;
       validatedBy: 'app_rule' | 'owner_confirmation' | 'auto_policy';
     };
@@ -164,6 +182,12 @@ export interface PersistResult {
   cycleRecordId: string;
   committedAt: number;
   eventsEmitted: number;
+  /**
+   * Transcript turns actually inserted. Reported rather than assumed: a cycle
+   * whose stimulus carried no text writes one turn, and one with no authorized
+   * response writes none, so a caller counting the conversation counts rows.
+   */
+  turnsWritten: number;
 }
 
 // ── Stage handler signature ──

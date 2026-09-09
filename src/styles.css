@@ -1,0 +1,469 @@
+/**
+ * The room's surfaces. Everything that is not the shader.
+ *
+ * ## No borders anywhere
+ *
+ * Separation is done with luminance, blur and space. A 1 px line is the cheapest
+ * possible way to say "these two things are different", and it is the thing that
+ * makes an interface look assembled out of boxes. The only hairlines in this file
+ * are the composer's top edge and the transcript's own-turn rule, and both are
+ * under 10% alpha — closer to a shadow than a border.
+ *
+ * ## Why the colours are registered with `@property`
+ *
+ * `applyPalette` writes fourteen custom properties onto `<html>` every time the
+ * hour or the sky changes. An *unregistered* custom property is a discrete value:
+ * it would jump. Registering each one as `<color>` makes it interpolable, so the
+ * `transition` on `:root` below turns sunset into a slow warming of the whole
+ * interface rather than a cut. A browser without `@property` ignores the at-rules
+ * and gets the cut, which is the correct degradation — the colours are still right,
+ * they just arrive at once.
+ *
+ * The `initial-value` of each is her night palette, the same three hexes `mood.ts`
+ * falls back to. That is what paints in the moment between the document loading and
+ * React reading `GET /api/state`: a plausible hour rather than a white flash.
+ *
+ * ## Type
+ *
+ * Two weights carry everything — 300 for prose and headlines, 400 for the few
+ * places that need to be found quickly — plus 500 on the 10–11 px uppercase labels,
+ * which are letter-spaced far enough apart that weight is all that keeps them
+ * legible. No font is downloaded; the system stack is what the platform already has
+ * rasterised, and on the two platforms this will actually run on it is very good.
+ */
+
+@property --primary { syntax: '<color>'; inherits: true; initial-value: #0c0c17; }
+@property --secondary { syntax: '<color>'; inherits: true; initial-value: #1a1a2c; }
+@property --accent { syntax: '<color>'; inherits: true; initial-value: #8f6ee0; }
+@property --ground { syntax: '<color>'; inherits: true; initial-value: #05050a; }
+@property --surface { syntax: '<color>'; inherits: true; initial-value: rgba(39, 39, 56, 0.06); }
+@property --surface-strong { syntax: '<color>'; inherits: true; initial-value: rgba(47, 48, 64, 0.11); }
+@property --ink { syntax: '<color>'; inherits: true; initial-value: rgba(240, 242, 247, 0.96); }
+@property --ink-soft { syntax: '<color>'; inherits: true; initial-value: rgba(240, 242, 247, 0.72); }
+@property --ink-dim { syntax: '<color>'; inherits: true; initial-value: rgba(240, 242, 247, 0.46); }
+@property --ink-faint { syntax: '<color>'; inherits: true; initial-value: rgba(240, 242, 247, 0.26); }
+@property --accent-soft { syntax: '<color>'; inherits: true; initial-value: rgba(143, 110, 224, 0.44); }
+@property --accent-faint { syntax: '<color>'; inherits: true; initial-value: rgba(143, 110, 224, 0.16); }
+@property --glow { syntax: '<color>'; inherits: true; initial-value: rgba(143, 110, 224, 0.3); }
+@property --hairline { syntax: '<color>'; inherits: true; initial-value: rgba(240, 242, 247, 0.09); }
+
+:root {
+  /* One curve for everything that moves. It decelerates hard and never overshoots,
+     which is the difference between "settling" and "bouncing". */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --quick: 220ms;
+  --calm: 480ms;
+  --slow: 900ms;
+
+  --label: 500 0.6875rem/1 var(--sans);
+  --track: 0.18em;
+
+  --sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+
+  color-scheme: dark;
+
+  /* The whole palette eases at once. 900 ms is long enough to be felt as weather
+     changing rather than seen as a repaint. */
+  transition:
+    --primary var(--slow) var(--ease),
+    --secondary var(--slow) var(--ease),
+    --accent var(--slow) var(--ease),
+    --ground var(--slow) var(--ease),
+    --surface var(--slow) var(--ease),
+    --surface-strong var(--slow) var(--ease),
+    --ink var(--slow) var(--ease),
+    --ink-soft var(--slow) var(--ease),
+    --ink-dim var(--slow) var(--ease),
+    --ink-faint var(--slow) var(--ease),
+    --accent-soft var(--slow) var(--ease),
+    --accent-faint var(--slow) var(--ease),
+    --glow var(--slow) var(--ease),
+    --hairline var(--slow) var(--ease);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 300 1rem/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* The transcript is the only thing that scrolls. A page-level scrollbar over a
+     fixed field would move the field's edges against the viewport. */
+  overflow: hidden;
+  overscroll-behavior: none;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+}
+
+/* One focus treatment everywhere: a hairline of accent and a soft bloom outside it.
+   Never removed — a keyboard has to be able to find every control in this room. */
+:focus-visible {
+  outline: 1px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--accent-faint);
+  border-radius: 0.4rem;
+}
+
+::selection {
+  background: var(--accent-faint);
+  color: var(--ink);
+}
+
+/* --------------------------------------------------------------- the field */
+
+.field {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/**
+ * The same composition as the shader, in five gradients: sky falling into ground,
+ * an aurora above the horizon, her at 36% from the top, her echo below it, and a
+ * vignette. No motion and no grain, so it bands on a cheap panel where the shader
+ * would not. It paints on the first frame, before any GL context exists, which is
+ * why the canvas fades in *over* it rather than replacing it.
+ */
+.field-css {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle 6vmax at 50% 36%, var(--accent-soft), transparent 62%),
+    radial-gradient(circle 26vmax at 50% 36%, var(--glow), transparent 72%),
+    radial-gradient(58% 14% at 50% 64%, var(--glow), transparent 76%),
+    radial-gradient(120% 46% at 26% 2%, var(--accent-faint), transparent 62%),
+    linear-gradient(to bottom, rgb(0 0 0 / 0.5), rgb(0 0 0 / 0) 46%),
+    linear-gradient(to bottom, var(--secondary), var(--primary) 72%);
+}
+
+.field-css::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(124% 104% at 50% 42%, rgb(0 0 0 / 0) 28%, rgb(0 0 0 / 0.52));
+}
+
+.field-gl {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Fades in once the context exists and the first frame is on it, so a slow GL
+     init reads as the room brightening rather than as a flash of a second design. */
+  opacity: 0;
+  transition: opacity 1200ms var(--ease);
+}
+
+.field-gl[data-state='live'] {
+  opacity: 1;
+}
+
+/* No WebGL2. Taken out of the layer entirely so the CSS field is what shows. */
+.field-gl[data-state='unavailable'] {
+  display: none;
+}
+
+/* ------------------------------------------------------ shared, above the field */
+
+.stage {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The one entrance: fade, an 8 px rise, and 0.4% of scale. Nothing arrives from
+   off-screen and nothing overshoots. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.996);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.enter {
+  animation: rise var(--calm) var(--ease) both;
+}
+
+/* 10–11 px, uppercase, tracked wide. Used sparingly and never as a heading. */
+.label {
+  font: var(--label);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.plain {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  text-align: inherit;
+}
+
+.plain:disabled {
+  cursor: default;
+}
+
+/* The one surface with a real backdrop filter: the door's field and its button, and
+   the composer. Blur plus saturation at 6–11% alpha reads as glass over her light
+   instead of as a grey panel. */
+.line,
+.pill {
+  width: 100%;
+  padding: 0.9rem 1.05rem;
+  background: var(--surface);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 0;
+  border-radius: 0.7rem;
+  transition:
+    background var(--quick) var(--ease),
+    color var(--quick) var(--ease),
+    opacity var(--quick) var(--ease);
+}
+
+.line {
+  color: var(--ink);
+  font-weight: 300;
+}
+
+.line::placeholder {
+  color: var(--ink-faint);
+}
+
+.line:hover,
+.line:focus {
+  background: var(--surface-strong);
+}
+
+.pill {
+  color: var(--ink-soft);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-align: center;
+  cursor: pointer;
+}
+
+.pill:hover:not(:disabled),
+.pill:focus-visible:not(:disabled) {
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+.pill:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ------------------------------------------------------------------- the notice */
+
+/**
+ * Two tones, no red box, no icon.
+ *
+ * A refusal is the system working — a wrong passphrase, a rate limit — so it reads
+ * at `--ink-soft` with nothing around it. Trouble is the system failing, and gets
+ * full ink and a rule of accent to its left. That rule is the only visual weight
+ * either kind is allowed, because an interface that alarms at everything teaches
+ * you to ignore the one line that mattered.
+ */
+.notice {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+  animation: rise var(--calm) var(--ease) both;
+}
+
+.notice[data-kind='trouble'] {
+  color: var(--ink);
+  padding-left: 0.85rem;
+  border-left: 1px solid var(--accent-soft);
+}
+
+.notice-issues {
+  margin: 0;
+  padding-left: 1.05rem;
+  color: var(--ink-dim);
+  font-size: 0.8125rem;
+}
+
+.notice-wait {
+  color: var(--ink-dim);
+  font-size: 0.8125rem;
+}
+
+/* --------------------------------------------------------------- the threshold */
+
+.threshold {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1.5rem calc(2rem + env(safe-area-inset-bottom));
+}
+
+.threshold-column {
+  width: 100%;
+  max-width: 26rem;
+  display: grid;
+  gap: 1.75rem;
+  animation: rise var(--slow) var(--ease) both;
+}
+
+.threshold-name {
+  font: var(--label);
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* Large and thin. `clamp` because this is the one piece of type whose size should
+   track the window rather than the reading distance. */
+.threshold-line {
+  margin: 0;
+  font-size: clamp(1.5rem, 4.2vw, 2.125rem);
+  font-weight: 300;
+  line-height: 1.28;
+  letter-spacing: -0.012em;
+  color: var(--ink);
+  text-wrap: balance;
+}
+
+.threshold-under {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.9375rem;
+}
+
+.threshold-form {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.threshold-foot {
+  display: grid;
+  gap: 0.9rem;
+}
+
+/* `absentAtBoot`, closed by default. It is a list of what she is starting without,
+   which belongs on the door — but reading it should be a choice, not the greeting. */
+.absent > summary {
+  font: var(--label);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--quick) var(--ease);
+}
+
+.absent > summary::-webkit-details-marker {
+  display: none;
+}
+
+.absent > summary:hover,
+.absent[open] > summary {
+  color: var(--ink-dim);
+}
+
+.absent-list {
+  margin: 0.9rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+  animation: rise var(--quick) var(--ease) both;
+}
+
+.absent-list li::before {
+  content: '—';
+  margin-right: 0.5rem;
+  color: var(--ink-faint);
+}
+
+/* ---------------------------------------------------------------- the room */
+
+.room {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: calc(1.15rem + env(safe-area-inset-top)) clamp(1.1rem, 3.5vw, 2.25rem) 1.15rem;
+}
+
+.bar-left,
+.bar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.bar-name {
+  font-weight: 400;
+  font-size: 0.9375rem;
+  letter-spacing: 0.01em;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* "night · clear · 21°". Each part is a separate element so an absent temperature
+   is an absent element rather than an empty separator. */
+.bar-env {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.bar-env span + span::before {
+  content: '·';
+  margin-right: 0.55rem;
+  color: var(--ink-faint);
+}
+
+/* CHUNK-MARKER */

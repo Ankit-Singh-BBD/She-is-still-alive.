@@ -44,6 +44,20 @@ export function check(
       }
       return allow(caller, action, resource);
 
+    // Writing into a conversation is speaking into it. `conversation:write` was
+    // declared but had no case, so it fell through to the default deny — which
+    // looked safe but meant even the owner could not be authorized to write, and
+    // the omission was invisible. Reading a conversation is the floor for
+    // writing to it; a caller who may not read it may not append to it either.
+    case 'conversation:write':
+      if (!perms.mayReadConversations) {
+        return deny(caller, action, 'Missing mayReadConversations permission', resource);
+      }
+      if (resource?.ownerId && resource.ownerId !== caller.id && !isOwner) {
+        return deny(caller, action, "Cannot write into another identity's conversation", resource);
+      }
+      return allow(caller, action, resource);
+
     case 'preference:mutate':
       if (!perms.mayMutatePreferences) {
         return deny(caller, action, 'Missing mayMutatePreferences permission', resource);
@@ -93,9 +107,15 @@ export function check(
       }
       return allow(caller, action, resource);
 
-    default:
-      // By default yield unhandled actions to deny
-      return deny(caller, action, `Unknown action: ${action}`, resource);
+    default: {
+      // Unreachable while `AuthzAction` stays closed and every member has a
+      // case above — that is the point: adding an action without handling it
+      // fails this assignment at compile time. At runtime an unrecognized
+      // action still denies, because a caller from untyped code must not get a
+      // decision this function never reasoned about.
+      const unhandled: never = action;
+      return deny(caller, unhandled, `Unknown action: ${String(unhandled)}`, resource);
+    }
   }
 }
 

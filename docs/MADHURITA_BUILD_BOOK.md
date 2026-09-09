@@ -2078,10 +2078,9 @@ The rebuild rolls out in **causally ordered micro-phases** (see Part XXVI). Each
 ### XXV.2 Migration Strategy
 
 - The new application gets a **fresh database, fresh schema**.
-- The new system must boot and work correctly from an **empty database**. Legacy DB import is **not** a prerequisite.
-- If old memory/data import becomes necessary later, that is a **separate explicit migration/import phase** (P28), not part of the rebuild.
-- Import is validated: every imported memory must have provenance, must be scoped, and must pass the Knowledge Retrieval Policy.
-- The old DB is never opened by the new runtime during the rebuild. The old DB file is **preserved as the archive** until the owner explicitly purges it.
+- The new system must boot and work correctly from an **empty database**. Legacy DB import is **not** a prerequisite and is **not part of this rebuild**.
+- Database migrations apply only to the **new schema** via `server/persistence/migrate.ts` and the SQL files in `server/persistence/migrations/`. These are forward-only, versioned schema migrations that run at boot.
+- The old DB is never opened by the new runtime during the rebuild. The old DB file is not part of the new runtime and is not required to be preserved as an archive.
 
 ### XXV.3 Rollback
 
@@ -2143,7 +2142,7 @@ gantt
   section Hardening
   P26 Performance Pass (M17)           :p26, after p25, 5d
   P27 Security Pass (M17)              :p27, after p26, 5d
-  P28 Rollout & Migration (M18)        :p28, after p27, 5d
+  P28 Production Readiness Validation (M18) :p28, after p27, 5d
 ```
 
 ### XXVI.1 Phase Index
@@ -2177,7 +2176,7 @@ gantt
 | **P25 — Personality & Modulation** | M16 | Per-identity modulation | Disable; default persona |
 | **P26 — Performance Pass** | M17 | All targets met | Revert optimizations |
 | **P27 — Security Pass** | M17 | All threats mitigated | Revert hardening |
-| **P28 — Rollout & Migration** | M18 | Optional import from legacy DB, validated | n/a (final) |
+| **P28 — Production Readiness Validation** | M18 | End-to-end integration, zero warnings, production bundle | n/a (final) |
 
 ### XXVI.2 Phase Dependency and Checkpoint Discipline
 
@@ -2415,12 +2414,12 @@ Marking a phase complete when the four conditions are not all met is a forbidden
 **Checkpoint:** All threats mitigated.
 **Rollback:** n/a (additive).
 
-#### Phase P28 — Rollout & Migration (M18)
+#### Phase P28 — Production Readiness Validation (M18)
 
-**Work:** migration script, dual-DB, archive, owner confirmation.
-**Files:** `scripts/migrate/`, `docs/`.
-**Tests:** dry-run test, rollback test.
-**Checkpoint:** Owner confirms, old DB archived.
+**Work:** end-to-end integration validation, clean-slate boot check, production build hygiene, zero-warning verification, operational readiness checklist.
+**Files:** `server/`, `src/`, `docs/`.
+**Tests:** full suite regression, clean-slate boot test, build verification.
+**Checkpoint:** Clean-slate boot succeeds, full test suite passes, zero warnings on production build.
 **Rollback:** n/a (final).
 
 ---
@@ -2438,7 +2437,7 @@ Marking a phase complete when the four conditions are not all met is a forbidden
 
 | File | Class | Notes |
 | --- | --- | --- |
-| `db.ts` | REBUILD | Replaced by `server/persistence/`. Existing schema preserved during migration. |
+| `db.ts` | REBUILD | Replaced by `server/persistence/`. |
 | `auth.ts` | REBUILD | Replaced by `server/identity/` + `server/authz/`. |
 | `cognition.ts` | REPLACE | Replaced by `server/cognition/` (12 stages). |
 | `cognition-2.ts` | DELETE | Was an interim. |
@@ -2600,7 +2599,7 @@ The user is the final authority over both the book and the code.
 | XXII | Load test, perf test, reduced-motion test | Tooling |
 | XXIII | Security suite (Part XXIII.3) | Security |
 | XXIV | Secret-not-logged test | Security |
-| XXV | Dry-run migration test | Integration |
+| XXV | Clean-slate boot test | Integration |
 | XXVI | Per-phase checkpoint | Phase |
 | XXVII | Legacy map audit | Manual |
 | XXVIII | State-file integrity test | Tooling |
@@ -2674,7 +2673,8 @@ The user is the final authority over both the book and the code.
 | 13 | Single RuntimeState Authority (C5). | 2026-09-01 | Prevent UI or LLM from holding or mutating competing state. |
 | 14 | No Legacy Fallback (C6). | 2026-09-01 | Rollback targets last verified new phase by disabling capabilities, never legacy. |
 | 15 | Real Infrastructure Adapters (C7). | 2026-09-01 | Rebuild clean interfaces rather than importing legacy runtime modules. |
-| 16 | Fresh DB Rebuild (C8). | 2026-09-01 | System must boot from fresh empty DB; legacy migration is a separate phase. |
+| 16 | Fresh DB Rebuild (C8). | 2026-09-01 | System must boot from fresh empty DB. No legacy DB import is part of the rebuild. Only NEW-SCHEMA forward migrations via `server/persistence/migrate.ts` are allowed. |
+| 16b | TRUE CLEAN-SLATE (post-rebuild reconciliation). | 2026-09-02 | Rebuilt phase P28 redefined from legacy-data migration to Production Readiness Validation. Removed `scripts/migrate/import_legacy.ts`, `docs/MIGRATION_GUIDE.md`, `tests/p28/migration.test.ts`, and the `legacy_import` extractor discriminator. |
 | 17 | Strict Phase Checkpoint Discipline (C9). | 2026-09-01 | Four mandatory criteria before any phase is marked complete. |
 | 18 | Test Categories A–G (C11). | 2026-09-01 | Structured invariant suite covering Authority, Memory, Runtime, Actions, Proactivity, Isolation, Failure. |
 | 19 | WebGPU Primary + WebGL2 Fallback (Visual). | 2026-09-01 | Target AAA-grade visual quality with TSL/WGSL while maintaining broad browser support. |

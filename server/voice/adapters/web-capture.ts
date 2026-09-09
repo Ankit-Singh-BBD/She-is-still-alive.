@@ -72,7 +72,7 @@ export class WebAudioCapture implements AudioCapture {
         this.mediaStream = await navigator.mediaDevices.getUserMedia({
           audio: audioConstraints,
         });
-      } catch (firstErr: any) {
+      } catch (firstErr) {
         if (this.isPermissionError(firstErr)) {
           this.handlePermissionDenied(firstErr);
           return;
@@ -81,7 +81,7 @@ export class WebAudioCapture implements AudioCapture {
         console.warn('Advanced audio constraints not accepted, falling back to basic audio:', firstErr);
         try {
           this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        } catch (secondErr: any) {
+        } catch (secondErr) {
           if (this.isPermissionError(secondErr)) {
             this.handlePermissionDenied(secondErr);
             return;
@@ -90,8 +90,10 @@ export class WebAudioCapture implements AudioCapture {
         }
       }
 
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        //@ts-ignore
+      const AudioCtx: typeof AudioContext | undefined =
+        window.AudioContext ||
+        // Older WebKit-prefixed AudioContext fallback (handled at runtime only)
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) {
         throw new Error('Web Audio API is not supported in this browser.');
       }
@@ -103,7 +105,7 @@ export class WebAudioCapture implements AudioCapture {
         } else {
           this.audioContext = new AudioCtx();
         }
-      } catch (e) {
+      } catch {
         this.audioContext = new AudioCtx();
       }
 
@@ -158,8 +160,8 @@ export class WebAudioCapture implements AudioCapture {
 
       this.state = 'capturing';
       this.callbacks?.onStart?.();
-    } catch (err: any) {
-      this.error = err;
+    } catch (err) {
+      this.error = err instanceof Error ? err : new Error(String(err));
       this.state = 'error';
       console.error('Failed to start WebAudioCapture:', err);
       void this.stop();
@@ -172,23 +174,43 @@ export class WebAudioCapture implements AudioCapture {
     this.state = 'stopping';
 
     if (this.processor) {
-      try { this.processor.disconnect(); } catch (e) {}
+      try {
+        this.processor.disconnect();
+      } catch {
+        // ignore
+      }
       this.processor = null;
     }
     if (this.analyser) {
-      try { this.analyser.disconnect(); } catch (e) {}
+      try {
+        this.analyser.disconnect();
+      } catch {
+        // ignore
+      }
       this.analyser = null;
     }
     if (this.source) {
-      try { this.source.disconnect(); } catch (e) {}
+      try {
+        this.source.disconnect();
+      } catch {
+        // ignore
+      }
       this.source = null;
     }
     if (this.mediaStream) {
-      try { this.mediaStream.getTracks().forEach((track) => track.stop()); } catch (e) {}
+      try {
+        this.mediaStream.getTracks().forEach((track) => track.stop());
+      } catch {
+        // ignore
+      }
       this.mediaStream = null;
     }
     if (this.audioContext && this.audioContext.state !== 'closed') {
-      try { await this.audioContext.close(); } catch (e) {}
+      try {
+        await this.audioContext.close();
+      } catch {
+        // ignore
+      }
       this.audioContext = null;
     }
 
@@ -227,7 +249,7 @@ export class WebAudioCapture implements AudioCapture {
     return devices.filter(d => d.kind === 'audioinput');
   }
 
-  public async setDevice(deviceId: string): Promise<void> {
+  public async setDevice(_deviceId: string): Promise<void> {
     if (this.state === 'capturing') {
       await this.stop();
       // Ideal flow: start with exact deviceId constraint, but omittable for this refactor
@@ -238,16 +260,19 @@ export class WebAudioCapture implements AudioCapture {
     await this.stop();
   }
 
-  private isPermissionError(err: any): boolean {
-    return err?.name === 'NotAllowedError' ||
-      err?.name === 'PermissionDeniedError' ||
-      err?.name === 'SecurityError' ||
-      err?.message?.toLowerCase().includes('not allowed') ||
-      err?.message?.toLowerCase().includes('denied') ||
-      err?.message?.toLowerCase().includes('permission');
+  private isPermissionError(err: unknown): boolean {
+    const errorObj = err as { name?: string; message?: string } | undefined;
+    return (
+      errorObj?.name === 'NotAllowedError' ||
+      errorObj?.name === 'PermissionDeniedError' ||
+      errorObj?.name === 'SecurityError' ||
+      errorObj?.message?.toLowerCase().includes('not allowed') === true ||
+      errorObj?.message?.toLowerCase().includes('denied') === true ||
+      errorObj?.message?.toLowerCase().includes('permission') === true
+    );
   }
 
-  private handlePermissionDenied(err: any): void {
+  private handlePermissionDenied(_err: unknown): void {
     const permErr = new Error('Microphone permission is not allowed. Please allow microphone access in your browser to speak with Madhurita.');
     permErr.name = 'NotAllowedError';
     this.error = permErr;

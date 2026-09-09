@@ -292,7 +292,6 @@ describe('P27: Security Pass Verification (Part XXIII.3)', () => {
       const { createEncryptedBackup, restoreEncryptedBackup, verifyBackupIntegrity } = await import('@server/backup/backup.js');
       const fs = await import('node:fs/promises');
       const os = await import('node:os');
-      const crypto = await import('node:crypto');
       const path = await import('node:path');
 
       // Setup a temp DB with data to backup

@@ -1,5 +1,4 @@
 import type { Identity } from '../identity/types.js';
-import type { ScopedMemoryItem, RetrievalRequest } from '../memory/types.js';
 import type { AuthzDecision } from '../authz/types.js';
 import { check } from '../authz/index.js';
 

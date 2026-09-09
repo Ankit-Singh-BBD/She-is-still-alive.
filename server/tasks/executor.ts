@@ -16,6 +16,7 @@ import type { EventBus } from '@server/events/event-bus.js';
 import type { ToolRegistry } from '@server/actions/registry.js';
 import type { ActionPipeline } from '@server/actions/pipeline.js';
 import type { Identity } from '@server/identity/types.js';
+import { IdentityRepository } from '@server/identity/repository.js';
 import type { DomainEventType } from '@server/events/types.js';
 
 export type TaskKind = 'reminder' | 'recurring' | 'one_shot' | 'background';
@@ -57,6 +58,12 @@ export interface TaskExecutorOptions {
   registry?: ToolRegistry;
   /** Optional — for executing recurring/one_shot/background tasks. */
   pipeline?: ActionPipeline;
+  /**
+   * Identity source used to resolve the caller a task executes as. Defaults to
+   * a repository over the same database. Injecting one lets a composition root
+   * share a single instance.
+   */
+  identityRepo?: IdentityRepository;
 }
 
 export interface ScheduleTaskInput {
@@ -82,6 +89,7 @@ export class TaskExecutor {
   private readonly eventBus: EventBus | undefined;
   private readonly registry: ToolRegistry | undefined;
   private readonly pipeline: ActionPipeline | undefined;
+  private readonly identityRepo: IdentityRepository;
   private readonly pollIntervalMs: number;
   private readonly maxConcurrent: number;
   private readonly retryBaseMs: number;
@@ -98,6 +106,7 @@ export class TaskExecutor {
     this.eventBus = eventBus;
     this.registry = options.registry;
     this.pipeline = options.pipeline;
+    this.identityRepo = options.identityRepo ?? new IdentityRepository(db);
     this.pollIntervalMs = options.pollIntervalMs ?? 1000;
     this.maxConcurrent = options.maxConcurrent ?? 3;
     this.retryBaseMs = options.retryBaseMs ?? 1000;
@@ -316,28 +325,26 @@ export class TaskExecutor {
     }
   }
 
+  /**
+   * Resolves the identity a task runs as.
+   *
+   * This used to fabricate a synthetic `owner` with `mayAccessTools: ['*']` for
+   * every task on the grounds that authz was checked at schedule time. That made
+   * task scheduling a privilege-escalation path: anything that reached
+   * `scheduleTask` executed with full owner rights regardless of who asked. The
+   * row is now read back and authorization re-evaluated at execution time, which
+   * is also the only way a permission revoked between scheduling and execution
+   * can take effect.
+   */
   private callerFor(identityId: string): Identity {
-    // The task is being executed on the identity's behalf. We don't re-query
-    // the DB here to keep the hot path lean; authz was already enforced at
-    // schedule time. The caller is the owner-equivalent for the action.
-    return {
-      id: identityId,
-      kind: 'owner',
-      displayName: 'Task Caller',
-      status: 'active',
-      enrolledAt: 0,
-      lastSeenAt: 0,
-      permissions: {
-        mayReadMemories: true,
-        mayReadConversations: true,
-        mayTriggerActions: 'all',
-        mayEnrollNewKnowledge: true,
-        mayMutatePreferences: true,
-        mayAccessTools: ['*'],
-        mayBeHeardInVoice: false,
-        mayReceiveProactiveMessages: false,
-      },
-    };
+    const identity = this.identityRepo.getIdentity(identityId);
+    if (!identity) {
+      throw new Error(`Task identity ${identityId} not found; refusing to execute`);
+    }
+    if (identity.status !== 'active') {
+      throw new Error(`Task identity ${identityId} is ${identity.status}; refusing to execute`);
+    }
+    return identity;
   }
 
   private markCompleted(taskId: string): void {

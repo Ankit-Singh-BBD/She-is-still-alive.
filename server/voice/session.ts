@@ -17,7 +17,7 @@ export interface SessionStateChangeEvent {
 
 export class LiveSessionStateMachine extends EventEmitter {
   private _state: SessionState = 'disconnected';
-  private _lastError?: Error;
+  private _lastError: Error | undefined;
 
   constructor() {
     super();
@@ -46,7 +46,7 @@ export class LiveSessionStateMachine extends EventEmitter {
     if (error) {
       this._lastError = error;
     } else if (newState === 'disconnected' || newState === 'connecting') {
-      this._lastError = undefined as any; // Clear error on reset or retry
+      this._lastError = undefined; // Clear error on reset or retry
     }
 
     this.emit('state', {

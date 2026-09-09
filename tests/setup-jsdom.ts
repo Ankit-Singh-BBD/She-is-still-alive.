@@ -1,106 +1,90 @@
 /**
- * Global setup for jsdom test environment.
- * Provides polyfills needed for React Three Fiber and other browser APIs.
+ * Global test setup.
+ *
+ * Runs for every test file, including the `environment: 'node'` ones, so it must
+ * stay side-effect free unless a browser global is actually present. Each block
+ * is guarded: under Node these are all no-ops.
+ *
+ * Purpose is narrow — give jsdom the handful of APIs the presence layer touches
+ * (ResizeObserver, canvas contexts, rAF, matchMedia) so components can mount
+ * without pulling in the optional `canvas` native package.
  */
 
-// Polyfill ResizeObserver for jsdom (required by react-use-measure -> R3F)
-if (typeof global.ResizeObserver === 'undefined') {
-  class ResizeObserver {
-    observe = vi.fn();
-    unobserve = vi.fn();
-    disconnect = vi.fn();
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
   }
-  global.ResizeObserver = ResizeObserver;
+  (globalThis as any).ResizeObserver = ResizeObserverStub;
 }
 
-// Mock HTMLCanvasElement.getContext for WebGL and 2D in jsdom
-// jsdom's default throws "Not implemented" for both '2d' and 'webgl' contexts
-// unless the optional 'canvas' npm package is installed. Provide a vi.fn
-// shim so React Three Fiber (WebGL) and BackgroundAtmosphere (2D particles)
-// can mount in unit tests.
-if (typeof HTMLCanvasElement !== 'undefined') {
-  const proto = HTMLCanvasElement.prototype as unknown as {
-    getContext: (contextId: any, options?: any) => any;
+if (typeof globalThis.requestAnimationFrame === 'undefined') {
+  (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback): number =>
+    setTimeout(() => cb(performance.now()), 16) as unknown as number;
+  (globalThis as any).cancelAnimationFrame = (id: number): void => {
+    clearTimeout(id as unknown as NodeJS.Timeout);
   };
-  const original = proto.getContext;
-  const isJsdomStub = typeof original === 'function' && /\[native code\]/.test(String(original)) === false
-    && String(original).includes('not implemented') === false
-    ? false : true;
+}
 
-  proto.getContext = function (this: any, contextId: any, options?: any): any {
-    if (contextId === '2d') {
-      return {
-        clearRect: vi.fn(),
-        fillRect: vi.fn(),
-        strokeRect: vi.fn(),
-        beginPath: vi.fn(),
-        arc: vi.fn(),
-        fill: vi.fn(),
-        stroke: vi.fn(),
-        save: vi.fn(),
-        restore: vi.fn(),
-        moveTo: vi.fn(),
-        lineTo: vi.fn(),
-        fillStyle: '',
-        strokeStyle: '',
-        lineWidth: 1,
-        globalAlpha: 1,
-        canvas: this,
-      } as unknown as CanvasRenderingContext2D;
-    }
-    if (
-      contextId === 'webgl' ||
-      contextId === 'webgl2' ||
-      contextId === 'experimental-webgl'
-    ) {
-      return {
-        getExtension: vi.fn(),
-        getParameter: vi.fn(() => 0),
-        createTexture: vi.fn(),
-        bindTexture: vi.fn(),
-        texParameteri: vi.fn(),
-        texImage2D: vi.fn(),
-        clearColor: vi.fn(),
-        clearDepth: vi.fn(),
-        clear: vi.fn(),
-        enable: vi.fn(),
-        disable: vi.fn(),
-        blendFunc: vi.fn(),
-        viewport: vi.fn(),
-        createShader: vi.fn(),
-        shaderSource: vi.fn(),
-        compileShader: vi.fn(),
-        getShaderParameter: vi.fn(() => true),
-        getShaderInfoLog: vi.fn(() => ''),
-        createProgram: vi.fn(),
-        attachShader: vi.fn(),
-        linkProgram: vi.fn(),
-        getProgramParameter: vi.fn(() => true),
-        getProgramInfoLog: vi.fn(() => ''),
-        useProgram: vi.fn(),
-        createBuffer: vi.fn(),
-        bindBuffer: vi.fn(),
-        bufferData: vi.fn(),
-        enableVertexAttribArray: vi.fn(),
-        vertexAttribPointer: vi.fn(),
-        drawArrays: vi.fn(),
-        drawElements: vi.fn(),
-        getUniformLocation: vi.fn(),
-        uniform1f: vi.fn(),
-        uniform2f: vi.fn(),
-        uniform3f: vi.fn(),
-        uniform4f: vi.fn(),
-        uniformMatrix4fv: vi.fn(),
-        canvas: this,
-      } as unknown as WebGLRenderingContext;
-    }
-    if (typeof original === 'function' && !isJsdomStub) {
-      try {
-        return original.call(this, contextId, options);
-      } catch {
-        return null;
-      }
-    }
+if (typeof window !== 'undefined' && typeof window.matchMedia === 'undefined') {
+  (window as any).matchMedia = (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  });
+}
+
+/**
+ * jsdom's `getContext` throws "Not implemented" without the native `canvas`
+ * package. The presence layer only needs a 2D context that accepts calls and a
+ * WebGL context that reports itself as unavailable, so the renderer takes its
+ * documented no-GPU path instead of crashing.
+ */
+if (typeof HTMLCanvasElement !== 'undefined') {
+  const noop = (): void => {};
+  const make2d = (): Record<string, unknown> => ({
+    canvas: null,
+    clearRect: noop,
+    fillRect: noop,
+    strokeRect: noop,
+    beginPath: noop,
+    closePath: noop,
+    moveTo: noop,
+    lineTo: noop,
+    arc: noop,
+    fill: noop,
+    stroke: noop,
+    save: noop,
+    restore: noop,
+    translate: noop,
+    scale: noop,
+    rotate: noop,
+    setTransform: noop,
+    drawImage: noop,
+    createLinearGradient: () => ({ addColorStop: noop }),
+    createRadialGradient: () => ({ addColorStop: noop }),
+    getImageData: () => ({ data: new Uint8ClampedArray(4) }),
+    putImageData: noop,
+    measureText: () => ({ width: 0 }),
+    fillText: noop,
+    globalAlpha: 1,
+    globalCompositeOperation: 'source-over',
+    fillStyle: '#000',
+    strokeStyle: '#000',
+    lineWidth: 1,
+  });
+
+  HTMLCanvasElement.prototype.getContext = function (contextId: string): unknown {
+    if (contextId === '2d') return make2d();
+    // Report no WebGL/WebGPU in jsdom. Callers must handle this.
     return null;
-  } as any;
+  } as typeof HTMLCanvasElement.prototype.getContext;
 }

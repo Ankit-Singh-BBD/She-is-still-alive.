@@ -6,7 +6,7 @@ import { EventBus } from '@server/events/event-bus.js';
 import { IdentityRepository, DEFAULT_PERMISSIONS } from '@server/identity/repository.js';
 import { ProactiveDecisionTree } from '@server/proactive/decision-tree.js';
 import { ProactiveEngine } from '@server/proactive/engine.js';
-import type { ProactiveCandidate } from '@server/proactive/types.js';
+import type { ProactiveCandidate, ProactiveEngineOptions } from '@server/proactive/types.js';
 import type { Identity } from '@server/identity/types.js';
 
 describe('Proactive Engine & Decision Tree (P17)', () => {
@@ -243,6 +243,195 @@ describe('Proactive Engine & Decision Tree (P17)', () => {
       expect(results.length).toBe(2);
       expect(results[0]?.outcome.action).toBe('emit');
       expect(results[1]?.outcome.action).toBe('emit');
+    });
+  });
+
+  describe('deferral queue', () => {
+    /**
+     * The gap these cover: 'defer' was evaluated, persisted with no due time,
+     * published as `proactive.suppressed`, and then dropped. Nothing ever looked
+     * at a deferred candidate again — not when quiet hours ended, not ever — so
+     * "later" meant "never". That is a dishonest verdict, not just a missing
+     * feature, which is why it belongs with the rest of the honesty fixes.
+     */
+
+    const costly: ProactiveCandidate = { ...validCandidate, interruptionCost: 0.85 };
+
+    const newEngine = (options?: ProactiveEngineOptions): ProactiveEngine =>
+      new ProactiveEngine({ db, eventBus, identityRepo, ...(options ? { options } : {}) });
+
+    it('attaches a due time to every deferral', () => {
+      const tree = new ProactiveDecisionTree();
+
+      const quiet = tree.evaluate(validCandidate, owner, () => false, { currentHour: 23 });
+      expect(quiet.action).toBe('defer');
+      expect(quiet.deferUntil).toBeGreaterThan(quiet.evaluatedAt);
+      // The end of the default quiet window, not an arbitrary backoff.
+      expect(new Date(quiet.deferUntil!).getHours()).toBe(7);
+
+      const busy = tree.evaluate(costly, owner, () => false, { currentHour: 14 });
+      expect(busy.action).toBe('defer');
+      expect(busy.deferUntil).toBe(busy.evaluatedAt + 900_000);
+    });
+
+    it('backs off further each time the same candidate is deferred', () => {
+      const tree = new ProactiveDecisionTree();
+
+      const once = tree.evaluate({ ...costly, deferCount: 1 }, owner, () => false, { currentHour: 14 });
+      expect(once.deferUntil).toBe(once.evaluatedAt + 1_800_000);
+
+      const twice = tree.evaluate({ ...costly, deferCount: 2 }, owner, () => false, { currentHour: 14 });
+      expect(twice.deferUntil).toBe(twice.evaluatedAt + 3_600_000);
+    });
+
+    it('abandons a candidate instead of deferring it a fourth time', () => {
+      const tree = new ProactiveDecisionTree();
+      const outcome = tree.evaluate({ ...costly, deferCount: 3 }, owner, () => false, { currentHour: 14 });
+
+      expect(outcome.action).toBe('suppress');
+      expect(outcome.reason).toContain('abandoning');
+      expect(outcome.deferUntil).toBeUndefined();
+    });
+    it('queues a deferred candidate with its due time, and leaves it alone until then', () => {
+      const engine = newEngine();
+      const result = engine.evaluate(validCandidate, { currentHour: 23 });
+      expect(result.outcome.action).toBe('defer');
+
+      const pending = engine.pendingDeferrals();
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.decisionId).toBe(result.decisionId);
+      expect(pending[0]?.deferCount).toBe(1);
+      expect(pending[0]?.deferredUntil).toBe(result.outcome.deferUntil);
+    });
+
+    it('re-evaluates and emits once the window opens', async () => {
+      const engine = newEngine();
+      const deferred = engine.evaluate(validCandidate, { currentHour: 23 });
+      const dueAt = deferred.outcome.deferUntil!;
+
+      // Nothing is due a millisecond early.
+      expect(await engine.processDeferred({ currentHour: 6 }, dueAt - 1)).toHaveLength(0);
+      expect(engine.pendingDeferrals()).toHaveLength(1);
+
+      const replayed = await engine.processDeferred({ currentHour: 9 }, dueAt);
+      expect(replayed).toHaveLength(1);
+      expect(replayed[0]?.outcome.action).toBe('emit');
+      // The same decision row, not a duplicate: the candidate kept its identity
+      // across the wait, so an audit reads one decision that was postponed and
+      // then made — not two unrelated ones.
+      expect(replayed[0]?.decisionId).toBe(deferred.decisionId);
+      expect(engine.pendingDeferrals()).toHaveLength(0);
+    });
+
+    it('does not replay a deferral twice', async () => {
+      const engine = newEngine();
+      const deferred = engine.evaluate(validCandidate, { currentHour: 23 });
+      const dueAt = deferred.outcome.deferUntil!;
+
+      expect(await engine.processDeferred({ currentHour: 9 }, dueAt)).toHaveLength(1);
+      expect(await engine.processDeferred({ currentHour: 9 }, dueAt + 60_000)).toHaveLength(0);
+    });
+    it('applies current authorization when a deferral returns, not the verdict it left with', async () => {
+      const engine = newEngine();
+      const deferred = engine.evaluate(
+        { ...validCandidate, identityId: person.id, callerKind: 'person' },
+        { currentHour: 23 },
+      );
+      expect(deferred.outcome.action).toBe('defer');
+
+      // Consent is withdrawn while the message waits out the night. A queue that
+      // replayed the stored verdict would deliver something the application
+      // would refuse if asked today.
+      identityRepo.updatePermissions(person.id, {
+        ...DEFAULT_PERMISSIONS.person,
+        mayReceiveProactiveMessages: false,
+      });
+
+      const replayed = await engine.processDeferred({ currentHour: 9 }, deferred.outcome.deferUntil!);
+      expect(replayed[0]?.outcome.action).toBe('reject');
+      expect(replayed[0]?.outcome.reason).toContain('not authorized');
+    });
+
+    it('publishes proactive.deferred, not proactive.suppressed', async () => {
+      const engine = newEngine();
+      const events: { type: string; payload: unknown }[] = [];
+      eventBus.subscribe((evt) => {
+        events.push({ type: evt.type, payload: evt.payload });
+      });
+
+      const result = engine.evaluate(validCandidate, { currentHour: 23 });
+      await new Promise((r) => setTimeout(r, 0));
+
+      // `proactive.deferred` was declared in the event union and never
+      // published; a deferral went out as a suppression, so no subscriber could
+      // tell "not now, at 07:00" from "no".
+      const deferredEvent = events.find((e) => e.type === 'proactive.deferred');
+      expect(deferredEvent).toBeDefined();
+      expect(events.some((e) => e.type === 'proactive.suppressed')).toBe(false);
+      expect(deferredEvent?.payload).toMatchObject({
+        decisionId: result.decisionId,
+        deferUntil: result.outcome.deferUntil,
+        deferCount: 1,
+      });
+    });
+    it('rate-limits on what was actually said, so a deferral does not block its own return', async () => {
+      const engine = newEngine();
+
+      // A suppressed attempt never reached anyone, so it must not stand in the
+      // way of the next attempt at the same topic.
+      engine.evaluate({ ...validCandidate, topic: 'quiet_topic', novelty: 0.1 }, { currentHour: 14 });
+      expect(engine.isRateLimited(owner.id, 'quiet_topic')).toBe(false);
+
+      // An emitted one does.
+      engine.evaluate({ ...validCandidate, topic: 'spoken_topic' }, { currentHour: 14 });
+      expect(engine.isRateLimited(owner.id, 'spoken_topic')).toBe(true);
+
+      // And a deferral is not something said. This is the trap the queue would
+      // have fallen into: the deferral's own row rate-limited its
+      // re-evaluation, so every deferred candidate came back only to be refused
+      // as a repeat of the attempt that had never happened.
+      const deferred = engine.evaluate({ ...validCandidate, topic: 'night_topic' }, { currentHour: 23 });
+      expect(engine.isRateLimited(owner.id, 'night_topic')).toBe(false);
+
+      const replayed = await engine.processDeferred({ currentHour: 9 }, deferred.outcome.deferUntil!);
+      expect(replayed[0]?.outcome.action).toBe('emit');
+      expect(engine.isRateLimited(owner.id, 'night_topic')).toBe(true);
+    });
+
+    it('gives up on a candidate that is never welcome, rather than deferring forever', async () => {
+      const engine = newEngine({ deferBackoffMs: 1000, maxDeferrals: 2 });
+
+      const first = engine.evaluate(costly, { currentHour: 14 });
+      expect(first.outcome.action).toBe('defer');
+
+      const second = await engine.processDeferred({ currentHour: 14 }, first.outcome.deferUntil!);
+      expect(second[0]?.outcome.action).toBe('defer');
+
+      const third = await engine.processDeferred({ currentHour: 14 }, second[0]!.outcome.deferUntil!);
+      expect(third[0]?.outcome.action).toBe('suppress');
+      expect(third[0]?.outcome.reason).toContain('abandoning');
+      expect(engine.pendingDeferrals()).toHaveLength(0);
+    });
+
+    it('resolves a deferral it cannot reconstruct instead of leaving it pending forever', async () => {
+      const engine = newEngine();
+      db.raw
+        .prepare(
+          `INSERT INTO proactive_decision (id, identity_id, decision, urgency, novelty, interruption_cost,
+             action, deferred_until, defer_count, candidate_json)
+           VALUES ('orphan', ?, '{"topic":"lost"}', 0.5, 0.8, 0.3, 'defer', ?, 1, NULL)`,
+        )
+        .run(owner.id, new Date(Date.now() - 1000).toISOString());
+
+      expect(engine.pendingDeferrals()).toHaveLength(1);
+      expect(await engine.processDeferred({ currentHour: 14 })).toHaveLength(0);
+      expect(engine.pendingDeferrals()).toHaveLength(0);
+
+      const row = db.raw
+        .prepare(`SELECT action, reason_json FROM proactive_decision WHERE id = 'orphan'`)
+        .get() as { action: string; reason_json: string };
+      expect(row.action).toBe('suppress');
+      expect(row.reason_json).toContain('could not be reconstructed');
     });
   });
 });

@@ -13,6 +13,7 @@
 
 import type { Database } from '@server/persistence/db.js';
 import { MemoryRepository } from '@server/memory/repository.js';
+import type { IdentityKind } from '@server/identity/types.js';
 import type {
   AuthorizedLearningDelta,
   UpdateResult,
@@ -62,7 +63,7 @@ export async function update(
             key,
             value,
             statedAt: (data['statedAt'] as number) ?? Date.now(),
-            subjectKind: item.subjectKind as any,
+            subjectKind: item.subjectKind as IdentityKind | 'system',
             sensitivity: item.sensitivity,
             confidence: item.provenance.confidence,
             sourceKind: 'conversation',
@@ -107,7 +108,7 @@ export async function update(
             predicate,
             object,
             sourceCycle: (data['sourceCycle'] as string) ?? item.provenance.sourceCycleId,
-            subjectKind: item.subjectKind as any,
+            subjectKind: item.subjectKind as IdentityKind | 'system',
             sensitivity: item.sensitivity,
             confidence: item.provenance.confidence,
             sourceKind: 'conversation',
@@ -129,7 +130,7 @@ export async function update(
             details: (data['details'] as string) ?? '',
             occurredAt: (data['occurredAt'] as number) ?? Date.now(),
             importance: (data['importance'] as number) ?? 0.5,
-            subjectKind: item.subjectKind as any,
+            subjectKind: item.subjectKind as IdentityKind | 'system',
             sensitivity: item.sensitivity,
             confidence: item.provenance.confidence,
             sourceKind: 'conversation',
@@ -150,7 +151,7 @@ export async function update(
             pattern,
             frequency: (data['frequency'] as string) ?? '',
             lastObserved: (data['lastObserved'] as number) ?? Date.now(),
-            subjectKind: item.subjectKind as any,
+            subjectKind: item.subjectKind as IdentityKind | 'system',
             sensitivity: item.sensitivity,
             confidence: item.provenance.confidence,
             sourceKind: 'conversation',
@@ -170,7 +171,7 @@ export async function update(
             identityId,
             pattern,
             evidenceCount: (data['evidenceCount'] as number) ?? 1,
-            subjectKind: item.subjectKind as any,
+            subjectKind: item.subjectKind as IdentityKind | 'system',
             sensitivity: item.sensitivity,
             confidence: item.provenance.confidence,
             sourceKind: 'conversation',

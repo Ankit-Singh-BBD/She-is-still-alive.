@@ -164,7 +164,7 @@ export class PersonalityRegistry implements IPersonalityRegistry {
       }
     }
 
-    const result: import('./types.js').EffectivePersona = {
+    const result: EffectivePersona = {
       identityId,
       name: base.name,
       verbosity: flags.enableVerbosityControl ? effectiveVerbosity : base.verbosity,

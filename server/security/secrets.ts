@@ -47,7 +47,7 @@ export function scrub(input: unknown): string {
 function scrubString(s: string): string {
   let out = s;
   // Bearer tokens
-  out = out.replace(/(Bearer\s+)[A-Za-z0-9\-_\.]+/gi, `$1${REDACTION}`);
+  out = out.replace(/(Bearer\s+)[A-Za-z0-9\-_.]+/gi, `$1${REDACTION}`);
   // generic key=value pairs where key is secret-like
   out = out.replace(/([?&](?:api_key|apiKey|passphrase|token|secret|recoveryCode)=)([^&\s]+)/gi, `$1${REDACTION}`);
   return out;

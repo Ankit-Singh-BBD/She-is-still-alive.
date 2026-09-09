@@ -14,7 +14,11 @@ export class Database {
   private readonly dbPath: string;
 
   constructor(options: DatabaseOptions = {}) {
-    const rawPath = options.path ?? process.env['DATABASE_PATH'] ?? ':memory:';
+    // `:memory:` is the right default for a bare `new Database()` — that is a
+    // test or a scratch script. The application never relies on it: the
+    // composition root reads `DATABASE_PATH` through `server/config/env.ts`
+    // (the one place environment is parsed) and passes the resolved path here.
+    const rawPath = options.path ?? ':memory:';
     this.dbPath = rawPath;
 
     if (rawPath !== ':memory:') {
@@ -83,11 +87,49 @@ export class Database {
 
 let defaultInstance: Database | null = null;
 
+/**
+ * The process-wide database.
+ *
+ * `MemoryRepository`, `IdentityRepository`, `EventBus` and `CognitiveRuntime`
+ * all fall back to this when constructed without an explicit `db`. That makes
+ * the singleton load-bearing: if the composition root builds its database and
+ * forgets to install it here, any subsystem constructed without one silently
+ * opens a *second*, empty, in-memory database and the application runs
+ * split-brained — writing her memories to one and reading them from the other.
+ *
+ * So a conflicting request is an error rather than a shrug. Asking for a
+ * specific path when a different one is already open cannot be satisfied, and
+ * quietly handing back the wrong database is how that becomes a data-loss bug
+ * instead of a startup message.
+ */
 export function getDatabase(options?: DatabaseOptions): Database {
-  if (!defaultInstance || !defaultInstance.isOpen()) {
-    defaultInstance = new Database(options);
+  if (defaultInstance && defaultInstance.isOpen()) {
+    if (options?.path !== undefined && options.path !== defaultInstance.path) {
+      throw new Error(
+        `getDatabase() was asked for '${options.path}' but '${defaultInstance.path}' is already open. ` +
+          'Call closeDatabase() first, or pass the database explicitly instead of using the singleton.',
+      );
+    }
+    return defaultInstance;
   }
+  defaultInstance = new Database(options);
   return defaultInstance;
+}
+
+/**
+ * Installs an already-constructed database as the process-wide one.
+ *
+ * The composition root builds the database, runs migrations against it, and
+ * then publishes it here so the subsystems that default to `getDatabase()` find
+ * the real one. Replacing a live instance is refused for the reason above.
+ */
+export function setDatabase(db: Database): void {
+  if (defaultInstance && defaultInstance !== db && defaultInstance.isOpen()) {
+    throw new Error(
+      `setDatabase() refused: '${defaultInstance.path}' is already open. Call closeDatabase() first.`,
+    );
+  }
+  defaultInstance = db;
 }
 
 export function closeDatabase(): void {

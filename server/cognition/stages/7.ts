@@ -47,6 +47,20 @@ export interface ActOptions {
   identity?: Identity | undefined;
   cycleId?: string | undefined;
   timeoutMs?: number | undefined;
+  /**
+   * What clearance a tool declares. Stage 7 has no registry — it speaks only to
+   * the `ToolExecutor` seam — so without this it has to assume something, and the
+   * assumption used to be hardcoded `'safe'`: the *weaker* of the two
+   * requirements. A tool declared `'all'` therefore passed the check here and was
+   * refused later inside the pipeline, which means the boundary that exists to
+   * catch a decision tampered with between stages was checking a requirement the
+   * tool does not have.
+   *
+   * Absent, or returning `undefined` for a tool it does not know, it falls back
+   * to `'safe'` — still the weaker assumption, but now the pipeline is the only
+   * place that can be lenient by accident rather than both.
+   */
+  clearanceFor?: ((toolId: string) => 'safe' | 'all' | undefined) | undefined;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -74,11 +88,12 @@ export async function act(
   }
 
   // Defence in depth. Stage 6 authorized this proposal; the boundary that
-  // actually performs the side effect authorizes it again.
+  // actually performs the side effect authorizes it again — against the
+  // clearance the tool really declares, not against an assumed one.
   const authz = check(opts.identity, 'tool:execute', {
     type: 'tool',
     toolId,
-    clearanceRequired: 'safe',
+    clearanceRequired: opts.clearanceFor?.(toolId) ?? 'safe',
   });
   if (!authz.allowed) {
     return [refusal(toolId, authz.reason ?? 'Denied by authorization policy')];

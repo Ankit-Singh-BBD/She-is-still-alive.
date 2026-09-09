@@ -7,17 +7,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type {
   AudioCapture,
-  AudioCaptureConfig,
   AudioCaptureCallbacks,
-  AudioCaptureState,
   AudioChunk,
-  AudioFormat,
 } from '@server/voice/interfaces/audio-capture.js';
 import type {
   AudioPlayback,
-  AudioPlaybackConfig,
   AudioPlaybackCallbacks,
-  AudioPlaybackState,
 } from '@server/voice/interfaces/audio-playback.js';
 import { MockAudioCapture, MockAudioPlayback } from '@server/voice/adapters/mock.js';
 

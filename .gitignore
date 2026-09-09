@@ -31,3 +31,7 @@ data/*.sqlite
 data/*.sqlite-wal
 data/*.sqlite-shm
 !data/.gitkeep
+
+# Backups. A backup is a complete copy of her memory; it must never be a commit
+# candidate, whatever BACKUP_DESTINATION is set to.
+backups/

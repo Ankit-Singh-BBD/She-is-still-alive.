@@ -1,14 +1,18 @@
 /**
  * CognitiveRuntime — orchestrates the 12-stage cycle.
  *
- * Stages 1-6 (PERCEIVE..DECIDE) are real implementations living in
- * `server/cognition/stages/{1..6}.ts` (P08). Stages 7-12 remain P07 scaffold
- * stubs until P09/P10.
+ * All twelve stages are real implementations living in
+ * `server/cognition/stages/{1..12}.ts`: 1-6 (PERCEIVE..DECIDE) from P08, 7-9
+ * (ACT, VERIFY, RESPOND) from P09, and 10-12 (LEARN, UPDATE, PERSIST) from P10.
  *
  * The runtime is the only place stage transitions are decided (Part VII.2):
  * each stage is a pure function, invoked exactly once per cycle, and its typed
  * output is threaded explicitly to its successors. The JSON in a StageTrace is
  * an audit record of what happened — never the transport between stages.
+ *
+ * A stage that throws does not abort the cycle: the error is recorded on its
+ * trace, the documented fallback is substituted, and the cycle reports
+ * `degraded` rather than `completed` so the outcome never overstates itself.
  */
 
 import { ulid } from 'ulid';
@@ -18,8 +22,11 @@ import type { IdentityRepository } from '@server/identity/repository.js';
 import type { Identity } from '@server/identity/types.js';
 import type { EventBus } from '@server/events/event-bus.js';
 import type { MemoryRetrieval } from '@server/memory/retrieval.js';
+import type { ConversationRepository } from '@server/conversations/repository.js';
+import type { TranscriptReader, TurnDraft } from '@server/conversations/messages.js';
 import type {
   CycleRecord,
+  CycleStatus,
   RawStimulus,
   IdentifiedStimulus,
   RecalledContext,
@@ -56,6 +63,19 @@ export interface CognitiveRuntimeOptions {
   identityRepo?: IdentityRepository | undefined;
   eventBus?: EventBus | undefined;
   memoryRetrieval?: MemoryRetrieval | undefined;
+  /**
+   * Opens the conversation a cycle is recorded against when the stimulus does
+   * not name one. Without it, an unnamed conversation is an error rather than a
+   * guess.
+   */
+  conversations?: ConversationRepository | undefined;
+  /**
+   * Reads the recent turns of the conversation for stage 3, and is the reason
+   * she can refer to what was just said. Absent, every cycle starts from
+   * memory alone and `RecalledContext.recentTurns` stays undefined — which the
+   * prompts report as "not loaded" rather than as "nothing was said".
+   */
+  transcript?: TranscriptReader | undefined;
   /** Caller identity used by stages 6-7 for authorization. */
   identity?: Identity | undefined;
   understand?: UnderstandOptions | undefined;
@@ -96,6 +116,8 @@ export class CognitiveRuntime {
   private readonly identityRepo: IdentityRepository | undefined;
   private readonly eventBus: EventBus | undefined;
   private readonly memoryRetrieval: MemoryRetrieval | undefined;
+  private readonly conversations: ConversationRepository | undefined;
+  private readonly transcript: TranscriptReader | undefined;
   private readonly understandOpts: UnderstandOptions;
   private readonly reasonOpts: ReasonOptions;
   private readonly decideOpts: DecideOptions;
@@ -111,13 +133,20 @@ export class CognitiveRuntime {
     this.identityRepo = options.identityRepo;
     this.eventBus = options.eventBus;
     this.memoryRetrieval = options.memoryRetrieval;
+    this.conversations = options.conversations;
+    this.transcript = options.transcript;
     this.understandOpts = options.understand ?? {};
     this.reasonOpts = options.reason ?? {};
     this.decideOpts = { ...(options.decide ?? {}), identity: options.identity };
     this.actOpts = { ...(options.act ?? {}), identity: options.identity };
     this.verifyOpts = {
       ...(options.verify ?? {}),
-      db: options.db,
+      // `this.db`, not `options.db`: stage 8's whole job is to re-read
+      // authoritative state, and it reports "no database to re-read" when it has
+      // none. A runtime constructed without an explicit database still has one
+      // (the process-wide instance), and handing stage 8 `undefined` there would
+      // make every verification fail for a reason that is not true.
+      db: this.db,
       identityId: options.identity?.id,
     };
     this.respondOpts = options.respond ?? {};
@@ -139,17 +168,31 @@ export class CognitiveRuntime {
   async runCycle(stimulus: RawStimulus): Promise<CycleRecord> {
     const cycleId = ulid();
     const startedAt = Date.now();
-    const cycleRecord = await this.createCycleRecord(cycleId, stimulus, startedAt);
+
+    // Resolved once, before anything else, and then carried on the stimulus
+    // itself.
+    //
+    // It used to be resolved inside `createCycleRecord` and thrown away: the
+    // `cycle_record` row pointed at a real conversation while the stimulus every
+    // stage saw still had `conversationId: undefined`, and the record this
+    // method returned said `'unknown'`. So stage 10 wrote
+    // `sourceConversationId: 'unknown'` into the provenance of everything it
+    // learned, and stage 3 had no conversation to read a transcript from.
+    // Resolving once and threading it fixes all three.
+    const conversationId = this.resolveConversationId(stimulus);
+    const situated: RawStimulus = { ...stimulus, conversationId };
+
+    const cycleRecord = await this.createCycleRecord(cycleId, situated, conversationId, startedAt);
 
     const stages: StageTrace[] = [];
 
     // ── Stages 1-6: real implementations (P08) ──
 
-    const r1 = await this.runStage<RawStimulus>(1, 'PERCEIVE', stimulus, () =>
-      perceive(stimulus),
+    const r1 = await this.runStage<RawStimulus>(1, 'PERCEIVE', situated, () =>
+      perceive(situated),
     );
     stages.push(r1.trace);
-    const perceived = r1.output ?? stimulus;
+    const perceived = r1.output ?? situated;
 
     const r2 = await this.runStage<IdentifiedStimulus>(2, 'IDENTIFY', perceived, () =>
       identify(perceived, this.identityRepo),
@@ -158,7 +201,7 @@ export class CognitiveRuntime {
     const identified = r2.output ?? identify(perceived);
 
     const r3 = await this.runStage<RecalledContext>(3, 'RECALL', identified, () =>
-      recall(identified, this.memoryRetrieval),
+      recall(identified, this.memoryRetrieval, this.transcript),
     );
     stages.push(r3.trace);
     const recalled = r3.output ?? emptyContext(identified);
@@ -234,11 +277,31 @@ export class CognitiveRuntime {
     const updateResult = r11.output;
 
     const completedAt = Date.now();
+
+    // A stage that threw was replaced by its documented fallback, so the cycle
+    // still produced a response — but reporting it as a clean 'completed' would
+    // be a claim the traces contradict. Derive the status from the traces.
+    const failedStages = stages.filter((s) => s.error !== undefined);
+    const cycleStatus: CycleStatus = failedStages.length > 0 ? 'degraded' : 'completed';
+    const cycleError =
+      failedStages.length > 0
+        ? failedStages.map((s) => `${s.stageName}: ${s.error ?? 'unknown error'}`).join('; ')
+        : undefined;
+
     const persistInput: PersistInput = {
       cycleId,
-      status: 'completed',
+      status: cycleStatus,
+      error: cycleError,
       completedAt,
       identityId: stimulus.identityId,
+      conversationId,
+      turns: transcriptTurns({
+        stimulus: situated,
+        cycleId,
+        response,
+        startedAt,
+        completedAt,
+      }),
       actionResults: verifiedResults,
       decision: authorizedDecision,
       response,
@@ -257,9 +320,25 @@ export class CognitiveRuntime {
     // so its `stage_trace` row hasn't been written yet. Flush it now.
     await this.finalizeCycleRecord(cycleId, [r12.trace]);
 
+    // Stage 12 runs after the status above was computed. If persistence itself
+    // threw, nothing durable was written and the cycle genuinely failed.
+    const persistFailed = r12.trace.error !== undefined;
+    const finalStatus: CycleStatus = persistFailed ? 'failed' : cycleStatus;
+    const finalError = persistFailed
+      ? [cycleError, `PERSIST: ${r12.trace.error ?? 'unknown error'}`].filter(Boolean).join('; ')
+      : cycleError;
+
+    if (persistFailed) {
+      // The status column still reads whatever `persist` last committed (or
+      // 'running' if it never got that far). Correct it out-of-band so the row
+      // does not outlive the process claiming success.
+      this.recordCycleFailure(cycleId, finalError ?? 'persist failed', completedAt);
+    }
+
     return {
       ...cycleRecord,
-      status: 'completed',
+      status: finalStatus,
+      error: finalError,
       completedAt,
       stages,
       proposedDecision: authorizedDecision.proposal,
@@ -268,6 +347,26 @@ export class CognitiveRuntime {
       response,
       learningDelta,
     };
+  }
+
+  /**
+   * Best-effort correction of a cycle row when stage 12 itself threw. Runs
+   * outside any transaction and swallows its own errors — if the database is
+   * unreachable there is nothing further this can do, and throwing here would
+   * mask the original persistence error from the caller.
+   */
+  private recordCycleFailure(cycleId: string, error: string, completedAt: number): void {
+    try {
+      this.db.raw
+        .prepare(
+          `UPDATE cycle_record
+              SET status = 'failed', completed_at = ?, error = ?
+            WHERE id = ?`,
+        )
+        .run(new Date(completedAt).toISOString(), error, cycleId);
+    } catch {
+      // Intentionally ignored — see doc comment.
+    }
   }
 
   /**
@@ -313,9 +412,44 @@ export class CognitiveRuntime {
 
   // ── Persistence ──
 
+  /**
+   * The conversation this cycle belongs to.
+   *
+   * `cycle_record.conversation_id` is a foreign key, and the previous fallback
+   * for a stimulus that carried no conversation was the string `'unknown'` — a
+   * value that can never satisfy that key. So a cycle without a conversation id
+   * did not degrade, it threw on its first insert, and nothing in `server/`
+   * created a conversation for it to point at.
+   *
+   * Now: an id that is supplied is honoured (and opened if the caller invented
+   * it), and an absent one opens or continues the caller's conversation. With no
+   * repository injected there is nothing that could honestly be inserted, so
+   * that says what is missing instead of failing on a constraint three frames
+   * later.
+   */
+  private resolveConversationId(stimulus: RawStimulus): string {
+    if (stimulus.conversationId !== undefined && stimulus.conversationId !== '') {
+      return this.conversations
+        ? this.conversations.ensure(stimulus.conversationId, stimulus.identityId)
+        : stimulus.conversationId;
+    }
+    if (!this.conversations) {
+      throw new Error(
+        'runCycle() was given a stimulus with no conversationId and the runtime has no ' +
+          'ConversationRepository to open one with. Pass `conversations` when constructing ' +
+          'CognitiveRuntime, or set conversationId on the stimulus.',
+      );
+    }
+    return this.conversations.openOrContinue(
+      stimulus.identityId,
+      stimulus.source === 'audio' ? 'voice' : 'text',
+    ).id;
+  }
+
   private async createCycleRecord(
     id: string,
     stimulus: RawStimulus,
+    conversationId: string,
     startedAt: number,
   ): Promise<CycleRecord> {
     this.db.raw
@@ -325,14 +459,41 @@ export class CognitiveRuntime {
       )
       .run(
         id,
-        stimulus.conversationId ?? 'unknown',
+        conversationId,
         new Date(startedAt).toISOString(),
         JSON.stringify(stimulus),
       );
+
+    // Announce the start. Stage 12 publishes the terminal event
+    // (`cycle.completed` / `cycle.degraded` / `cycle.failed`), but nothing
+    // published the opening one, so `cycle.started` sat declared and unused and
+    // a subscriber could only ever learn about a cycle after it was over —
+    // which is no use at all to anything that wants to show that she is
+    // thinking while she is thinking.
+    if (this.eventBus) {
+      await this.eventBus.publish({
+        type: 'cycle.started',
+        payload: {
+          cycleId: id,
+          conversationId,
+          source: stimulus.source,
+        },
+        identityId: stimulus.identityId,
+        cycleId: id,
+        timestamp: startedAt,
+        causationId: undefined,
+        correlationId: id,
+        version: 1,
+      });
+    }
+
     return {
       id,
       identityId: stimulus.identityId,
-      conversationId: stimulus.conversationId ?? 'unknown',
+      // The resolved conversation, not `stimulus.conversationId ?? 'unknown'`.
+      // The caller is told which thread this cycle is in, which is also the
+      // thread its transcript was written to.
+      conversationId,
       status: 'running',
       startedAt,
       stages: [],
@@ -410,6 +571,73 @@ function emptyContext(stimulus: IdentifiedStimulus): RecalledContext {
     learnedPatterns: [],
     retrievedAt: Date.now(),
   };
+}
+
+/**
+ * The turns this cycle should add to the transcript.
+ *
+ * Two rules, both of them about not writing a line nobody said:
+ *
+ *   - The user's turn is written only when the stimulus actually carried text. A
+ *     system trigger, a proactive wake-up or an audio stimulus with no
+ *     transcript yet has nothing to quote, and serialising its payload into the
+ *     transcript would put JSON in her mouth. When voice lands (P19) the
+ *     transcript belongs in `payload.text` and this needs no change.
+ *   - Her turn is written only when stage 9 produced an *authorized* response.
+ *     If stage 9 threw, the runtime returns no response and the caller shows
+ *     nothing, so recording the fallback line would be a claim the traces
+ *     contradict. The text stored is the authorized one — post-redaction, what
+ *     she actually said — never a draft.
+ *
+ * The timestamps are the cycle's own: the stimulus arrived when it arrived, and
+ * the answer exists as of `completedAt`. Ordering never depends on them being
+ * distinct (see `MessageRepository.recentForCaller`), but they are the honest
+ * times, and `startedAt` is the fallback for a stimulus that carried none.
+ */
+function transcriptTurns(input: {
+  stimulus: RawStimulus;
+  cycleId: string;
+  response: AuthorizedResponse | undefined;
+  startedAt: number;
+  completedAt: number;
+}): TurnDraft[] {
+  const turns: TurnDraft[] = [];
+
+  const said = textOf(input.stimulus.payload);
+  if (said.trim() !== '') {
+    turns.push({
+      role: 'user',
+      text: said,
+      timestamp: input.stimulus.receivedAt || input.startedAt,
+      metadata: { cycleId: input.cycleId, source: input.stimulus.source },
+    });
+  }
+
+  const answered = input.response?.text ?? '';
+  if (answered.trim() !== '') {
+    turns.push({
+      role: 'assistant',
+      text: answered,
+      timestamp: input.completedAt,
+      metadata: {
+        cycleId: input.cycleId,
+        redacted: input.response?.redacted ?? false,
+        disclosuresApplied: input.response?.disclosuresApplied ?? [],
+      },
+    });
+  }
+
+  return turns;
+}
+
+/** The text a stimulus carried, if it carried any. */
+function textOf(payload: unknown): string {
+  if (typeof payload === 'string') return payload;
+  if (payload && typeof payload === 'object') {
+    const text = (payload as { text?: unknown }).text;
+    if (typeof text === 'string') return text;
+  }
+  return '';
 }
 
 function safeStringify(value: unknown): string {

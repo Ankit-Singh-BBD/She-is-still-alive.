@@ -44,10 +44,11 @@ describe('Phase P01: Bootstrap Requirements', () => {
     'server/actions',
     'server/tasks',
     'server/learning',
-    'server/proactivity',
+    'server/proactive',
     'server/voice',
     'server/realtime',
-    'src/components',
+    'src/ui',
+    'src/visual',
     'tests',
   ];
 

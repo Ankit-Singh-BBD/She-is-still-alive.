@@ -26,8 +26,9 @@
  */
 
 import type { CycleRecord, RawStimulus, StageNumber } from '@server/cognition/types.js';
+import type {
+  AdvancedModuleRegistry} from './index.js';
 import {
-  AdvancedModuleRegistry,
   DEFAULT_ADVANCED_FLAGS,
   type AdvancedModuleFlagMap,
   type AdvancedModuleResult,
@@ -75,7 +76,7 @@ export class AdvancedModuleCognitiveHook {
    */
   async afterCycle(
     cycle: CycleRecord,
-    stimulus: RawStimulus,
+    _stimulus: RawStimulus,
   ): Promise<AdvancedCognitiveExtension> {
     if (!this.registry) return EMPTY_EXTENSION;
     if (Object.values(this.flags).every((v) => v === false)) return EMPTY_EXTENSION;

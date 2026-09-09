@@ -1,6 +1,5 @@
 import type { Identity } from '../identity/types.js';
 import type { SessionState as VoiceLiveState } from '../voice/session.js';
-import type { DomainEvent } from '../events/types.js';
 
 export interface PresenceState {
   activeActor: string | null; // IdentityId
@@ -11,8 +10,20 @@ export interface PresenceState {
 export type TimeOfDay = 'night' | 'sunrise' | 'day' | 'sunset';
 
 export interface WeatherSnapshot {
-  condition: 'clear' | 'cloudy' | 'rainy' | 'stormy' | 'snow' | 'fog';
-  temperature?: number;
+  /**
+   * Six renderable conditions, plus `'unknown'`.
+   *
+   * The book lists the six the visual layer knows how to draw. `'unknown'` is
+   * the seventh state the *code* needs, because weather arrives over a network
+   * that fails: without it the only way to represent "nobody could see the sky"
+   * is to pick one of the six, and the orb would then render rain she never
+   * observed. The palette still has to choose something for `'unknown'` — that
+   * is a rendering decision, and it is made in the palette derivation where it
+   * is visible, not smuggled in here as a claim about the weather.
+   */
+  condition: 'clear' | 'cloudy' | 'rainy' | 'stormy' | 'snow' | 'fog' | 'unknown';
+  temperature?: number; // degrees Celsius
+  observedAt?: number; // epoch ms of the reading
 }
 
 export interface GeoSnapshot {
@@ -29,7 +40,16 @@ export interface PaletteSpec {
 export interface EnvironmentState {
   timeOfDay: TimeOfDay;
   weather: WeatherSnapshot;
-  location: GeoSnapshot;
+  /**
+   * Absent when nobody has told her where she is.
+   *
+   * The book types this as required, which forces a value into it even when
+   * there is none, and the only available value is `{ lat: 0, lng: 0 }` — a
+   * point in the Gulf of Guinea. That is not a missing location, it is a wrong
+   * one, and every consumer downstream would treat it as a real reading.
+   * Optional is the honest shape.
+   */
+  location?: GeoSnapshot | undefined;
   derivedPalette: PaletteSpec;
 }
 

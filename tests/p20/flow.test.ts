@@ -6,7 +6,6 @@ import { RealtimeFlow } from '@server/realtime/flow.js';
 import { EventBus } from '@server/events/event-bus.js';
 import type { RuntimeState, BroadcastMessage, Subscriber } from '@server/realtime/types.js';
 import type { Identity } from '@server/identity/types.js';
-import type { PersistedDomainEvent } from '@server/events/types.js';
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const migrationsDir = path.join(repoRoot, 'server/persistence/migrations');
@@ -401,7 +400,7 @@ describe('P20 Realtime Flow Contract', () => {
 
       // Reconnect replay from seq 2 should yield only the event at seq 3.
       const replaySubscriber = createMockSubscriber('replay-sub');
-      await eventBus.replayTo(replaySubscriber.send as any, 2);
+      await eventBus.replayTo(ev => { void replaySubscriber.send(ev as unknown as BroadcastMessage); }, 2);
 
       expect(replaySubscriber.messages.length).toBe(1);
       expect(replaySubscriber.messages[0]!.seq).toBe(3);
@@ -419,7 +418,7 @@ describe('P20 Realtime Flow Contract', () => {
 
       // New subscriber replays from start
       const replaySubscriber = createMockSubscriber('replay-sub');
-      await eventBus.replayTo(replaySubscriber.send as any, 0);
+      await eventBus.replayTo(ev => { void replaySubscriber.send(ev as unknown as BroadcastMessage); }, 0);
 
       expect(replaySubscriber.messages.length).toBe(2);
       expect(replaySubscriber.messages[0]!.seq).toBe(1);
@@ -433,7 +432,7 @@ describe('P20 Realtime Flow Contract', () => {
       await eventBus.publish({ type: 'task.scheduled', payload: { id: 3 } });
 
       const replaySubscriber = createMockSubscriber('replay-sub');
-      await eventBus.replayTo(replaySubscriber.send as any, 2);
+      await eventBus.replayTo(ev => { void replaySubscriber.send(ev as unknown as BroadcastMessage); }, 2);
 
       // Only seq > 2, so only seq 3
       expect(replaySubscriber.messages.length).toBe(1);

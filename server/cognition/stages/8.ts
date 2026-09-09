@@ -26,9 +26,27 @@ export interface VerificationContext {
   cycleId: string;
 }
 
+/**
+ * What a verifier concluded.
+ *
+ * A bare `true`/`false` is accepted too, and is all a simple verifier needs. The
+ * object form exists so a verifier that knows *why* the postcondition failed can
+ * say so: those strings reach stage 9, which decides what she tells the caller,
+ * and stage 12, which writes them down. "Something did not hold" is a much worse
+ * thing to find in a trace a week later than "the row is there but the value is
+ * the old one".
+ */
+export interface PostconditionOutcome {
+  ok: boolean;
+  discrepancies?: string[] | undefined;
+}
+
 export interface PostconditionVerifier {
   /** Returns true only if authoritative state now satisfies the postcondition. */
-  verify(result: ActionResult, ctx: VerificationContext): Promise<boolean> | boolean;
+  verify(
+    result: ActionResult,
+    ctx: VerificationContext,
+  ): Promise<boolean | PostconditionOutcome> | boolean | PostconditionOutcome;
 }
 
 export interface VerifierRegistry {
@@ -97,12 +115,18 @@ export async function verify(
     }
 
     try {
-      const confirmed = await verifier.verify(result, ctx);
+      const verdict = await verifier.verify(result, ctx);
+      const confirmed = typeof verdict === 'boolean' ? verdict : verdict.ok;
+      const reasons = typeof verdict === 'boolean' ? [] : (verdict.discrepancies ?? []);
       if (confirmed) {
         checked.push({ ...result, verified: true });
       } else {
         discrepancies.push(
-          `Postcondition for '${result.toolId}' did not hold when authoritative state was re-read`,
+          ...(reasons.length > 0
+            ? reasons
+            : [
+                `Postcondition for '${result.toolId}' did not hold when authoritative state was re-read`,
+              ]),
         );
         checked.push({ ...result, verified: false });
       }

@@ -66,6 +66,24 @@ export class LearningPipeline {
    * Run the learning pipeline on a completed cycle.
    */
   async processCycle(cycleRecord: CycleRecord, messages: Message[]): Promise<LearningResult> {
+    // 0. Refuse to be the second writer for one cycle.
+    //
+    // Stages 10 and 11 already learn inside the cycle. Running again over the
+    // same `cycle_record` would re-propose what was kept and insert `episodic`
+    // and `semantic` duplicates, which the dedupe engine has no branch for. See
+    // `relearnCycles` for why this is the default.
+    if (!this.options.relearnCycles) {
+      const already = this.memoriesWrittenBy(cycleRecord.id);
+      if (already > 0) {
+        return {
+          learned: false,
+          count: 0,
+          skipped: `Cycle ${cycleRecord.id} already wrote ${already} ${already === 1 ? 'memory' : 'memories'} in-cycle; not learning from it twice`,
+          details: [],
+        };
+      }
+    }
+
     // 1. Resolve caller kind
     const callerKind = this.resolveCallerKind(cycleRecord.identityId);
 
@@ -155,6 +173,43 @@ export class LearningPipeline {
     };
   }
 
+  /**
+   * How many memory rows this cycle has already written.
+   *
+   * Read from authoritative state rather than from an event, for the same reason
+   * a postcondition verifier re-reads a table instead of trusting a return value:
+   * `cycle.learned` says an intention was recorded, and rows are what actually
+   * exist.
+   *
+   * Two honest gaps. `relationship` carries no provenance column at all, so a
+   * relationship written in-cycle is invisible here; and `json_valid` is checked
+   * before `json_extract` because a row whose `provenance_json` is not JSON would
+   * otherwise make this query throw and take the whole pipeline with it.
+   */
+  private memoriesWrittenBy(cycleId: string): number {
+    const byProvenance = (table: string): string =>
+      `(SELECT COUNT(*) FROM ${table} WHERE provenance_json IS NOT NULL
+          AND json_valid(provenance_json)
+          AND json_extract(provenance_json, '$.sourceCycleId') = ?)`;
+
+    const row = this.db.raw
+      .prepare(
+        `SELECT ${byProvenance('episodic_memory')}
+              + (SELECT COUNT(*) FROM semantic_memory
+                   WHERE source_cycle = ?
+                      OR (provenance_json IS NOT NULL
+                          AND json_valid(provenance_json)
+                          AND json_extract(provenance_json, '$.sourceCycleId') = ?))
+              + ${byProvenance('preference')}
+              + ${byProvenance('habit')}
+              + ${byProvenance('learned_pattern')}
+           AS n`,
+      )
+      .get(cycleId, cycleId, cycleId, cycleId, cycleId, cycleId) as { n: number } | undefined;
+
+    return row?.n ?? 0;
+  }
+
   private resolveCallerKind(identityId: string): IdentityKind {
     if (this.identityRepo) {
       const identity = this.identityRepo.getIdentity(identityId);
@@ -181,7 +236,10 @@ export class LearningPipeline {
       sourceConversationId: cycleRecord.conversationId,
       sourceMessageIds: [],
       extractedAt: Date.now(),
-      extractor: 'llm' as const,
+      // Reported by the extractor rather than assumed. This was hardcoded to
+      // `'llm'` while the only extractor in the repository was a stub, so every
+      // row it ever wrote would have claimed a model proposed it.
+      extractor: candidate.extractor ?? ('rule' as const),
       confidence: candidate.confidence,
       validatedBy: 'auto_policy' as const,
     };
@@ -225,6 +283,14 @@ export class LearningPipeline {
           subject: content.subject,
           predicate: content.predicate,
           object: content.object,
+          // `semantic_memory` is the one domain with a dedicated `source_cycle`
+          // column, and this left it null while `persistQuarantine` a few methods
+          // down filled it in. So a fact she quarantined could be traced back to
+          // the cycle that produced it and a fact she accepted could not, which
+          // is the wrong way round. `memoriesWrittenBy` reads this column first
+          // and the provenance JSON second, so the guard was surviving on its
+          // fallback.
+          sourceCycle: cycleRecord.id,
           ...(decision.subjectKind ? { subjectKind: decision.subjectKind } : {}),
           ...(decision.sensitivity ? { sensitivity: decision.sensitivity } : {}),
           confidence: candidate.confidence,
@@ -283,6 +349,16 @@ export class LearningPipeline {
     }
   }
 
+  /**
+   * Reinforces an existing memory the dedupe engine matched.
+   *
+   * Every domain the dedupe engine can return `update` for must have a branch
+   * here. It previously had none for `relationship` yet still returned
+   * `existingId`, so the caller incremented `learnedCount` over a row nothing
+   * had written — she reported learning something she had not learned. An
+   * unhandled domain, or an UPDATE that matches no row, now throws: the caller
+   * records the failure in `details` instead of counting it.
+   */
   private updateExisting(
     existingId: string,
     candidate: LearningCandidate,
@@ -290,20 +366,61 @@ export class LearningPipeline {
     _decision: ScopedLearningDecision,
   ): string {
     const nowIso = new Date().toISOString();
+    let changes: number;
 
-    if (candidate.domain === 'preference') {
-      const content = candidate.content as { value: string };
-      this.db.raw
-        .prepare(`UPDATE preference SET value = ?, updated_at = ? WHERE id = ?`)
-        .run(content.value, nowIso, existingId);
-    } else if (candidate.domain === 'habit') {
-      this.db.raw
-        .prepare(`UPDATE habit SET last_observed = ?, updated_at = ? WHERE id = ?`)
-        .run(nowIso, nowIso, existingId);
-    } else if (candidate.domain === 'learned_pattern') {
-      this.db.raw
-        .prepare(`UPDATE learned_pattern SET evidence_count = evidence_count + 1, updated_at = ? WHERE id = ?`)
-        .run(nowIso, existingId);
+    switch (candidate.domain) {
+      case 'preference': {
+        const content = candidate.content as { value: string };
+        changes = this.db.raw
+          .prepare(`UPDATE preference SET value = ?, updated_at = ? WHERE id = ?`)
+          .run(content.value, nowIso, existingId).changes;
+        break;
+      }
+
+      case 'habit': {
+        changes = this.db.raw
+          .prepare(`UPDATE habit SET last_observed = ?, updated_at = ? WHERE id = ?`)
+          .run(nowIso, nowIso, existingId).changes;
+        break;
+      }
+
+      case 'learned_pattern': {
+        changes = this.db.raw
+          .prepare(
+            `UPDATE learned_pattern SET evidence_count = evidence_count + 1, updated_at = ? WHERE id = ?`,
+          )
+          .run(nowIso, existingId).changes;
+        break;
+      }
+
+      case 'relationship': {
+        // Dedupe matched on (owner_id, name, relation), so those are unchanged.
+        // What a repeat mention can carry is fresher notes and a revised
+        // importance; COALESCE keeps the stored value when the candidate omits
+        // one rather than blanking it.
+        const content = candidate.content as { notes?: string; importance?: number };
+        changes = this.db.raw
+          .prepare(
+            `UPDATE relationship
+                SET notes = COALESCE(?, notes),
+                    importance = COALESCE(?, importance),
+                    updated_at = ?
+              WHERE id = ?`,
+          )
+          .run(content.notes ?? null, content.importance ?? null, nowIso, existingId).changes;
+        break;
+      }
+
+      default:
+        throw new Error(
+          `Dedupe returned 'update' for domain '${candidate.domain}', which has no update path`,
+        );
+    }
+
+    if (changes === 0) {
+      throw new Error(
+        `Update of existing ${candidate.domain} ${existingId} matched no row; nothing was learned`,
+      );
     }
 
     return existingId;
@@ -323,7 +440,7 @@ export class LearningPipeline {
       sourceConversationId: cycleRecord.conversationId,
       sourceMessageIds: [],
       extractedAt: Date.now(),
-      extractor: 'llm',
+      extractor: candidate.extractor ?? 'rule',
       confidence: candidate.confidence,
       validatedBy: 'app_rule',
       quarantined: true,
