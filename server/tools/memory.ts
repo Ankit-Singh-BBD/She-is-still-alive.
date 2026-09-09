@@ -400,7 +400,11 @@ export function recallTool(
       // A read is `safe`: it mutates nothing, and the policy that decides what
       // comes back is enforced inside MemoryRetrieval regardless of who asks.
       clearanceRequired: 'safe',
-      retryPolicy: DEFAULT_RETRY_POLICY,
+      // Reads and returns; writes nothing. So the three attempts this policy declares
+      // are safe to actually take, including after a deadline — which for a
+      // SQLite-backed tool is the only failure that realistically happens, and which
+      // `retryOnDeadline: false` would silently reduce to one attempt.
+      retryPolicy: { ...DEFAULT_RETRY_POLICY, retryOnDeadline: true },
       timeoutMs: 5_000,
       execute: async (input, context) => {
         const result = await deps.memoryRetrieval.retrieve({

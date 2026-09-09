@@ -37,6 +37,23 @@ export function doingWords(stage: CognitiveStageName): string {
   return DOING[stage] ?? 'thinking';
 }
 
+/**
+ * The same words, for a stage name that arrived over the wire.
+ *
+ * `ChatReply.fellBackAt` is `readonly string[]` and not `CognitiveStageName[]`,
+ * because `StageTrace.stageName` on the server is a plain `string` — so an
+ * unrecognised name is a real possibility and is passed through untranslated
+ * rather than guessed at or dropped.
+ *
+ * These have to be words and not the raw names because the raw names read as
+ * English mid-sentence: "one stage fell back — reason" says the reason is coming
+ * next, which is the opposite of what happened. "fell back — thinking it through"
+ * cannot be misread, and it is the same vocabulary the live line uses.
+ */
+export function stageWords(name: string): string {
+  return DOING[name as CognitiveStageName] ?? name;
+}
+
 /** The four hours, as she would say them. */
 const HOURS: Record<EnvironmentState['timeOfDay'], string> = {
   night: 'night',
@@ -81,7 +98,12 @@ export function cycleWords(reply: ChatReply | undefined): string | undefined {
   if (reply === undefined) return undefined;
   if (reply.status === 'degraded') {
     const stages = [...new Set(reply.fellBackAt)];
-    return `she answered, but ${stages.length === 1 ? 'one stage' : `${stages.length} stages`} fell back — ${stages.join(', ').toLowerCase()}`;
+    // `degraded` is set by the runtime when a stage threw, and `fellBackAt` is built
+    // from the traces that carry an error, so the two should never disagree. If they
+    // do, the verdict is still the honest half — say that, rather than "0 stages".
+    if (stages.length === 0) return 'she answered, but not cleanly — no stage was named';
+    const named = stages.map(stageWords).join(', ');
+    return `she answered, but ${stages.length === 1 ? 'one stage' : `${stages.length} stages`} fell back — ${named}`;
   }
   if (reply.status === 'failed') return 'that cycle failed to close';
   if (reply.redacted) {
@@ -90,16 +112,32 @@ export function cycleWords(reply: ChatReply | undefined): string | undefined {
   return undefined;
 }
 
-/** "3 done, 1 unproven" — never counts an action as proven off `success` alone. */
+/**
+ * "1 confirmed, 2 unconfirmed" — never counts an action as proven off `success` alone.
+ *
+ * The buckets are made disjoint by construction rather than by subtraction:
+ * `proven` requires `success` as well as `verified`, so a call that failed cannot land
+ * in two buckets and leave another negative. `ActionPipeline` does keep that invariant
+ * — stage 5 only runs when the call returned — but the client is reading independent
+ * booleans off the wire and is not the component that can assume a relationship between
+ * them.
+ *
+ * `attempted` splits what used to be one failure bucket. "1 failed" was also what this
+ * said about a tool call that was never dispatched — no clearance, or `FLAG_ACTIONS`
+ * off — and "failed" reads as a malfunction, which sends someone to debug a setting.
+ * "not run" is the other half, and it is the honest half: nothing was touched.
+ */
 export function actionWords(reply: ChatReply | undefined): string | undefined {
   if (reply === undefined || reply.actions.length === 0) return undefined;
-  const proven = reply.actions.filter((action) => action.verified).length;
-  const failed = reply.actions.filter((action) => !action.success).length;
-  const unproven = reply.actions.length - proven - failed;
+  const notRun = reply.actions.filter((action) => !action.attempted).length;
+  const failed = reply.actions.filter((action) => action.attempted && !action.success).length;
+  const proven = reply.actions.filter((action) => action.success && action.verified).length;
+  const unproven = reply.actions.length - proven - failed - notRun;
   const parts: string[] = [];
   if (proven > 0) parts.push(`${proven} confirmed`);
   if (unproven > 0) parts.push(`${unproven} unconfirmed`);
   if (failed > 0) parts.push(`${failed} failed`);
+  if (notRun > 0) parts.push(`${notRun} not run`);
   return parts.join(', ');
 }
 

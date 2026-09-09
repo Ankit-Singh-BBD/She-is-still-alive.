@@ -330,7 +330,7 @@ describe('the conversation transcript', () => {
     const decision: AuthorizedDecision = {
       proposal: { action: 'respond', rationale: 'a sentence was called for' },
       authorized: true,
-      clearanceChecked: true,
+      clearance: { kind: 'not_required' },
     };
     const response: AuthorizedResponse = {
       text: 'chai',
@@ -343,6 +343,7 @@ describe('the conversation transcript', () => {
       return {
         cycleId,
         status: 'completed' as const,
+        startedAt: Date.UTC(2026, 8, 4, 9, 0, 0),
         completedAt: Date.UTC(2026, 8, 4, 9, 0, 1),
         identityId: OWNER,
         conversationId,
@@ -441,7 +442,7 @@ describe('the conversation transcript', () => {
     const decision: AuthorizedDecision = {
       proposal: { action: 'respond', rationale: 'a sentence was called for' },
       authorized: true,
-      clearanceChecked: true,
+      clearance: { kind: 'not_required' },
     };
 
     /** The same context rendered by all three builders that carry a transcript. */

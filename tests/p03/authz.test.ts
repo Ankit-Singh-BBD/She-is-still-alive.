@@ -110,12 +110,74 @@ describe('Phase P03: Authorization Matrix (authz.check)', () => {
       expect(other.allowed).toBe(false);
     });
 
-    it('denies guest from enrolling new knowledge or mutating preferences', () => {
-      const enroll = check(guest, 'knowledge:enroll', { type: 'knowledge' });
-      expect(enroll.allowed).toBe(false);
+    /**
+     * This used to assert `denies guest from enrolling new knowledge or mutating
+     * preferences` — a blanket ban, read straight off `DEFAULT_PERMISSIONS.guest`,
+     * which Build Book XIII.4 opens by forbidding: *"Madhurita does **not** implement
+     * a blanket 'guests teach nothing' rule"*. Its table stores a guest's own
+     * preferences and general behavioural patterns.
+     *
+     * What replaces it is the rule that actually holds: the permission is the switch,
+     * and the scope clause under it is where the isolation lives. So there are three
+     * things to pin, not one.
+     */
+    it('allows guest to accumulate their own record', () => {
+      const enroll = check(guest, 'knowledge:enroll', { type: 'memory', ownerId: guest.id });
+      expect(enroll.allowed).toBe(true);
 
-      const pref = check(guest, 'preference:mutate', { type: 'preference' });
+      const pref = check(guest, 'preference:mutate', { type: 'preference', ownerId: guest.id });
+      expect(pref.allowed).toBe(true);
+    });
+
+    it("denies guest from writing into the owner's memory or preferences", () => {
+      const enroll = check(guest, 'knowledge:enroll', { type: 'memory', ownerId: owner.id });
+      expect(enroll.allowed).toBe(false);
+      expect(enroll.reason).toContain("another identity's memory");
+
+      const pref = check(guest, 'preference:mutate', { type: 'preference', ownerId: owner.id });
       expect(pref.allowed).toBe(false);
+      expect(pref.reason).toContain('another identity');
+    });
+
+    /**
+     * The permission as a control the owner actually has. `true` by default is not
+     * `true` forever: revoking it must stop the caller writing *anywhere*, including
+     * the scope they would otherwise own — otherwise the switch only ever repeats what
+     * the scope clause already said.
+     */
+    it('denies a caller the owner revoked enrolment from, even in their own scope', () => {
+      const revoked: Identity = {
+        ...person,
+        permissions: { ...DEFAULT_PERMISSIONS.person, mayEnrollNewKnowledge: false },
+      };
+      const enroll = check(revoked, 'knowledge:enroll', { type: 'memory', ownerId: revoked.id });
+      expect(enroll.allowed).toBe(false);
+      expect(enroll.reason).toContain('mayEnrollNewKnowledge');
+
+      const noPrefs: Identity = {
+        ...person,
+        permissions: { ...DEFAULT_PERMISSIONS.person, mayMutatePreferences: false },
+      };
+      const pref = check(noPrefs, 'preference:mutate', {
+        type: 'preference',
+        ownerId: noPrefs.id,
+      });
+      expect(pref.allowed).toBe(false);
+      expect(pref.reason).toContain('mayMutatePreferences');
+    });
+
+    /**
+     * `memory:write` and `knowledge:enroll` are the same authority under two names —
+     * stage 10 asks for one of them per candidate domain — so they must not be able to
+     * drift apart. Same caller, same resource, same answer.
+     */
+    it('treats memory:write and knowledge:enroll as one authority', () => {
+      for (const scope of [guest.id, owner.id]) {
+        const write = check(guest, 'memory:write', { type: 'memory', ownerId: scope });
+        const enroll = check(guest, 'knowledge:enroll', { type: 'memory', ownerId: scope });
+        expect(write.allowed).toBe(enroll.allowed);
+        expect(write.reason).toBe(enroll.reason);
+      }
     });
   });
 });

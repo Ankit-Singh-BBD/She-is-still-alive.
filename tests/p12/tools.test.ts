@@ -26,7 +26,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { resolve } from 'node:path';
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 import { Database, closeDatabase } from '@server/persistence/db.js';
 import { runMigrations } from '@server/persistence/migrate.js';
 import { loadConfig } from '@server/config/env.js';

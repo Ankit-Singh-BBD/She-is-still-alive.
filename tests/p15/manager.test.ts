@@ -131,4 +131,38 @@ describe('LoopManager (P15)', () => {
     expect(evals.length).toBe(0);
     expect(executor.getPendingTasks().length).toBe(0);
   });
+
+  /**
+   * The same contract as `TaskExecutor`: a loop that could not announce it
+   * opened is still open, and the failed announcement is reported rather than
+   * left as an unhandled rejection for `main.ts` to shut the server down over.
+   */
+  it('reports a failed event publish instead of taking the process down', async () => {
+    const failures: string[] = [];
+    const brokenBus = new EventBus(db);
+    brokenBus.publish = async () => {
+      throw new Error('domain_event is locked');
+    };
+    const isolated = new LoopManager(db, brokenBus, executor, {
+      report: (what) => failures.push(what),
+    });
+
+    const openedId = isolated.openLoop({
+      identityId: owner.id,
+      topic: 'still opens',
+      triggerSpec: { type: 'schedule', intervalMs: 60_000 },
+      actionSpec: {
+        kind: 'task',
+        taskKind: 'reminder',
+        payload: { kind: 'reminder', message: 'x' },
+      },
+    });
+
+    expect(isolated.getLoop(openedId)?.status).toBe('active');
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(failures).toEqual(['publishing loop.opened']);
+  });
 });

@@ -1,0 +1,43 @@
+-- Honesty fix: the out-of-band learner now has a production caller, and this is
+-- the index the question it asks needs.
+--
+-- `LearningPipeline.processCycle` existed, was constructed at boot, was named in
+-- the boot banner, and had no caller anywhere outside a test. The banner told the
+-- operator that "out-of-band learning keeps only what was literally said" while
+-- nothing out of band ever ran. `server/learning/consolidation.ts` is the caller;
+-- it wakes on a timer and asks one bounded question:
+--
+--     which cycles finished after the last one I consolidated?
+--
+--   SELECT … FROM cycle_record
+--    WHERE status IN ('completed','degraded')
+--      AND completed_at IS NOT NULL
+--      AND (completed_at > :at OR (completed_at = :at AND id > :id))
+--    ORDER BY completed_at, id
+--    LIMIT :n
+--
+-- `cycle_record` carried exactly one index — on `conversation_id` — so that read
+-- was a full table scan plus a sort of every cycle she has ever run, every time
+-- the sweep woke up. On the keyset `(completed_at, id)` it is a seek to the
+-- cursor and `LIMIT` rows forward.
+--
+-- Partial, because a `running` cycle has `completed_at IS NULL` and the sweep
+-- must never see one: the index holds only rows that have actually finished, and
+-- an open cycle costs nothing to carry.
+--
+-- Why the cursor is `(completed_at, id)` and not `id` alone, given that `id` is a
+-- monotonic ULID: ids are minted when a cycle *starts*. A long cycle that began
+-- first can finish last, and a cursor on `id` would step over it while it was
+-- still running and never come back. `completed_at` is written at commit, and
+-- transactions on one connection serialize, so ordering by it cannot skip a
+-- cycle. `id` is the tiebreak for two cycles that commit in the same
+-- millisecond.
+--
+-- Both columns are ISO-8601 UTC strings with millisecond precision — every write
+-- goes through `new Date(…).toISOString()` in `stages/12.ts` and
+-- `runtime.recordCycleFailure` — so lexicographic comparison is chronological
+-- comparison, which is what makes the keyset above a plain string `>`.
+
+CREATE INDEX IF NOT EXISTS idx_cycle_record_completed
+  ON cycle_record(completed_at, id)
+  WHERE completed_at IS NOT NULL;

@@ -169,6 +169,7 @@ describe('Action Pipeline (P11-P13)', () => {
           baseDelayMs: 10,
           maxDelayMs: 50,
           retryableErrors: ['network error'],
+          retryOnDeadline: false,
         },
         timeoutMs: 1000,
         execute: async () => {
@@ -205,6 +206,7 @@ describe('Action Pipeline (P11-P13)', () => {
           baseDelayMs: 10,
           maxDelayMs: 50,
           retryableErrors: [],
+          retryOnDeadline: false,
         },
         timeoutMs: 50, // 50ms deadline
         execute: async () => {

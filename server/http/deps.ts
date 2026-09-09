@@ -22,6 +22,7 @@ import type { Identity } from '@server/identity/types.js';
 import type { IdentityRepository } from '@server/identity/repository.js';
 import type { ConversationRepository } from '@server/conversations/repository.js';
 import type { MessageRepository } from '@server/conversations/messages.js';
+import type { OriginSeedReport } from '@server/origin/index.js';
 import type { RealtimeFlow } from '@server/realtime/flow.js';
 import type { BootReport } from '@server/app.js';
 
@@ -50,6 +51,15 @@ export interface RouteDeps {
   realtime(): RealtimeFlow | undefined;
   /** Builds the per-caller cognitive runtime. See `MadhuritaApp.runtimeFor`. */
   runtimeFor(identity: Identity): CognitiveRuntime;
+  /**
+   * Writes whatever of her origin story is missing, and answers what it wrote.
+   *
+   * A function on `RouteDeps` for the same reason `realtime` is one: it cannot run until
+   * an owner exists, and the request that creates the owner is the first moment it can.
+   * It is idempotent, so calling it on a database that already has the story writes
+   * nothing — which is what makes it safe to call from a route at all.
+   */
+  rememberOrigin(owner: Identity): OriginSeedReport;
   /**
    * What the app decided at boot, or `undefined` before `start()`.
    *

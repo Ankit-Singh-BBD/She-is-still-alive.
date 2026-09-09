@@ -140,7 +140,7 @@ describe('Learning Pipeline (P16)', () => {
   it('enforces Scoped Guest Learning Policy for guests', async () => {
     const mockExtractor: LearningExtractor = {
       extract: async () => [
-        // 1. Guest preference -> Allowed, public/isolated
+        // 1. The guest's own preference -> kept, under their own identity.
         {
           domain: 'preference',
           callerId: guest.id,
@@ -150,17 +150,33 @@ describe('Learning Pipeline (P16)', () => {
           importance: 0.7,
           reasoning: 'Guest preference',
         },
-        // 2. Guest episodic small talk -> Discarded
+        // 2. Nothing but a greeting -> discarded, and "regardless of identity".
         {
           domain: 'episodic',
           callerId: guest.id,
           callerKind: 'guest',
-          content: { summary: 'Talked about weather' },
+          content: { summary: 'Namaste, kaisi ho' },
           confidence: 0.9,
           importance: 0.8,
           reasoning: 'Small talk',
         },
-        // 3. Guest claim about owner -> Quarantined
+        // 3. An ordinary guest episodic -> kept.
+        //
+        //    This case is the one that changed. The copy of the policy that used to live
+        //    beside this pipeline discarded every guest `episodic`, `habit`,
+        //    `relationship` and non-owner `semantic` by name — a rule XIII.4's table does
+        //    not contain — because that was how it approximated the small-talk detector it
+        //    did not have. Case 2 is that detector; this case is what it stops eating.
+        {
+          domain: 'episodic',
+          callerId: guest.id,
+          callerKind: 'guest',
+          content: { summary: 'Asked for the lake photo to be printed' },
+          confidence: 0.9,
+          importance: 0.8,
+          reasoning: 'Something that happened',
+        },
+        // 4. Guest claim about owner -> quarantined.
         {
           domain: 'semantic',
           callerId: guest.id,
@@ -182,17 +198,40 @@ describe('Learning Pipeline (P16)', () => {
     });
 
     const result = await pipeline.processCycle(createMockCycle(guest.id), createMockMessages());
-    expect(result.count).toBe(2); // 1 preference persisted + 1 quarantined
+    expect(result.count).toBe(3); // preference + episodic + quarantine
 
     const pref = memoryRepo.getPreference(guest.id, 'language');
     expect(pref).not.toBeNull();
     expect(pref?.value).toBe('es');
     expect(pref?.subjectKind).toBe('guest');
+    // `person_shared`, not `public`: `public` is the one sensitivity that lets any caller
+    // past the identity check in `MemoryRetrieval.isAllowedByPolicy`, so it is the one
+    // value that would un-isolate the row this case exists to isolate.
+    expect(pref?.sensitivity).toBe('person_shared');
+
+    const summaries = (
+      db.raw.prepare(`SELECT summary FROM episodic_memory WHERE identity_id = ?`).all(guest.id) as
+        Array<{ summary: string }>
+    ).map((row) => row.summary);
+    expect(summaries).toEqual(['Asked for the lake photo to be printed']);
+
+    const greeting = result.details.find(
+      (detail) => (detail.candidate.content as { summary?: string }).summary === 'Namaste, kaisi ho',
+    );
+    expect(greeting?.decision.action).toBe('discard');
+    expect(greeting?.decision.reason).toContain('Small talk');
 
     // Quarantined semantic memory is recorded in DB with archived status
-    const quarantined = db.raw.prepare(`SELECT * FROM semantic_memory WHERE identity_id = ?`).all(guest.id) as Array<{ lifecycle_status: string }>;
+    const quarantined = db.raw
+      .prepare(`SELECT * FROM semantic_memory WHERE identity_id = ?`)
+      .all(guest.id) as Array<{ lifecycle_status: string; sensitivity: string; subject_kind: string }>;
     expect(quarantined.length).toBe(1);
     expect(quarantined[0]?.lifecycle_status).toBe('archived');
+    // The two cells that make the quarantine mean something: `owner_only` is what stops
+    // the guest reading their own unconfirmed claim back out of her, and `subject_kind`
+    // records who it is about rather than who said it.
+    expect(quarantined[0]?.sensitivity).toBe('owner_only');
+    expect(quarantined[0]?.subject_kind).toBe('owner');
   });
 
   it('deduplicates and updates existing preference and increments learned pattern evidence', async () => {
@@ -271,5 +310,51 @@ describe('Learning Pipeline (P16)', () => {
     // Verify pattern evidence count incremented
     const patterns = memoryRepo.listLearnedPatterns(owner.id);
     expect(patterns[0]?.evidenceCount).toBe(2);
+  });
+
+  /**
+   * The memory is the durable fact; `memory.appended` is the announcement.
+   *
+   * This publish was `void this.publish(...)` over a promise nothing caught, and
+   * `server/main.ts` shuts the server down on an unhandled rejection — so a
+   * locked `domain_event` table during consolidation would have killed the
+   * process after the memory had already been written. She would have lost the
+   * session, not the memory, which is the wrong thing to lose either way.
+   */
+  it('reports a failed memory.appended publish instead of taking the process down', async () => {
+    const failures: string[] = [];
+    const brokenBus = new EventBus(db);
+    brokenBus.publish = async () => {
+      throw new Error('domain_event is locked');
+    };
+
+    const mockExtractor: LearningExtractor = {
+      extract: async () => [
+        {
+          domain: 'preference',
+          callerId: owner.id,
+          callerKind: 'owner',
+          content: { key: 'theme', value: 'dark' },
+          confidence: 0.95,
+          importance: 0.9,
+          reasoning: 'Stated outright',
+        },
+      ],
+    };
+
+    const pipeline = new LearningPipeline({
+      db,
+      eventBus: brokenBus,
+      memoryRepo,
+      identityRepo,
+      extractor: mockExtractor,
+      report: (what) => failures.push(what),
+    });
+
+    const result = await pipeline.processCycle(createMockCycle(owner.id), createMockMessages());
+
+    expect(result.count).toBe(1);
+    expect(memoryRepo.getPreference(owner.id, 'theme')?.value).toBe('dark');
+    expect(failures).toEqual(['publishing memory.appended']);
   });
 });

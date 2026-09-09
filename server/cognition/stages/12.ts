@@ -33,12 +33,13 @@
  * `running`.
  */
 
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 import { appendTurns, type TurnDraft } from '@server/conversations/messages.js';
 import type { Database } from '@server/persistence/db.js';
-import type { EventBus } from '@server/events/event-bus.js';
+import { EventBus } from '@server/events/event-bus.js';
 import type { DomainEventType, PersistedDomainEvent } from '@server/events/types.js';
 import { appendAuditEntries } from '@server/security/audit.js';
+import type { InterruptionCause } from '../gate.js';
 import type {
   ActionResult,
   AuditEntry,
@@ -74,6 +75,14 @@ export interface PersistInput {
    */
   error?: string | undefined;
   completedAt: number;
+  /**
+   * When the cycle began, carried onto the terminal event.
+   *
+   * A subscriber that wants to say "she thought about this for 1.8 seconds" would
+   * otherwise have to remember `cycle.started` and pair the two by id, and any
+   * subscriber that came up mid-cycle could not.
+   */
+  startedAt: number;
   identityId: string;
   /**
    * The conversation this cycle belongs to, already resolved by the runtime.
@@ -106,6 +115,15 @@ export interface PersistInput {
   /** Stage traces recorded during the cycle. Persisted here so the cycle's
    * audit and trace are committed in a single transaction. */
   stages: StageTrace[];
+  /**
+   * Set exactly when a later stimulus displaced this cycle (Build Book VII.5),
+   * which is also the only way `status` is ever `'interrupted'`.
+   *
+   * Carried this far so the cancellation is in the durable log rather than
+   * inferred from a short trace list: VII.5 requires it be recorded and "never
+   * silently dropped", and the two cycles name each other.
+   */
+  interruption?: InterruptionCause | undefined;
 }
 
 export async function persist(
@@ -148,21 +166,40 @@ export async function persist(
    */
   const written: { id: string; seq: number }[] = [];
 
+  /**
+   * Who writes the event rows.
+   *
+   * The runtime's bus when there is one, and a subscriber-less bus over the same
+   * database when there is not — `append` only writes, so the fallback produces
+   * byte-identical rows and simply delivers to nobody, which is exactly what the
+   * no-bus contract above says happens.
+   */
+  const eventWriter = opts.eventBus ?? new EventBus(db);
+
   // One transaction: cycle close + audit entries + domain event stream. If any
   // insert throws, none of them land; the cycle keeps its `running` row and a
   // higher layer can retry.
   db.raw.transaction(() => {
     // 1. Close the cycle record.
+    //
+    // The verdict is written here and not left to `stage_trace`. A trace row is keyed
+    // by stage number and kept for tracing; the cycle's own decision and answer are
+    // what anything reading the cycle back needs — the consolidation sweep, which
+    // builds the learning prompt from them, and her own account of a turn whose
+    // runtime no longer exists. `output_json` had been declared since the first
+    // schema and filled by nothing.
     db.raw
       .prepare(
         `UPDATE cycle_record
-            SET status = ?, completed_at = ?, error = ?
+            SET status = ?, completed_at = ?, error = ?, decision_json = ?, output_json = ?
           WHERE id = ?`,
       )
       .run(
         input.status,
         new Date(input.completedAt).toISOString(),
         input.error ?? null,
+        input.decision === undefined ? null : JSON.stringify(input.decision),
+        input.response === undefined ? null : JSON.stringify(input.response),
         input.cycleId,
       );
 
@@ -216,26 +253,21 @@ export async function persist(
     turnsWritten = appendTurns(db, input.conversationId, input.turns).length;
 
     // 5. Append domain events to the ordered stream.
-    const insertEvent = db.raw.prepare(
-      `INSERT INTO domain_event
-         (id, type, payload_json, identity_id, cycle_id, timestamp,
-          causation_id, correlation_id, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
+    //
+    // Through `EventBus.append`, which is synchronous precisely so it can be called
+    // from inside this transaction — the nine-column INSERT used to be spelled out
+    // here as well as in the bus, so a migration adding a column would have updated
+    // one of them. What `append` does not do is deliver; that is step 6, after the
+    // commit, and the separation is the point.
     for (const ev of events) {
-      const id = ulid();
-      const result = insertEvent.run(
-        id,
-        ev.type,
-        JSON.stringify(ev.payload),
-        ev.identityId ?? null,
-        ev.cycleId ?? null,
-        new Date(input.completedAt).toISOString(),
-        null,
-        null,
-        1,
-      );
-      written.push({ id, seq: Number(result.lastInsertRowid) });
+      const row = eventWriter.append({
+        type: ev.type,
+        payload: ev.payload,
+        identityId: ev.identityId,
+        cycleId: ev.cycleId,
+        timestamp: input.completedAt,
+      });
+      written.push({ id: row.id, seq: row.seq });
     }
   })();
 
@@ -294,11 +326,18 @@ function buildDomainEvents(input: PersistInput): DomainEvent[] {
   const base = { identityId: input.identityId, cycleId: input.cycleId };
 
   if (input.decision) {
+    // `proposal.action` is what will be *carried out*, which on a refusal is the
+    // `clarify` fallback. Reporting only that made a denied tool call replay as a
+    // clarification nobody asked for, and left a subscriber watching for refusals
+    // with nothing to watch. `proposed` is what she actually put forward, and
+    // `clearance` says which of the four things the gate did.
     events.push({
       type: 'cycle.decided',
       payload: {
         action: input.decision.proposal.action,
+        proposed: (input.decision.refusedProposal ?? input.decision.proposal).action,
         authorized: input.decision.authorized,
+        clearance: input.decision.clearance.kind,
         reason: input.decision.reason ?? null,
       },
       ...base,
@@ -310,6 +349,10 @@ function buildDomainEvents(input: PersistInput): DomainEvent[] {
       type: 'cycle.action',
       payload: {
         toolId: result.toolId,
+        // `attempted` alongside `success`, because a subscriber reading only the
+        // latter cannot tell a refusal from a call that went out and threw — and the
+        // event log is where that question gets asked long after the cycle is gone.
+        attempted: result.attempted,
         success: result.success,
         verified: result.verified,
         error: result.error ?? null,
@@ -352,19 +395,52 @@ function buildDomainEvents(input: PersistInput): DomainEvent[] {
     });
   }
 
+  // The terminal event, one per cycle.
+  //
+  // For an interrupted cycle this *is* the interruption event: `cycle.interrupted`
+  // has been a declared event type with no publisher since P06, and this is it.
+  // The cause rides on the terminal payload rather than on a second event of the
+  // same type — emitting both would make one interrupted cycle replay as two
+  // interruptions, and double-count for any subscriber tallying them.
   events.push({
     // 'degraded' is a real outcome, not a success: the cycle answered, but a
     // stage failed on the way. It reports as `cycle.degraded` so subscribers
-    // (and she herself) can tell the difference.
+    // (and she herself) can tell the difference. 'interrupted' is not a failure
+    // either — it is a cycle that was correctly abandoned.
     type:
       input.status === 'completed'
         ? 'cycle.completed'
         : input.status === 'degraded'
           ? 'cycle.degraded'
-          : 'cycle.failed',
+          : input.status === 'interrupted'
+            ? 'cycle.interrupted'
+            : 'cycle.failed',
     payload: {
       status: input.status,
+      startedAt: input.startedAt,
       completedAt: input.completedAt,
+      // There is no `endedAtStage` here. It was written as the constant `'PERSIST'`,
+      // and a field that is always a constant is not state: every terminal event is
+      // published from inside this transaction, so *holding one* is already proof
+      // PERSIST ran, whatever the outcome. `server/http/state.ts` reads it that way
+      // and needs nothing from the payload to do so.
+      //
+      // What a reader actually wants from a `cycle.degraded` — which stage threw — is
+      // not this field either. That is in the cycle's `stage_trace` rows, and in the
+      // `fellBackAt` list the caller is handed.
+      //
+      // Present exactly when a later stimulus displaced this cycle, so a replay
+      // shows *what* stopped it and how far it got — not merely that it stopped.
+      ...(input.interruption
+        ? {
+            interruptedBy: {
+              byCycleId: input.interruption.byCycleId,
+              bySource: input.interruption.bySource,
+              at: input.interruption.at,
+            },
+            stagesCompleted: input.stages.filter((s) => s.error === undefined).length,
+          }
+        : {}),
     },
     ...base,
   });

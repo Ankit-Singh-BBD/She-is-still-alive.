@@ -14,6 +14,7 @@
  */
 
 import type { Config } from '@server/config/env.js';
+import type { ToolSpec } from '@server/tools/roster.js';
 
 import { createGeminiTransport, GeminiLanguageModel } from './gemini.js';
 import { LanguageFaculties } from './faculties.js';
@@ -39,10 +40,24 @@ export { IDENTITY, SYSTEM_INSTRUCTIONS } from './prompts.js';
 
 export interface CreateLanguageFacultiesOptions {
   config: Config;
-  /** The installed tool roster, read at call time. See `LanguageFaculties`. */
-  toolIds: () => readonly string[];
+  /**
+   * The installed tool roster, read at call time. See `LanguageFaculties`.
+   *
+   * Each entry carries the tool's description and its argument shape, because an id
+   * alone is not enough to call anything — `server/tools/roster.ts` says why.
+   */
+  tools: () => readonly ToolSpec[];
   /** Injectable so a test can drive the real adapters without a network. */
   model?: LanguageModel | undefined;
+  /**
+   * Her register for one identity as prompt lines, read at call time.
+   *
+   * Forwarded verbatim to `LanguageFaculties`, where only `draftResponse` reads it.
+   * Optional here because a faculty with no tone provider is a complete faculty —
+   * it just speaks in one register — and because the tone source is built later in
+   * `createApp` than this call is.
+   */
+  tone?: ((identityId: string) => string) | undefined;
 }
 
 /**
@@ -56,7 +71,11 @@ export function createLanguageFaculties(
 ): LanguageFaculties | undefined {
   const model = options.model ?? realModel(options.config);
   if (!model) return undefined;
-  return new LanguageFaculties({ model, toolIds: options.toolIds });
+  return new LanguageFaculties({
+    model,
+    tools: options.tools,
+    ...(options.tone ? { tone: options.tone } : {}),
+  });
 }
 
 function realModel(config: Config): LanguageModel | undefined {

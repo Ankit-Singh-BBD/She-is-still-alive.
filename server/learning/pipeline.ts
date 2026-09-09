@@ -11,7 +11,6 @@
  * 7. Emits domain events for auditability
  */
 
-import { ulid } from 'ulid';
 import type { Database } from '@server/persistence/db.js';
 import type { EventBus } from '@server/events/event-bus.js';
 import type { MemoryRepository } from '@server/memory/repository.js';
@@ -27,10 +26,9 @@ import type {
   CycleRecord,
   Message,
   ScopedLearningDecision,
-  DedupeResult,
 } from './types.js';
 import { DEFAULT_LEARNING_OPTIONS } from './types.js';
-import { DefaultGuestLearningPolicy } from './policy.js';
+import { DefaultGuestLearningPolicy, discarded } from './policy.js';
 import { DedupeEngine } from './dedupe.js';
 
 export class LearningPipeline {
@@ -42,6 +40,7 @@ export class LearningPipeline {
   private readonly policy: GuestLearningPolicy;
   private readonly dedupeEngine: DedupeEngine;
   private readonly options: Required<LearningPipelineOptions>;
+  private readonly report: (what: string, error: unknown) => void;
 
   constructor(params: {
     db: Database;
@@ -51,6 +50,8 @@ export class LearningPipeline {
     extractor: LearningExtractor;
     policy?: GuestLearningPolicy;
     options?: LearningPipelineOptions;
+    /** Where a failed event publish is reported. Defaults to `console.error`. */
+    report?: ((what: string, error: unknown) => void) | undefined;
   }) {
     this.db = params.db;
     this.eventBus = params.eventBus;
@@ -60,6 +61,11 @@ export class LearningPipeline {
     this.policy = params.policy ?? new DefaultGuestLearningPolicy();
     this.dedupeEngine = new DedupeEngine(this.db);
     this.options = { ...DEFAULT_LEARNING_OPTIONS, ...params.options };
+    this.report =
+      params.report ??
+      ((what, error) => {
+        console.error(`[learning] ${what}:`, error);
+      });
   }
 
   /**
@@ -84,8 +90,15 @@ export class LearningPipeline {
       }
     }
 
-    // 1. Resolve caller kind
+    // 1. Resolve who is speaking, and what the owner is called.
+    //
+    // The name is looked up once per cycle rather than per candidate, and it is what makes
+    // the quarantine row reachable off this path: "Ankit ko chai pasand hai" is a claim
+    // about him that never uses the word "owner". Without it the policy could only catch
+    // the role word, and the pipeline would file a guest's claim about the owner as the
+    // guest's own semantic fact.
     const callerKind = this.resolveCallerKind(cycleRecord.identityId);
+    const ownerName = this.resolveOwnerName();
 
     // 2. Extract candidate memories
     const rawCandidates = await this.extractor.extract(cycleRecord, messages);
@@ -102,17 +115,16 @@ export class LearningPipeline {
       ) {
         details.push({
           candidate,
-          decision: {
-            action: 'discard',
-            discardReason: `Below threshold (conf: ${candidate.confidence}, imp: ${candidate.importance})`,
-          },
+          decision: discarded(
+            `Below threshold (conf: ${candidate.confidence}, imp: ${candidate.importance})`,
+          ),
           dedupe: { action: 'insert', reason: 'Skipped dedupe due to discard' },
         });
         continue;
       }
 
       // Step B: Scoped Learning Policy evaluation
-      const decision = this.policy.evaluate(candidate, candidate.callerId, callerKind);
+      const decision = this.policy.evaluate(candidate, candidate.callerId, callerKind, ownerName);
 
       if (decision.action === 'discard') {
         details.push({
@@ -131,8 +143,8 @@ export class LearningPipeline {
         let memoryId: string | undefined;
 
         if (decision.action === 'quarantine') {
-          // Write to quarantine / unverified_semantic table or mark in semantic memory
-          memoryId = this.persistQuarantine(candidate, cycleRecord, decision);
+          // Held as an `unverified_semantic` row, whatever domain it was extracted as.
+          memoryId = this.persistQuarantine(candidate, cycleRecord, decision, ownerName);
         } else if (dedupe.action === 'update' && dedupe.existingId) {
           memoryId = this.updateExisting(dedupe.existingId, candidate, cycleRecord, decision);
         } else {
@@ -148,7 +160,7 @@ export class LearningPipeline {
         });
 
         // Step E: Emit domain event
-        void this.publish('memory.appended', {
+        this.publish('memory.appended', {
           memoryId,
           domain: candidate.domain,
           identityId: candidate.callerId,
@@ -222,8 +234,19 @@ export class LearningPipeline {
     return row?.kind ?? 'guest';
   }
 
-  private deduplicate(candidate: LearningCandidate): DedupeResult {
-    return this.dedupeEngine.evaluate(candidate);
+  /**
+   * The owner's enrolled display name, or undefined when there is no owner yet.
+   *
+   * Falls back to raw SQL for the same reason `resolveCallerKind` does: the identity
+   * repository is optional on this constructor, and the policy's answer must not depend
+   * on which of two equivalent wirings a caller chose.
+   */
+  private resolveOwnerName(): string | undefined {
+    if (this.identityRepo) return this.identityRepo.getOwner()?.displayName;
+    const row = this.db.raw
+      .prepare(`SELECT display_name FROM identity WHERE kind = 'owner' LIMIT 1`)
+      .get() as { display_name: string } | undefined;
+    return row?.display_name;
   }
 
   private persistNew(
@@ -241,20 +264,22 @@ export class LearningPipeline {
       // row it ever wrote would have claimed a model proposed it.
       extractor: candidate.extractor ?? ('rule' as const),
       confidence: candidate.confidence,
-      validatedBy: 'auto_policy' as const,
+      // The policy's claim, not this writer's. `persistQuarantine` used to hardcode
+      // `'app_rule'` on a row whose entire purpose is to be awaiting validation.
+      validatedBy: decision.validatedBy,
     };
 
     switch (candidate.domain) {
       case 'preference': {
         const content = candidate.content as { key: string; value: string };
         const mem = this.memoryRepo.createPreference({
-          identityId: candidate.callerId,
+          identityId: decision.identityId,
           key: content.key,
           value: content.value,
-          ...(decision.subjectKind ? { subjectKind: decision.subjectKind } : {}),
-          ...(decision.sensitivity ? { sensitivity: decision.sensitivity } : {}),
+          subjectKind: decision.subjectKind,
+          sensitivity: decision.sensitivity,
           confidence: candidate.confidence,
-          ...(decision.sourceKind ? { sourceKind: decision.sourceKind } : {}),
+          sourceKind: decision.sourceKind,
           provenance,
         });
         return mem.id;
@@ -263,14 +288,14 @@ export class LearningPipeline {
       case 'episodic': {
         const content = candidate.content as { summary: string; details?: string; importance?: number };
         const mem = this.memoryRepo.createEpisodic({
-          identityId: candidate.callerId,
+          identityId: decision.identityId,
           summary: content.summary,
           ...(content.details !== undefined ? { details: content.details } : {}),
           ...(content.importance !== undefined ? { importance: content.importance } : {}),
-          ...(decision.subjectKind ? { subjectKind: decision.subjectKind } : {}),
-          ...(decision.sensitivity ? { sensitivity: decision.sensitivity } : {}),
+          subjectKind: decision.subjectKind,
+          sensitivity: decision.sensitivity,
           confidence: candidate.confidence,
-          ...(decision.sourceKind ? { sourceKind: decision.sourceKind } : {}),
+          sourceKind: decision.sourceKind,
           provenance,
         });
         return mem.id;
@@ -279,7 +304,7 @@ export class LearningPipeline {
       case 'semantic': {
         const content = candidate.content as { subject: string; predicate: string; object: string };
         const mem = this.memoryRepo.createSemantic({
-          identityId: candidate.callerId,
+          identityId: decision.identityId,
           subject: content.subject,
           predicate: content.predicate,
           object: content.object,
@@ -291,10 +316,10 @@ export class LearningPipeline {
           // and the provenance JSON second, so the guard was surviving on its
           // fallback.
           sourceCycle: cycleRecord.id,
-          ...(decision.subjectKind ? { subjectKind: decision.subjectKind } : {}),
-          ...(decision.sensitivity ? { sensitivity: decision.sensitivity } : {}),
+          subjectKind: decision.subjectKind,
+          sensitivity: decision.sensitivity,
           confidence: candidate.confidence,
-          ...(decision.sourceKind ? { sourceKind: decision.sourceKind } : {}),
+          sourceKind: decision.sourceKind,
           provenance,
         });
         return mem.id;
@@ -303,13 +328,13 @@ export class LearningPipeline {
       case 'habit': {
         const content = candidate.content as { pattern: string; frequency?: string };
         const mem = this.memoryRepo.createHabit({
-          identityId: candidate.callerId,
+          identityId: decision.identityId,
           pattern: content.pattern,
           ...(content.frequency !== undefined ? { frequency: content.frequency } : {}),
-          ...(decision.subjectKind ? { subjectKind: decision.subjectKind } : {}),
-          ...(decision.sensitivity ? { sensitivity: decision.sensitivity } : {}),
+          subjectKind: decision.subjectKind,
+          sensitivity: decision.sensitivity,
           confidence: candidate.confidence,
-          ...(decision.sourceKind ? { sourceKind: decision.sourceKind } : {}),
+          sourceKind: decision.sourceKind,
           provenance,
         });
         return mem.id;
@@ -318,12 +343,12 @@ export class LearningPipeline {
       case 'relationship': {
         const content = candidate.content as { name: string; relation: string; notes?: string; importance?: number };
         const mem = this.memoryRepo.createRelationship({
-          ownerId: candidate.callerId,
+          ownerId: decision.identityId,
           name: content.name,
           relation: content.relation,
           ...(content.notes !== undefined ? { notes: content.notes } : {}),
           ...(content.importance !== undefined ? { importance: content.importance } : {}),
-          ...(decision.sensitivity ? { sensitivity: decision.sensitivity } : {}),
+          sensitivity: decision.sensitivity,
         });
         return mem.id;
       }
@@ -331,12 +356,12 @@ export class LearningPipeline {
       case 'learned_pattern': {
         const content = candidate.content as { pattern: string };
         const mem = this.memoryRepo.createLearnedPattern({
-          identityId: candidate.callerId,
+          identityId: decision.identityId,
           pattern: content.pattern,
-          ...(decision.subjectKind ? { subjectKind: decision.subjectKind } : {}),
-          ...(decision.sensitivity ? { sensitivity: decision.sensitivity } : {}),
+          subjectKind: decision.subjectKind,
+          sensitivity: decision.sensitivity,
           confidence: candidate.confidence,
-          ...(decision.sourceKind ? { sourceKind: decision.sourceKind } : {}),
+          sourceKind: decision.sourceKind,
           provenance,
         });
         return mem.id;
@@ -426,62 +451,171 @@ export class LearningPipeline {
     return existingId;
   }
 
+  /**
+   * Hold a non-owner's claim about the owner until he confirms it.
+   *
+   * Every field here now comes from the decision. It used to take `_decision` unused and
+   * hardcode all five of `subject_kind`, `sensitivity`, `source_kind`, `lifecycle_status`
+   * and `validatedBy` in its SQL — so the policy computed a quarantine scope that this
+   * method overrode, and `validatedBy: 'app_rule'` claimed a rule had validated the one
+   * kind of row that exists *because* nothing has validated it. Its provenance also
+   * claimed `extractor: 'llm'` for every row including rule-extracted ones, and carried
+   * `quarantined: true` and a `quarantineReason` sentence that are not fields of
+   * `MemoryProvenance` and that nothing in the codebase reads — the stated reason for the
+   * quarantine existed only there, which is why `sensitivity` and `lifecycle_status` had
+   * to become the parts that actually do the work.
+   *
+   * It reached `lifecycle_status` with raw SQL because `MemoryRepository` hardcoded that
+   * column, so it also carried its own copy of the table's shape and timestamp format —
+   * one INSERT to keep in step with the schema by hand. `createSemantic` now takes a
+   * `lifecycleStatus`, so there is one writer of this table again.
+   *
+   * ## Why every domain lands in `semantic_memory`
+   *
+   * XIII.4's cell reads "Saved as `unverified_semantic`", and the quarantine branch of
+   * the policy fires on *any* domain — a guest can say "Ankit ko chai pasand hai"
+   * (`preference`), "Ankit ki behen Priya hai" (`relationship`), or "Ankit roz 6 baje
+   * uthta hai" (`habit`), and all three are unverified claims about him. This method used
+   * to cast `candidate.content` to `{ subject, predicate, object }` regardless, so for
+   * five of the six domains it bound `undefined` to three NOT NULL columns: the insert
+   * threw, the loop caught it into `details`, and the claim was silently not held. One
+   * table also means one review surface and no upsert collision with the speaker's own
+   * rows — `setPreference` matches on `(identity_id, key)` and would have overwritten a
+   * guest's own stated preference with an unconfirmed claim about someone else.
+   */
   private persistQuarantine(
     candidate: LearningCandidate,
     cycleRecord: CycleRecord,
-    _decision: ScopedLearningDecision,
+    decision: ScopedLearningDecision,
+    ownerName: string | undefined,
   ): string {
-    const id = ulid();
-    const nowIso = new Date().toISOString();
-    const content = candidate.content as { subject: string; predicate: string; object: string };
+    const claim = quarantinedClaim(candidate, ownerName);
 
-    const provenance = {
-      sourceCycleId: cycleRecord.id,
-      sourceConversationId: cycleRecord.conversationId,
-      sourceMessageIds: [],
-      extractedAt: Date.now(),
-      extractor: candidate.extractor ?? 'rule',
+    const mem = this.memoryRepo.createSemantic({
+      identityId: decision.identityId,
+      subject: claim.subject,
+      predicate: claim.predicate,
+      object: claim.object,
+      sourceCycle: cycleRecord.id,
+      subjectKind: decision.subjectKind,
+      sensitivity: decision.sensitivity,
       confidence: candidate.confidence,
-      validatedBy: 'app_rule',
-      quarantined: true,
-      quarantineReason: 'Non-owner claims about owner require owner confirmation',
-    };
-
-    // Store in semantic_memory with unverified / quarantine lifecycle_status
-    this.db.raw
-      .prepare(
-        `INSERT INTO semantic_memory (id, identity_id, subject_kind, sensitivity, confidence, source_kind,
-                                     provenance_json, subject, predicate, object, source_cycle,
-                                     created_at, updated_at, lifecycle_status)
-         VALUES (?, ?, 'owner', 'owner_only', ?, 'conversation', ?, ?, ?, ?, ?, ?, ?, 'archived')`,
-      )
-      .run(
-        id,
-        candidate.callerId,
-        candidate.confidence,
-        JSON.stringify(provenance),
-        content.subject,
-        content.predicate,
-        content.object,
-        cycleRecord.id,
-        nowIso,
-        nowIso,
-      );
-
-    return id;
-  }
-
-  private async publish(type: DomainEventType, payload: Record<string, unknown>): Promise<void> {
-    if (!this.eventBus) return;
-    await this.eventBus.publish({
-      type,
-      payload,
-      identityId: undefined,
-      cycleId: undefined,
-      timestamp: Date.now(),
-      causationId: undefined,
-      correlationId: undefined,
-      version: 1,
+      sourceKind: decision.sourceKind,
+      lifecycleStatus: decision.lifecycleStatus,
+      provenance: {
+        sourceCycleId: cycleRecord.id,
+        sourceConversationId: cycleRecord.conversationId,
+        sourceMessageIds: [],
+        extractedAt: Date.now(),
+        extractor: candidate.extractor ?? 'rule',
+        confidence: candidate.confidence,
+        validatedBy: decision.validatedBy,
+      },
     });
+
+    return mem.id;
   }
+
+  /**
+   * Announce that a memory landed, fire-and-forget, failure reported.
+   *
+   * See `TaskExecutor.publish`. The row is already committed when this runs — a
+   * lost announcement costs a projection an update, and an unhandled rejection
+   * would have cost the process its life.
+   */
+  private publish(type: DomainEventType, payload: Record<string, unknown>): void {
+    const bus = this.eventBus;
+    if (!bus) return;
+    void bus
+      .publish({
+        type,
+        payload,
+        identityId: undefined,
+        cycleId: undefined,
+        timestamp: Date.now(),
+        causationId: undefined,
+        correlationId: undefined,
+        version: 1,
+      })
+      .catch((error: unknown) => {
+        this.report(`publishing ${type}`, error);
+      });
+  }
+}
+
+/**
+ * One unverified claim, as the triple that will hold it.
+ *
+ * The point is that nothing is lost while it waits: whatever domain the speaker's
+ * sentence was extracted into, the words survive in `object`, what was asserted survives
+ * in `predicate`, and `subject` names who it was asserted about. The owner reviewing his
+ * quarantine reads sentences, not a domain tag.
+ *
+ * `subject` falls back to the role word when there is no enrolled owner name, because
+ * that is then the only reason the policy could have fired — `isAboutOwner` matches
+ * either the name or the word.
+ */
+function quarantinedClaim(
+  candidate: LearningCandidate,
+  ownerName: string | undefined,
+): { subject: string; predicate: string; object: string } {
+  const content =
+    typeof candidate.content === 'object' && candidate.content !== null
+      ? (candidate.content as Record<string, unknown>)
+      : {};
+  const text = (key: string): string => {
+    const value = content[key];
+    return typeof value === 'string' ? value.trim() : '';
+  };
+  const about = ownerName?.trim() || 'owner';
+
+  const claim = ((): { subject: string; predicate: string; object: string } => {
+    switch (candidate.domain) {
+      case 'semantic':
+        return {
+          subject: text('subject') || about,
+          predicate: text('predicate') || 'is',
+          object: text('object'),
+        };
+      case 'preference':
+        return {
+          subject: about,
+          predicate: `prefers:${text('key') || 'unspecified'}`,
+          object: text('value'),
+        };
+      case 'habit':
+        return {
+          subject: about,
+          predicate: text('frequency') ? `habit:${text('frequency')}` : 'habit',
+          object: text('pattern'),
+        };
+      case 'learned_pattern':
+        return { subject: about, predicate: 'pattern', object: text('pattern') };
+      case 'relationship':
+        return {
+          subject: about,
+          predicate: `relation:${text('relation') || 'unspecified'}`,
+          object: [text('name'), text('notes')].filter(Boolean).join(' — '),
+        };
+      case 'episodic':
+        return {
+          subject: about,
+          predicate: 'episode',
+          object: [text('summary'), text('details')].filter(Boolean).join(' — '),
+        };
+      default: {
+        const _exhaustive: never = candidate.domain;
+        throw new Error(`Unhandled memory domain: ${String(_exhaustive)}`);
+      }
+    }
+  })();
+
+  // A row whose `object` is empty holds no claim, and writing one would let the caller
+  // count it as learned. Empty string satisfies NOT NULL, so the schema will not catch
+  // this; the loop records the failure in `details` instead.
+  if (claim.object === '') {
+    throw new Error(`Quarantined ${candidate.domain} claim carried no text to hold`);
+  }
+
+  return claim;
 }

@@ -1,87 +1,95 @@
 /**
- * Advanced Intelligence Modules (Phase P24 / Milestone M16)
+ * Advanced Intelligence Modules (Build Book Part XX / Part XXVI.3 Phase P24).
  *
- * Build Book Part XX & Part XXVI.3 Phase P24:
- *   Each is a CognitiveModule that hooks into one or more of the 12 cognitive
- *   stages. They are opt-in modules with explicit feature flags and isolation —
- *   a failure in one cannot crash the runtime.
+ * Four faculties that hook the 12-stage cycle: emotion reading, relationship
+ * context, long-horizon reflection, dream consolidation. Each is opt-in behind its
+ * own flag and isolated, so a failure in one cannot crash a cycle.
  *
- * Modules declare:
- *   - id            stable module identifier
- *   - flag          feature flag key that controls enable/disable
- *   - hooks         list of stage numbers this module participates in
- *   - run(input, stage, context)  per-stage contribution (pure; may be async)
+ * ## What changed here, and why the file got smaller
  *
- * The AdvancedModuleRegistry:
- *   - holds the registered modules
- *   - resolves enabled modules from a flag map
- *   - invokes only the hook that matches the current stage number
- *   - isolates failures: a throwing module is recorded as a WarningAction and
- *     does not propagate the error
+ * This file used to hold the contract, the registry, *and* four factories whose
+ * bodies were one line each:
+ *
+ *     return { hint: 'emotion-reading:no-op', inputKind: typeof input };
+ *
+ * Four flags, four hook lists, four entries in the trace — and nothing behind any
+ * of them. That is a worse failure than missing code, because the wiring reported
+ * success: `successCount: 6` on a cycle where six modules had done nothing at all.
+ *
+ * So the four factories now live in their own files with real implementations, the
+ * shared contract lives in `./types.js`, and this file keeps the registry and the
+ * re-exports. Every name that was importable from here before still is —
+ * `tests/p24/advanced-modules.test.ts` imports twelve of them and needed no edit.
+ *
+ * ## Why the factories take dependencies now
+ *
+ * A module that reads affect has to write the tone somewhere; a module that folds
+ * duplicates has to reach the memory repository. Those arrive as an
+ * `AdvancedModuleDeps` bag rather than through the registry, because the registry's
+ * job is dispatch and isolation and it should not have to know what any module
+ * wants.
+ *
+ * Every parameter is optional at every level, so `createDefaultAdvancedModules()`
+ * with no arguments keeps working exactly as it did — it builds four real modules
+ * that compute what they can and report `applied: false` for the rest. That path is
+ * public surface and is what the P24 tests exercise; the wired path is what
+ * `server/app.ts` builds.
  */
 
 import type { StageNumber } from '@server/cognition/types.js';
 
-export type AdvancedModuleId =
-  | 'emotion-reading'
-  | 'relationship-context'
-  | 'long-horizon-reflection'
-  | 'dream-consolidation';
+import { createDreamConsolidationModule } from './dream.js';
+import { createEmotionReadingModule } from './emotion.js';
+import { createLongHorizonReflectionModule } from './reflection.js';
+import { createRelationshipContextModule } from './relationship.js';
+import {
+  DEFAULT_ADVANCED_FLAGS,
+  type AdvancedModule,
+  type AdvancedModuleContext,
+  type AdvancedModuleDeps,
+  type AdvancedModuleFlagMap,
+  type AdvancedModuleId,
+  type AdvancedModuleResult,
+} from './types.js';
 
-export type AdvancedModuleFlag =
-  | 'enableEmotionReading'
-  | 'enableRelationshipContext'
-  | 'enableLongHorizonReflection'
-  | 'enableDreamConsolidation';
-
-export interface AdvancedModuleFlagMap {
-  enableEmotionReading: boolean;
-  enableRelationshipContext: boolean;
-  enableLongHorizonReflection: boolean;
-  enableDreamConsolidation: boolean;
-}
-
-export const DEFAULT_ADVANCED_FLAGS: Readonly<AdvancedModuleFlagMap> = {
-  enableEmotionReading: false,
-  enableRelationshipContext: false,
-  enableLongHorizonReflection: false,
-  enableDreamConsolidation: false,
+export {
+  createDreamConsolidationModule,
+  createEmotionReadingModule,
+  createLongHorizonReflectionModule,
+  createRelationshipContextModule,
 };
-
-export interface AdvancedModuleContext {
-  identityId: string;
-  conversationId: string;
-  cycleId: string;
-  /** Current stage number — set by the caller so modules can branch. */
-  stageNumber: StageNumber;
-}
-
-export interface AdvancedModuleResult {
-  /** Stable module id that produced this result. */
-  moduleId: AdvancedModuleId;
-  /** Stage number that produced this result (echo of the input stage). */
-  stage: StageNumber;
-  /** Payload contributed by the module. Shape is opaque to the registry. */
-  data: Record<string, unknown>;
-  /** Optional diagnostic note. */
-  note?: string;
-}
-
-export interface AdvancedModule {
-  readonly id: AdvancedModuleId;
-  readonly flag: AdvancedModuleFlag;
-  /** Stage numbers this module participates in. Only those stages invoke `run`. */
-  readonly hooks: readonly StageNumber[];
-  /** Pure per-stage contribution. Throwing is never propagated. */
-  run(input: unknown, stage: StageNumber, context: AdvancedModuleContext): Promise<Record<string, unknown>>;
-}
+export type { DreamOptions } from './dream.js';
+export type { ReflectionOptions } from './reflection.js';
+export { REFLECTION_PREDICATE } from './reflection.js';
+export {
+  MIN_ACTIONABLE_CONFIDENCE,
+  personaDeltaFor,
+  readAffect,
+  type AffectLabel,
+  type AffectReading,
+} from './affect.js';
+export {
+  DEFAULT_ADVANCED_FLAGS,
+  EMPTY_ADVANCED_EXTENSION,
+  type AdvancedCognitiveExtension,
+  type AdvancedCycleNote,
+  type AdvancedModule,
+  type AdvancedModuleContext,
+  type AdvancedModuleDeps,
+  type AdvancedModuleFlag,
+  type AdvancedModuleFlagMap,
+  type AdvancedModuleId,
+  type AdvancedModuleReport,
+  type AdvancedModuleResult,
+} from './types.js';
 
 /**
  * Isolated invocation of the advanced modules enabled by `flags`.
  *
- * - Offline: if a module's flag is false, the module is skipped entirely.
- * - Isolated: a module that throws is swallowed and reported as an `errors`
- *   entry; it cannot abort the cycle.
+ * - Off: a module whose flag is false is never constructed into a call.
+ * - Isolated: a module that throws is recorded in `errors` and cannot abort the
+ *   cycle. Modules are advisory, so callers must *not* branch on `errors` to
+ *   block the surrounding stage.
  * - Stage-filtered: only modules whose `hooks` include `stage` are invoked.
  */
 export class AdvancedModuleRegistry {
@@ -111,26 +119,32 @@ export class AdvancedModuleRegistry {
   }
 
   enabledIds(flags: AdvancedModuleFlagMap): AdvancedModuleId[] {
-    return [...this.modules.values()]
-      .filter((m) => flags[m.flag])
-      .map((m) => m.id);
+    return [...this.modules.values()].filter((m) => flags[m.flag]).map((m) => m.id);
+  }
+
+  /** True when at least one enabled module hooks `stage` — lets a caller skip the call. */
+  hooksStage(stage: StageNumber, flags: AdvancedModuleFlagMap): boolean {
+    for (const module of this.modules.values()) {
+      if (flags[module.flag] && module.hooks.includes(stage)) return true;
+    }
+    return false;
   }
 
   /**
-   * Invoke all enabled modules that hook the given `stage`.
+   * Invoke every enabled module that hooks `stage`.
    *
-   * Returns `{ results, errors }` where `results` are the successful module
-   * outputs and `errors` are isolated failures (string ids + throw message).
-   *
-   * Never throws for module-level errors — callers must not branch on
-   * `errors` to block the outer stage; advanced modules are advisory.
+   * Returns the successful outputs and the isolated failures. Never throws for a
+   * module-level error.
    */
   async run(
     input: unknown,
     stage: StageNumber,
     context: AdvancedModuleContext,
     flags: AdvancedModuleFlagMap,
-  ): Promise<{ results: AdvancedModuleResult[]; errors: Array<{ moduleId: AdvancedModuleId; message: string }> }> {
+  ): Promise<{
+    results: AdvancedModuleResult[];
+    errors: Array<{ moduleId: AdvancedModuleId; message: string }>;
+  }> {
     const results: AdvancedModuleResult[] = [];
     const errors: Array<{ moduleId: AdvancedModuleId; message: string }> = [];
 
@@ -151,77 +165,32 @@ export class AdvancedModuleRegistry {
   }
 }
 
-// ── Default no-op implementations for the four P24 modules ──
-//
-// Each module's `run` is deliberately trivial — just an echo with metadata.
-// Real inference/retrieval logic plugs in by replacing the module instance
-// while preserving the same interface, flag, and isolation contract.
-
-export function createEmotionReadingModule(): AdvancedModule {
-  return {
-    id: 'emotion-reading',
-    flag: 'enableEmotionReading',
-    hooks: [2, 4], // enriches IDENTIFY and UNDERSTAND
-    async run(input: unknown, _stage: StageNumber, _ctx: AdvancedModuleContext) {
-      // Placeholder — real impl classifies affect from voice/text features.
-      return { hint: 'emotion-reading:no-op', inputKind: typeof input };
-    },
-  };
-}
-
-export function createRelationshipContextModule(): AdvancedModule {
-  return {
-    id: 'relationship-context',
-    flag: 'enableRelationshipContext',
-    hooks: [4], // contributes to UNDERSTAND (Part XX.1)
-    async run(input: unknown, _stage: StageNumber, _ctx: AdvancedModuleContext) {
-      // Placeholder — real impl recalls who matters to whom for this identity.
-      return { hint: 'relationship-context:no-op', inputKind: typeof input };
-    },
-  };
-}
-
-export function createLongHorizonReflectionModule(): AdvancedModule {
-  return {
-    id: 'long-horizon-reflection',
-    flag: 'enableLongHorizonReflection',
-    hooks: [11], // summarizes/consolidates during UPDATE
-    async run(input: unknown, _stage: StageNumber, _ctx: AdvancedModuleContext) {
-      // Placeholder — real impl produces scheduled daily/weekly summaries.
-      return { hint: 'long-horizon-reflection:no-op', inputKind: typeof input };
-    },
-  };
-}
-
-export function createDreamConsolidationModule(): AdvancedModule {
-  return {
-    id: 'dream-consolidation',
-    flag: 'enableDreamConsolidation',
-    hooks: [10, 12], // offline consolidation in LEARN + PERSIST window
-    async run(input: unknown, _stage: StageNumber, _ctx: AdvancedModuleContext) {
-      // Placeholder — real impl runs during quiet hours.
-      return { hint: 'dream-consolidation:no-op', inputKind: typeof input };
-    },
-  };
-}
-
-export function createDefaultAdvancedModules(): AdvancedModule[] {
+/**
+ * The four modules, in stage order of their first hook.
+ *
+ * Callable with no arguments on purpose — see the header. With no deps each module
+ * still runs and still reports; it simply reports that it had nowhere to write.
+ */
+export function createDefaultAdvancedModules(deps: AdvancedModuleDeps = {}): AdvancedModule[] {
   return [
-    createEmotionReadingModule(),
-    createRelationshipContextModule(),
-    createLongHorizonReflectionModule(),
-    createDreamConsolidationModule(),
+    createEmotionReadingModule(deps),
+    createRelationshipContextModule(deps),
+    createLongHorizonReflectionModule(deps),
+    createDreamConsolidationModule(deps),
   ];
 }
 
-export function createDefaultAdvancedModuleRegistry(): AdvancedModuleRegistry {
-  return new AdvancedModuleRegistry(createDefaultAdvancedModules());
+export function createDefaultAdvancedModuleRegistry(
+  deps: AdvancedModuleDeps = {},
+): AdvancedModuleRegistry {
+  return new AdvancedModuleRegistry(createDefaultAdvancedModules(deps));
 }
 
 export function createEnabledAdvancedModuleRegistry(
   flags: Partial<AdvancedModuleFlagMap> = {},
+  deps: AdvancedModuleDeps = {},
 ): { registry: AdvancedModuleRegistry; flags: AdvancedModuleFlagMap } {
-  const registry = createDefaultAdvancedModuleRegistry();
+  const registry = createDefaultAdvancedModuleRegistry(deps);
   const resolved: AdvancedModuleFlagMap = { ...DEFAULT_ADVANCED_FLAGS, ...flags };
   return { registry, flags: resolved };
 }

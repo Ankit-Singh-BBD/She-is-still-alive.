@@ -3,7 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#05070a" />
+    <!--
+      Her `--ground` at night with no weather applied. This is the colour the browser
+      paints in its own chrome and the colour Android paints behind the splash screen,
+      so a value that disagrees with the stylesheet shows up as a visible seam above
+      the field for the whole first paint. It is the last hand-written copy of that
+      palette; `tests/presence/stylesheet.test.ts` holds it to the derived one.
+    -->
+    <meta name="theme-color" content="#05050b" />
     <meta name="description" content="Madhurita — a persistent presence." />
 
     <title>Madhurita</title>

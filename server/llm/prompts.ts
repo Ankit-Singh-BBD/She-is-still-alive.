@@ -25,6 +25,7 @@
 
 import type { ScopedMemoryItem } from '@server/memory/types.js';
 import { mayDiscloseToCaller } from '@server/cognition/stages/9.js';
+import type { ToolSpec } from '@server/tools/roster.js';
 import type {
   ActionResult,
   AuthorizedDecision,
@@ -91,10 +92,16 @@ This is the DECIDE stage. Propose one action.
 
   respond        - say something
   execute_tool   - run one of the tools listed in the prompt, by its exact id
-  schedule_task  - something should happen later
   learn          - something should be remembered
   clarify        - ask before acting
   noop           - do nothing
+
+There is no action for "later". Something that has to happen at a later time is
+still execute_tool — a scheduling tool in the list, given the time as its input.
+Only a tool leaves anything behind, so if nothing in the list can carry it, choose
+respond and say plainly that you cannot set it up. Never propose an action in the
+hope that some later stage will honour it: the five above are the only ones the
+application carries out, and it carries them out exactly as written.
 
 This is a proposal and nothing more. The application checks it against the
 caller's permissions and refuses it if they do not have the clearance; a refused
@@ -112,11 +119,12 @@ Plain sentences. No markdown, no bullet points, no stage directions, no emoji
 unless she is answering one. Short — usually one or two sentences. You are
 speaking, not writing.
 
-The hard rule: never claim an action happened unless the verification you are
-shown confirms it. If an action ran but could not be confirmed, say that you
-could not confirm it. Do not say done, saved, scheduled, sent or taken care of
-over an unconfirmed action. The application will catch you and replace your
-whole answer with an admission, which is worse than admitting it yourself.
+The hard rule: never say a thing happened unless this prompt shows you that it
+happened. If an action ran but could not be confirmed, say you could not confirm
+it. If no action ran, say you have not done it. Do not say done, saved, scheduled,
+sent, taken care of, kar diya or ho gaya over anything this prompt does not
+confirm. Over an unconfirmed action the application will catch you and replace
+your whole answer with an admission, which is worse than admitting it yourself.
 
 Never mention how you work — no table names, no file paths, no stage names, no
 SQL. Speak only from what you are shown here; if a memory is not in this prompt,
@@ -154,9 +162,28 @@ export const SYSTEM_INSTRUCTIONS = {
 
 // ── Rendering ──────────────────────────────────────────────────────────────
 
-/** What was said, plus who said it — by kind, never by id. */
+/**
+ * What was said, plus who said it — by kind, never by id.
+ *
+ * A proactive trigger is rendered differently, and it has to be. Nobody said it:
+ * `AutonomicLoop` woke, a sensor read a row, and the text in the payload is *her
+ * own* observation on the way to becoming speech. Labelling it `Said:` under
+ * `Speaker: owner` told the faculty that he had reported his own failed reminder
+ * to her, and the answer that came back was addressed to the wrong person about
+ * the wrong event. `Noticed:` says what the payload actually is, and the absent
+ * speaker says who is starting this.
+ */
 function renderStimulus(stimulus: IdentifiedStimulus): string {
   const text = textOf(stimulus.payload);
+  if (stimulus.inputType === 'proactive_trigger') {
+    return [
+      `Speaker: nobody — nothing was said to you, and you are choosing to speak first`,
+      `Channel: ${stimulus.source} (${stimulus.inputType})`,
+      `Noticed: ${text.length > 0 ? text : '(nothing — the sensor produced no words)'}`,
+      `Address the ${stimulus.identityKind} directly about this, in your own words.`,
+      ...(stimulus.attachedContext ? [`Context: ${stimulus.attachedContext}`] : []),
+    ].join('\n');
+  }
   const lines = [
     `Speaker: ${stimulus.identityKind}`,
     `Channel: ${stimulus.source} (${stimulus.inputType})`,
@@ -312,7 +339,7 @@ export function buildReasonPrompt(input: {
 export function buildDecidePrompt(input: {
   stimulus: IdentifiedStimulus;
   reasoning: ReasoningTraceProposal;
-  toolIds: readonly string[];
+  tools: readonly ToolSpec[];
 }): string {
   const steps = input.reasoning.steps
     .map((s, i) => `${i + 1}. ${s.description} → ${s.conclusion} (${s.confidence.toFixed(2)})`)
@@ -325,9 +352,32 @@ export function buildDecidePrompt(input: {
     `Recommended: ${input.reasoning.recommendedApproach}`,
     `Considered: ${input.reasoning.optionsConsidered.join(', ') || 'nothing else'}`,
     '',
-    input.toolIds.length > 0
-      ? `Tools you may propose, by exact id:\n${input.toolIds.map((id) => `- ${id}`).join('\n')}`
-      : 'There are no tools available in this configuration. Do not propose execute_tool.',
+    renderTools(input.tools),
+  ].join('\n');
+}
+
+/**
+ * The roster, with what each tool does and what it takes.
+ *
+ * This used to be the ids alone — seven strings like `reminder.schedule` — while the
+ * instruction above them said "you must give its id and its input as JSON text". The
+ * argument names were therefore guessed, and stage 7's `inputSchema` rejected the
+ * guess. Every line here is derived from the tool's own schema by `toolRoster`, so
+ * what she is told a tool takes is what the executor will accept.
+ */
+function renderTools(tools: readonly ToolSpec[]): string {
+  if (tools.length === 0) {
+    return 'There are no tools available in this configuration. Do not propose execute_tool.';
+  }
+  const lines = tools.map((tool) => {
+    const args = tool.args === undefined ? 'no arguments' : tool.args;
+    const writes = tool.clearance === 'all' ? ' [changes something]' : '';
+    return `- ${tool.id}${writes} — ${tool.description}\n  input: {${args}}`;
+  });
+  return [
+    'Tools you may propose, by exact id. `input` lists every field the tool accepts;',
+    'a field marked `?` may be omitted and every other one is required.',
+    ...lines,
   ].join('\n');
 }
 
@@ -344,25 +394,58 @@ export function buildRespondPrompt(input: {
     '',
     renderMemory(input.recalled, true),
     '',
-    `What you decided: ${input.decision.proposal.action} — ${input.decision.proposal.rationale}`,
   ];
 
-  if (!input.decision.authorized) {
+  // On a refusal `decision.proposal` is the fallback, not what she chose. Reading
+  // it here told her "what you decided: clarify" and then "that was refused" —
+  // two lines that cannot both be about the same thing, and she was being asked
+  // to speak from them. `refusedProposal` is what she actually put forward.
+  const refused = input.decision.refusedProposal;
+  if (refused) {
+    lines.push(`What you decided: ${refused.action} — ${refused.rationale}`);
     lines.push(
-      `That was refused: ${input.decision.reason ?? 'not permitted for this caller'}. Do not do it and do not describe it as pending.`,
+      `You were not allowed to: ${input.decision.reason ?? 'not permitted for this caller'}. It did not happen, is not queued, and is not pending. You may say you cannot do it; do not imply you might later unless you know that is true.`,
+      `What you will do instead: ${input.decision.proposal.action}.`,
     );
+  } else {
+    lines.push(
+      `What you decided: ${input.decision.proposal.action} — ${input.decision.proposal.rationale}`,
+    );
+    if (!input.decision.authorized) {
+      // No proposal was formed at all — the decision stage itself failed. Saying
+      // "that was refused" here would invent a refusal that never happened.
+      lines.push(
+        `Deciding did not complete: ${input.decision.reason ?? 'no reason recorded'}. Work only from what is above.`,
+      );
+    }
   }
 
   if (input.results.length === 0) {
-    lines.push('You took no action, so there is nothing to report as done.');
+    // The one instruction the application cannot enforce afterwards. Suppression in
+    // stage 9 needs an action result to fire, so on a zero-action turn this line is
+    // the whole gate — and it has to be explicit, because "nothing to report as done"
+    // is satisfied by an answer that never says "done" and still leaves him believing
+    // the thing is set up.
+    lines.push(
+      'You took no action this turn. Nothing outside this conversation changed: nothing was scheduled, sent, saved, switched on or set up.',
+      'If he asked you to do something, say plainly that you have not done it. Do not say or imply that it is handled, on a list, or coming later.',
+    );
   } else {
     lines.push('', 'What actually happened:');
     for (const result of input.results) {
-      const state = !result.success
-        ? `did not run (${result.error ?? 'no reason recorded'})`
-        : result.verified
-          ? 'ran, and was confirmed against stored state — you may say this happened'
-          : 'ran, but could NOT be confirmed — you may not say it happened';
+      // The three states a result can be in, and they are three rather than two.
+      // "did not run" was written over both halves of `!success` — a call that was
+      // dispatched and threw, and a call that was never made at all. She was being
+      // asked to speak from a line that could not tell her whether the world might
+      // be half-changed, which is the one thing she most needs to get right here.
+      const state = !result.attempted
+        ? `was never called (${result.error ?? 'no reason recorded'}) — nothing changed, say so plainly`
+        : !result.success
+          ? `was called and failed partway (${result.error ?? 'no reason recorded'}) — it may have done ` +
+            'part of what it was asked; you may not say it worked, and you may not say nothing happened'
+          : result.verified
+            ? 'ran, and was confirmed against stored state — you may say this happened'
+            : 'ran, but could NOT be confirmed — you may not say it happened';
       lines.push(`- ${result.toolId}: ${state}`);
       if (result.success && result.verified && result.output !== undefined) {
         lines.push(`  it came back with: ${compact(result.output)}`);
@@ -383,11 +466,14 @@ export function buildLearnPrompt(input: {
   response: AuthorizedResponse;
   actionResults: { toolId: string; success: boolean; verified: boolean }[];
 }): string {
+  const refused = input.decision.refusedProposal;
   return [
     renderStimulus(input.recalled.stimulus),
     '',
     `You answered: ${input.response.text || '(nothing)'}`,
-    `You had decided: ${input.decision.proposal.action}`,
+    refused
+      ? `You had decided: ${refused.action}, and were not allowed to (${input.decision.reason ?? 'no reason recorded'}).`
+      : `You had decided: ${input.decision.proposal.action}`,
     input.actionResults.length > 0
       ? `Actions: ${input.actionResults.map((r) => `${r.toolId} (${r.verified ? 'confirmed' : 'unconfirmed'})`).join(', ')}`
       : 'Actions: none.',

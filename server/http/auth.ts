@@ -47,13 +47,29 @@
  * never granted CORS to.
  */
 
-import type { Request, Response } from 'express';
+import type { Response } from 'express';
+import type { IncomingHttpHeaders } from 'node:http';
 
 import type { Identity, IdentityKind, Session } from '@server/identity/types.js';
 import type { IdentityRepository } from '@server/identity/repository.js';
 import type { SameSite } from '@server/config/env.js';
 
 import { HttpError } from './errors.js';
+
+/**
+ * Everything authentication actually reads off a request.
+ *
+ * Narrower than Express's `Request` on purpose. Express's own `Request` extends
+ * `http.IncomingMessage`, so every route still passes one of these without a
+ * change — and so does the raw `IncomingMessage` that arrives on a WebSocket
+ * upgrade, which never goes through Express at all. The alternative was casting
+ * an upgrade request to `Request` and hoping nothing downstream reached for
+ * `req.query`; a type that says what is read cannot be wrong about it.
+ */
+export interface AuthenticatableRequest {
+  readonly method?: string | undefined;
+  readonly headers: IncomingHttpHeaders;
+}
 
 /** How the credential arrived, which decides whether CSRF applies. */
 export type CredentialSource = 'bearer' | 'cookie';
@@ -107,7 +123,7 @@ export function readCookie(header: string | undefined, name: string): string | u
  * stale cookie shadow it would make "log in as someone else" silently not work.
  */
 export function readCredential(
-  req: Request,
+  req: AuthenticatableRequest,
   cookieName: string,
 ): { token: string; via: CredentialSource } | undefined {
   const header = req.headers.authorization;
@@ -137,12 +153,15 @@ export function readCredential(
  * over the header it could have used instead.
  */
 export function assertNotCrossSite(
-  req: Request,
+  req: AuthenticatableRequest,
   via: CredentialSource,
   allowedOrigins: readonly string[],
 ): void {
   if (via === 'bearer') return;
-  if (SAFE_METHODS.has(req.method)) return;
+  // An absent method is treated as unsafe rather than safe: this guard's job is
+  // to refuse, and a request that will not say what it is does not get the
+  // benefit of the doubt.
+  if (req.method !== undefined && SAFE_METHODS.has(req.method)) return;
 
   const fetchSite = req.headers['sec-fetch-site'];
   if (typeof fetchSite === 'string' && fetchSite !== '') {
@@ -191,7 +210,7 @@ export interface AuthenticatorOptions {
  * never logged in" from "your session ended" from "you are locked out" — three
  * different screens that a bare 401 collapses into one.
  */
-export function authenticate(req: Request, options: AuthenticatorOptions): Caller {
+export function authenticate(req: AuthenticatableRequest, options: AuthenticatorOptions): Caller {
   const credential = readCredential(req, options.cookieName);
   if (credential === undefined) {
     throw new HttpError('no_credential', 'This needs a session.');
@@ -228,6 +247,31 @@ export function authenticate(req: Request, options: AuthenticatorOptions): Calle
   }
 
   return { identity, session, via: credential.via };
+}
+
+/**
+ * The same authentication, for a WebSocket upgrade, with the CSRF hole closed.
+ *
+ * A WebSocket upgrade is a `GET`. `SAFE_METHODS` therefore early-returns and the
+ * one CSRF guard in this process does not run — on the one long-lived,
+ * bidirectional, cookie-authenticated channel the application has. That is
+ * cross-site WebSocket hijacking: `new WebSocket('wss://her.host/voice')` from any
+ * page in any tab sends the cookie, and the same-origin policy has nothing to say
+ * about it because a WebSocket is not an XHR. The attacker would get a microphone
+ * feed and a text channel into her memory.
+ *
+ * The fix is one line and it is not a second policy: the upgrade is presented to
+ * `assertNotCrossSite` with a method that is not in `SAFE_METHODS`, because a
+ * socket that can stream a microphone and send `say` *is* a state-changing
+ * request whatever verb carried it. The judgement "this is a write" belongs at the
+ * call site; the rule about origins stays in the one function that holds it, and
+ * the fabricated verb never leaves this one.
+ */
+export function authenticateUpgrade(
+  req: AuthenticatableRequest,
+  options: AuthenticatorOptions,
+): Caller {
+  return authenticate({ method: 'UPGRADE', headers: req.headers }, options);
 }
 
 /**

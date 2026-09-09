@@ -86,13 +86,13 @@ export function installCoreTools(deps: CoreToolDeps): string[] {
 }
 
 /**
- * What clearance a tool declares, for stage 7's defence-in-depth check.
+ * What clearance a tool declares, for the two authorization gates that need it.
  *
- * Stage 7 re-authorizes before dispatch, and it has no registry — so without
- * this it had to assume `safe`, which is the weaker of the two requirements. A
- * write tool would then pass stage 7's check and be refused later inside the
+ * Stages 6 and 7 both call `check()` with a `clearanceRequired`, and neither has a
+ * registry — so without this both had to assume `safe`, the weaker of the two
+ * requirements. A write tool then passed both checks and was refused inside the
  * pipeline, meaning the boundary that exists to catch a tampered decision was
- * checking the wrong thing.
+ * checking the wrong thing, and the trace blamed the wrong stage.
  */
 export function clearanceLookup(registry: ToolRegistry) {
   return (toolId: string): 'safe' | 'all' | undefined => registry.get(toolId)?.clearanceRequired;
@@ -100,5 +100,6 @@ export function clearanceLookup(registry: ToolRegistry) {
 
 export { ToolVerifierRegistry, installTool } from './verification.js';
 export { PipelineToolExecutor } from './executor.js';
+export { toolRoster, describeArgs, type ToolSpec } from './roster.js';
 export type { Postcondition, VerifiedTool, VerificationEvidence, VerificationOutcome } from './types.js';
 export { held, broken, parseOutput } from './types.js';

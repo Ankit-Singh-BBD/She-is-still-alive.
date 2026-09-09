@@ -26,7 +26,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { resolve } from 'node:path';
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 import { z } from 'zod';
 import { Database, closeDatabase } from '@server/persistence/db.js';
 import { runMigrations } from '@server/persistence/migrate.js';
@@ -133,6 +133,7 @@ describe('P13 — VERIFY re-reads authoritative state', () => {
 
   const succeeded = (toolId: string, output: unknown): ActionResult => ({
     toolId,
+    attempted: true,
     success: true,
     output,
     verified: false,
@@ -364,20 +365,50 @@ describe('P13 — VERIFY re-reads authoritative state', () => {
       expect(report.discrepancies.join('\n')).toMatch(/does not match its own output schema/);
     });
 
-    it('does not re-read anything for a call that never executed', async () => {
+    it('does not re-read anything for a call that did not complete', async () => {
+      // Dispatched and thrown, so `attempted` is true and the sentence has to leave
+      // room for a tool that did half of what it was asked before failing. Stage 8
+      // still re-reads nothing: an unfinished call has no postcondition to hold.
       const report = await stage8([
-        { toolId: 'memory.remember_event', success: false, error: 'timed out', verified: false },
+        {
+          toolId: 'memory.remember_event',
+          attempted: true,
+          success: false,
+          error: 'timed out',
+          verified: false,
+        },
       ]);
-      expect(report.preconditionsMet).toBe(true);
       expect(report.results[0]?.verified).toBe(false);
-      expect(report.discrepancies.join('\n')).toMatch(/did not execute: timed out/);
+      expect(report.discrepancies.join('\n')).toMatch(/was called and did not complete: timed out/);
     });
 
-    it('fails its precondition when no tool was ever identified', async () => {
+    it('says a refused call was never made, rather than that it failed', async () => {
+      // The other half of `!success`, and the one the old single sentence read wrong.
+      // Nothing was dispatched, so nothing can be half-done.
       const report = await stage8([
-        { toolId: 'unknown', success: false, error: 'not authorized', verified: false },
+        {
+          toolId: 'memory.remember_event',
+          attempted: false,
+          success: false,
+          error: 'No tool executor is wired; action is disabled',
+          verified: false,
+        },
       ]);
-      expect(report.preconditionsMet).toBe(false);
+      expect(report.postconditionsMet).toBe(false);
+      expect(report.discrepancies.join('\n')).toMatch(/was never called: No tool executor is wired/);
+      expect(report.discrepancies.join('\n')).not.toMatch(/did not complete/);
+    });
+
+    it('says so when no tool was ever identified, rather than verifying nothing quietly', async () => {
+      // Stage 7 refused before dispatch, so there is no id to look state up by. The
+      // honest report is the sentence naming that — which is what stage 9 can show
+      // the caller — and a `postconditionsMet` of false by the same route as any
+      // other discrepancy.
+      const report = await stage8([
+        { toolId: 'unknown', attempted: false, success: false, error: 'not authorized', verified: false },
+      ]);
+      expect(report.postconditionsMet).toBe(false);
+      expect(report.results[0]?.verified).toBe(false);
       expect(report.discrepancies.join('\n')).toMatch(/without an identified tool: not authorized/);
     });
 
@@ -385,7 +416,6 @@ describe('P13 — VERIFY re-reads authoritative state', () => {
       // A cycle that decided to say something and act on nothing must not be
       // reported as unverified — there is no claim to disprove.
       const report = await stage8([]);
-      expect(report.preconditionsMet).toBe(true);
       expect(report.postconditionsMet).toBe(true);
       expect(report.discrepancies).toEqual([]);
       expect(report.results).toEqual([]);

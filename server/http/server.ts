@@ -75,6 +75,21 @@ export interface HttpServerOptions {
   /** Overrides `config.server.port`. `0` asks the OS for a free one. */
   readonly port?: number | undefined;
   readonly host?: string | undefined;
+  /**
+   * Anything that needs the `http.Server` itself rather than the Express app.
+   *
+   * There is exactly one such thing — the WebSocket gateway, which listens for
+   * `upgrade` — and this is how it gets there without `server.ts` importing `ws`.
+   * A closure rather than a value because the server does not exist until
+   * `start()`, and the returned handle is closed *before* the listener in `stop()`:
+   * a live socket is an open connection, and `server.close()` waits for those.
+   */
+  readonly attach?: ((server: Server) => Attachment) | undefined;
+}
+
+/** Something holding sockets that must be let go before the listener closes. */
+export interface Attachment {
+  close(): Promise<void>;
 }
 
 export interface RunningHttpServer {
@@ -158,13 +173,19 @@ export function createHttpServer(options: HttpServerOptions): HttpServerHandle {
       const port = options.port ?? deps.config.server.port;
       const host = options.host ?? deps.config.server.host;
       const server = createServer(app);
+      const attachment = options.attach?.(server);
       const bound = await listen(server, port, host);
       return {
         app,
         port: bound,
         host,
         url: `http://${host === '0.0.0.0' || host === '::' ? 'localhost' : host}:${bound}`,
-        stop: () => close(server),
+        stop: async () => {
+          // Attachment first. A WebSocket is a connection `server.close()` waits
+          // for, so closing in the other order is the hang described in decision 4.
+          await attachment?.close();
+          await close(server);
+        },
       };
     },
   };

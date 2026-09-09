@@ -14,7 +14,12 @@ import { config as loadDotenv } from 'dotenv';
 
 import { loadConfig, describeConfig, ConfigError } from '@server/config/env.js';
 import { createApp, type MadhuritaApp, type BootReport } from '@server/app.js';
-import { createHttpServer, type RunningHttpServer } from '@server/http/index.js';
+import {
+  attachVoiceGateway,
+  createHttpServer,
+  VOICE_PATH,
+  type RunningHttpServer,
+} from '@server/http/index.js';
 
 // `.env` is read here and nowhere else. Until now `dotenv` was a dependency
 // that was never actually called, which meant every value an operator put in
@@ -80,13 +85,25 @@ async function main(): Promise<void> {
   // WAL files that were never checkpointed.
   let http: RunningHttpServer;
   try {
-    http = await createHttpServer({ deps: app.routeDeps }).start();
+    http = await createHttpServer({
+      deps: app.routeDeps,
+      // The one thing that needs the `http.Server` and not the Express app: a
+      // WebSocket lives on the `upgrade` event, which Express never sees. The
+      // gateway is handed to `stop()` through the returned handle, so every open
+      // voice session — and every provider session behind one — is closed before
+      // the listener is, which is also the only reason `stop()` returns at all
+      // with a microphone attached.
+      attach: (server) => attachVoiceGateway(server, { deps: app.routeDeps, ear: app.voiceEar }),
+    }).start();
   } catch (error) {
     await app.stop();
     throw error;
   }
 
   console.log(`  listening        : ${http.url}`);
+  // Derived from `url` rather than from `host`, which is `0.0.0.0` when she is
+  // bound to every interface — an address a browser cannot connect to.
+  console.log(`  voice            : ${http.url.replace(/^http/, 'ws')}${VOICE_PATH}`);
   console.log('');
   console.log('  She is awake. Ctrl-C to stop.');
   console.log('');

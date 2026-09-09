@@ -1,10 +1,11 @@
 /**
  * The Gemini transport.
  *
- * One class, one job: send a prompt to `gemini-2.5-flash-lite` and return the
- * JSON it answered with. Everything that makes it safe to hand to a cognitive
- * stage lives here, and each of these is a rule the model cannot talk its way
- * out of because it is applied on this side of the wire:
+ * One class, one job: send a prompt to the configured reasoning model
+ * (`DEFAULT_REASONING_MODEL` unless `LLM_REASONING_MODEL` says otherwise) and
+ * return the JSON it answered with. Everything that makes it safe to hand to a
+ * cognitive stage lives here, and each of these is a rule the model cannot talk
+ * its way out of because it is applied on this side of the wire:
  *
  *  - **The stage's token budget is enforced, not requested.** The prompt is
  *    truncated to the stage's `maxInputTokens` before it is sent, and

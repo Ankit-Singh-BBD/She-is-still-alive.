@@ -10,7 +10,7 @@
  * persists rows.
  */
 
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 import type { Database } from '@server/persistence/db.js';
 import type { EventBus } from '@server/events/event-bus.js';
 import type { ToolRegistry } from '@server/actions/registry.js';
@@ -21,6 +21,18 @@ import type { DomainEventType } from '@server/events/types.js';
 
 export type TaskKind = 'reminder' | 'recurring' | 'one_shot' | 'background';
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+/**
+ * How many permanently-failed rows `failedTasks` will pull before filtering by
+ * time in TypeScript.
+ *
+ * The bound exists because the `since` cutoff cannot be a SQL predicate (see
+ * `failedTasks`), so the query has to over-fetch. It is generous relative to
+ * what a caller does with the result — the autonomic layer raises *one* notice
+ * per failed task and is rate-limited per topic — while still refusing to load a
+ * year of failures into memory to answer a question about the last hour.
+ */
+const FAILED_TASK_SCAN_LIMIT = 200;
 
 export interface TaskSchedule {
   runAt?: number; // epoch ms; if absent, run immediately when claimed
@@ -64,6 +76,14 @@ export interface TaskExecutorOptions {
    * share a single instance.
    */
   identityRepo?: IdentityRepository;
+  /**
+   * Where a failed event publish is reported. Defaults to `console.error`.
+   *
+   * Injectable for the same reason `EventBus` and `RealtimeFlow` have one: the
+   * bug this exists for is a rejection nobody sees, and a test cannot assert on
+   * `console`.
+   */
+  report?: ((what: string, error: unknown) => void) | undefined;
 }
 
 export interface ScheduleTaskInput {
@@ -95,6 +115,7 @@ export class TaskExecutor {
   private readonly retryBaseMs: number;
   private readonly retryMaxMs: number;
   private readonly handlers: TaskExecutorHandlers;
+  private readonly report: (what: string, error: unknown) => void;
 
   private running = false;
   private stopRequested = false;
@@ -112,6 +133,11 @@ export class TaskExecutor {
     this.retryBaseMs = options.retryBaseMs ?? 1000;
     this.retryMaxMs = options.retryMaxMs ?? 60_000;
     this.handlers = {};
+    this.report =
+      options.report ??
+      ((what, error) => {
+        console.error(`[tasks] ${what}:`, error);
+      });
   }
 
   /** Set reminder dispatch handler (e.g. from realtime broadcaster). */
@@ -164,7 +190,7 @@ export class TaskExecutor {
         now,
       );
 
-    void this.publish('task.scheduled', { taskId: id, kind: input.kind, dueAt: Date.parse(dueAt) });
+    this.publish('task.scheduled', { taskId: id, kind: input.kind, dueAt: Date.parse(dueAt) });
     return id;
   }
 
@@ -176,7 +202,7 @@ export class TaskExecutor {
       )
       .run(new Date().toISOString(), taskId);
     if (result.changes > 0) {
-      void this.publish('task.cancelled', { taskId });
+      this.publish('task.cancelled', { taskId });
       this.inflight.delete(taskId);
       return true;
     }
@@ -211,6 +237,49 @@ export class TaskExecutor {
   /** Force an immediate evaluation cycle (e.g. from a test or operator). */
   async tick(now: number = Date.now()): Promise<number> {
     return this.runClaimCycle(now);
+  }
+
+  /**
+   * Tasks that used up every attempt and never succeeded, most recent first.
+   *
+   * Here rather than as a query in the caller because the `task` table is this
+   * module's to read: the autonomic layer needs to know that something she
+   * undertook for him has permanently failed, and a second place that knows how
+   * `status`, `attempt` and `max_attempts` relate is a second place to get it
+   * wrong. The `attempt >= max_attempts` term is what distinguishes a permanent
+   * failure from one the retry backoff is still working through — a row can sit
+   * in `failed` between attempts.
+   *
+   * `since` bounds it so a database that has been alive for a year does not
+   * report a task that failed in March as news. It is applied in TypeScript
+   * rather than as a SQL predicate on purpose: `task.updated_at` is TEXT and the
+   * column holds two formats — `datetime('now')` from the schema default writes
+   * `'YYYY-MM-DD HH:MM:SS'`, while every write in this file uses
+   * `toISOString()`. Those two do not order against each other lexically (`'T'`
+   * sorts above `' '`), so a string range comparison would silently drop rows.
+   * `mapRow` parses both, and a number comparison is unambiguous.
+   */
+  failedTasks(since: number, identityId?: string): TaskRow[] {
+    const columns = `id, identity_id, kind, payload_json, due_at, status, attempt, max_attempts,
+                created_at, updated_at, completed_at, last_error`;
+    const rows = (
+      identityId === undefined
+        ? this.db.raw
+            .prepare(
+              `SELECT ${columns} FROM task
+                WHERE status = 'failed' AND attempt >= max_attempts
+                ORDER BY updated_at DESC LIMIT ?`,
+            )
+            .all(FAILED_TASK_SCAN_LIMIT)
+        : this.db.raw
+            .prepare(
+              `SELECT ${columns} FROM task
+                WHERE status = 'failed' AND attempt >= max_attempts AND identity_id = ?
+                ORDER BY updated_at DESC LIMIT ?`,
+            )
+            .all(identityId, FAILED_TASK_SCAN_LIMIT)
+    ) as Record<string, unknown>[];
+    return rows.map((r) => this.mapRow(r)).filter((task) => task.updatedAt >= since);
   }
 
   // ── Internals ──
@@ -258,12 +327,12 @@ export class TaskExecutor {
     if (claim.changes === 0) return; // somebody else claimed it
 
     this.inflight.add(row.id);
-    void this.publish('task.claimed', { taskId: row.id, attempt: row.attempt + 1 });
+    this.publish('task.claimed', { taskId: row.id, attempt: row.attempt + 1 });
 
     try {
       await this.executePayload(row);
       this.markCompleted(row.id);
-      void this.publish('task.completed', { taskId: row.id });
+      this.publish('task.completed', { taskId: row.id });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.markFailed(row, message, now);
@@ -316,7 +385,15 @@ export class TaskExecutor {
         caller: this.callerFor(row.identityId),
       });
       if (!result.success) {
-        throw new Error(result.error ?? `Tool ${payload.toolId} returned failure`);
+        // Which of the two failures this was, in the message. `markFailed` records the
+        // message and nothing else about the outcome survives, so a row that says only
+        // "returned failure" cannot tell someone reading it later whether the tool was
+        // refused at the gate or ran and broke partway.
+        throw new Error(
+          result.attempted
+            ? `Tool ${payload.toolId} was called and failed: ${result.error ?? 'no reason recorded'}`
+            : `Tool ${payload.toolId} was never called: ${result.error ?? 'no reason recorded'}`,
+        );
       }
     } else {
       // Exhaustive check
@@ -364,7 +441,7 @@ export class TaskExecutor {
           `UPDATE task SET status = 'failed', last_error = ?, updated_at = ? WHERE id = ?`,
         )
         .run(error, isoNow, row.id);
-      void this.publish('task.failed', { taskId: row.id, error, attempt: row.attempt + 1 });
+      this.publish('task.failed', { taskId: row.id, error, attempt: row.attempt + 1 });
     } else {
       const delay = Math.min(
         this.retryBaseMs * Math.pow(2, row.attempt) + Math.random() * 100,
@@ -376,7 +453,7 @@ export class TaskExecutor {
           `UPDATE task SET status = 'pending', last_error = ?, due_at = ?, updated_at = ? WHERE id = ?`,
         )
         .run(error, nextDue, isoNow, row.id);
-      void this.publish('task.retry_scheduled', { taskId: row.id, error, nextDue, attempt: row.attempt + 1 });
+      this.publish('task.retry_scheduled', { taskId: row.id, error, nextDue, attempt: row.attempt + 1 });
     }
   }
 
@@ -398,20 +475,37 @@ export class TaskExecutor {
     };
   }
 
-  private async publish(
-    type: DomainEventType,
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    if (!this.eventBus) return;
-    await this.eventBus.publish({
-      type,
-      payload,
-      identityId: undefined,
-      cycleId: undefined,
-      timestamp: Date.now(),
-      causationId: undefined,
-      correlationId: undefined,
-      version: 1,
-    });
+  /**
+   * Announce that something happened to a task, without making the caller wait
+   * and without letting a failed announcement take the process down.
+   *
+   * Both halves are load-bearing. `scheduleTask` returns an id the caller will
+   * use; the row is already committed by then, so waiting on the event would
+   * make a durable write slower for no gain. But the thirteen call sites used to
+   * write `void this.publish(...)` over a promise nothing caught, and
+   * `server/main.ts` turns an unhandled rejection into a shutdown — so a
+   * `SQLITE_BUSY` on the event insert during a sweep would stop the server
+   * *after* the task was scheduled and the id handed out.
+   *
+   * Returning `void` rather than a promise is what makes that unrepeatable: there
+   * is no rejection left for a call site to forget.
+   */
+  private publish(type: DomainEventType, payload: Record<string, unknown>): void {
+    const bus = this.eventBus;
+    if (!bus) return;
+    void bus
+      .publish({
+        type,
+        payload,
+        identityId: undefined,
+        cycleId: undefined,
+        timestamp: Date.now(),
+        causationId: undefined,
+        correlationId: undefined,
+        version: 1,
+      })
+      .catch((error: unknown) => {
+        this.report(`publishing ${type}`, error);
+      });
   }
 }

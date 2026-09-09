@@ -44,7 +44,7 @@
  */
 
 import type { Router } from 'express';
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 
 import type { RuntimeState, Subscriber } from '@server/realtime/types.js';
 

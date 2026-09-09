@@ -7,6 +7,7 @@
  */
 
 import type { Database } from '@server/persistence/db.js';
+import { toRomanHinglish } from '@server/lang/index.js';
 import { MemoryRepository } from './repository.js';
 import type {
   Habit,
@@ -182,8 +183,8 @@ export class MemoryRetrieval {
   private bagOfWordsSimilarity(query: string, text: string): number {
     if (!query || !text) return 0;
 
-    const queryTokens = new Set(query.toLowerCase().match(/\w+/g) ?? []);
-    const textTokens = new Set(text.toLowerCase().match(/\w+/g) ?? []);
+    const queryTokens = comparableTokens(query);
+    const textTokens = comparableTokens(text);
 
     if (queryTokens.size === 0 || textTokens.size === 0) return 0;
 
@@ -251,4 +252,44 @@ export class MemoryRetrieval {
 
     return scoped;
   }
+}
+
+/**
+ * Comparable words out of a line of text, for the overlap score above.
+ *
+ * Three things beyond lowercasing, all of them about the language she is actually
+ * spoken to in:
+ *
+ *  - `\p{L}` rather than `\w`. `\w` is `[A-Za-z0-9_]` and nothing else, so a line
+ *    written in Devanagari tokenized to the empty set and every similarity
+ *    involving it came back 0 — from the empty-set guard, not from any judgement
+ *    about the words.
+ *  - One script, via `toRomanHinglish`. Tokenizing Devanagari correctly is not
+ *    enough on its own: a Roman query and a Devanagari memory then produce two
+ *    valid token sets that overlap in nothing. The ear already folds what it hears
+ *    (`server/voice/live/session.ts`), but a turn *typed* in Devanagari reaches the
+ *    store without passing the ear, and a memory written from one of those would be
+ *    unreachable from every query she is ever spoken. Applied to both sides here, so
+ *    the store may hold either script and the comparison stops caring.
+ *  - Vowel length is folded away, because Roman Hinglish has no settled spelling
+ *    for it. The same word is typed "theek" and "thik", "aaj" and "aj", "hoon" and
+ *    "hun", "yaad" and "yad", and a memory written one way would never match a
+ *    stimulus written the other. `ee`→`i`, `oo`→`u`, then any repeated letter
+ *    collapsed — applied to both sides, so the fold can only ever join two
+ *    spellings of one word, never separate them. It is also what absorbs the
+ *    transliterator's deliberate choice of the short form: `ठीक` becomes "thik"
+ *    and the owner types "theek".
+ *
+ * It costs some precision in English: "book" and "buk" fold together, as do "all"
+ * and "al". This is one weighted term in a ranking sum next to importance and
+ * recency, not a filter, and a near-miss that ranks slightly high is a far smaller
+ * failure than a whole script that could not be seen.
+ */
+function comparableTokens(text: string): Set<string> {
+  const words = toRomanHinglish(text).toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
+  return new Set(words.map(foldVowelLength));
+}
+
+function foldVowelLength(word: string): string {
+  return word.replace(/ee/g, 'i').replace(/oo/g, 'u').replace(/(.)\1+/g, '$1');
 }

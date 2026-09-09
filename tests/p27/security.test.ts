@@ -101,7 +101,7 @@ describe('P27: Security Pass Verification (Part XXIII.3)', () => {
         description: 'Test',
         inputSchema: z.object({ age: z.number() }),
         clearanceRequired: 'safe',
-        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [] },
+        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [], retryOnDeadline: false },
         timeoutMs: 1000,
         execute: async (input: unknown) => {
           return { val: (input as { age: number }).age * 2 };
@@ -137,7 +137,7 @@ describe('P27: Security Pass Verification (Part XXIII.3)', () => {
         description: 'Test',
         inputSchema: z.object({ name: z.string() }),
         clearanceRequired: 'safe',
-        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [] },
+        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [], retryOnDeadline: false },
         timeoutMs: 1000,
         execute: async (input: unknown) => {
           capturedInput = input;
@@ -176,7 +176,7 @@ describe('P27: Security Pass Verification (Part XXIII.3)', () => {
         description: 'Dangerous action',
         inputSchema: z.object({}),
         clearanceRequired: 'all',
-        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [] },
+        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [], retryOnDeadline: false },
         timeoutMs: 1000,
         execute: async () => {
           return { destroyed: true };
@@ -233,7 +233,7 @@ describe('P27: Security Pass Verification (Part XXIII.3)', () => {
       const response = await respond(
         recalled as never,
         decision as never,
-        [{ toolId: 'delete.tool', success: true, verified: false }],
+        [{ toolId: 'delete.tool', attempted: true, success: true, verified: false }],
         undefined,
         { llm: mockLLM, audit: auditCollector },
       );

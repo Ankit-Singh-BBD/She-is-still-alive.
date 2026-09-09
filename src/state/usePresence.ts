@@ -21,6 +21,14 @@
  * is counting events for it, so `version` is `0`. Opening a stream then is a
  * request we already know answers 503, so it is not made; the status goes straight
  * to `unavailable` and the field visibly stops claiming to be live.
+ *
+ * ## Two signals, one connection
+ *
+ * This hook owns the page's only `EventSource`, so anything else that needs the
+ * stream is served from here rather than by opening a second one. `state` is the
+ * server's own snapshot; `cycleCommits` counts cycles that committed, which is what
+ * the transcript watches — it cannot be read off `state`, and `src/lib/stream.ts`
+ * explains at length why not.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -32,6 +40,18 @@ export interface PresenceReading {
   /** The last state the server reported. `undefined` until the first read lands. */
   state: RuntimeState | undefined;
   status: StreamStatus;
+  /**
+   * How many cycles have committed since this stream opened.
+   *
+   * A counter rather than the event, because the only useful content of the signal
+   * is that it changed: a reader re-reads whatever it cares about. Counting also
+   * makes it impossible to act on the same commit twice, which an event object
+   * carried in state cannot promise across a re-render.
+   *
+   * `0` means none yet — the room may still be mid-conversation from before this
+   * client connected, which is what the opening reads are for.
+   */
+  cycleCommits: number;
 }
 
 export interface PresenceOptions {
@@ -44,6 +64,7 @@ export interface PresenceOptions {
 export function usePresence({ active, onExpire }: PresenceOptions): PresenceReading {
   const [state, setState] = useState<RuntimeState | undefined>(undefined);
   const [status, setStatus] = useState<StreamStatus>('connecting');
+  const [cycleCommits, setCycleCommits] = useState(0);
 
   // Held in a ref so a fresh callback identity from the parent cannot tear down a
   // working stream and reopen it.
@@ -54,6 +75,9 @@ export function usePresence({ active, onExpire }: PresenceOptions): PresenceRead
     if (!active) {
       setState(undefined);
       setStatus('closed');
+      // Reset with the room. A count from the last visit would read as a commit
+      // that happened during this one.
+      setCycleCommits(0);
       return;
     }
 
@@ -90,6 +114,9 @@ export function usePresence({ active, onExpire }: PresenceOptions): PresenceRead
         onStatus: (next) => {
           if (live) setStatus(next);
         },
+        onCycleCommitted: () => {
+          if (live) setCycleCommits((n) => n + 1);
+        },
       });
     })();
 
@@ -99,5 +126,5 @@ export function usePresence({ active, onExpire }: PresenceOptions): PresenceRead
     };
   }, [active]);
 
-  return { state, status };
+  return { state, status, cycleCommits };
 }

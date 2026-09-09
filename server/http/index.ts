@@ -12,7 +12,15 @@
  */
 
 export { createHttpServer, devOrigins } from './server.js';
-export type { HttpServerHandle, HttpServerOptions, RunningHttpServer } from './server.js';
+export type {
+  Attachment,
+  HttpServerHandle,
+  HttpServerOptions,
+  RunningHttpServer,
+} from './server.js';
+
+export { attachVoiceGateway, VOICE_PATH } from './ws.js';
+export type { VoiceGateway, VoiceGatewayOptions } from './ws.js';
 
 export type { RouteDeps } from './deps.js';
 

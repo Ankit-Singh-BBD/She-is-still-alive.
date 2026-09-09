@@ -1,12 +1,30 @@
 /**
  * P24 — Advanced Modules Opt-in (M16)
- * Tests for AdvancedModuleRegistry, AdvancedModuleCognitiveHook, and the
- * per-module opt-in / isolation contract.
+ *
+ * Two halves, and the split is deliberate.
+ *
+ * The first half tests `AdvancedModuleRegistry` on its own — construction, flag
+ * enablement, stage filtering, failure isolation. What can go wrong there is
+ * dispatch logic, and dispatch logic is far easier to pin down without twelve
+ * stages and a database in the way.
+ *
+ * The second half used to test `AdvancedModuleCognitiveHook`, which ran the same
+ * registry over an already-*finished* `CycleRecord`. That class is deleted, and its
+ * ten tests are not ported: they asserted that a mechanism nothing called did what
+ * it claimed. A module that reads affect at stage 2 exists so stage 9 can answer in
+ * the register it found, and a pass beginning after stage 12 has committed cannot
+ * inform any stage of the cycle it is reading — so every write it made landed a turn
+ * late. What replaces them drives a real `CognitiveRuntime` over a real migrated
+ * database, because that is the only path there is now.
  *
  * Per Build Book Part XX & Part XXVI.3.
  */
 
 import { describe, it, expect } from 'vitest';
+import * as path from 'node:path';
+import { Database } from '@server/persistence/db.js';
+import { runMigrations } from '@server/persistence/migrate.js';
+import { CognitiveRuntime } from '@server/cognition/runtime.js';
 import {
   AdvancedModuleRegistry,
   createDefaultAdvancedModuleRegistry,
@@ -17,39 +35,17 @@ import {
   createLongHorizonReflectionModule,
   createDreamConsolidationModule,
   DEFAULT_ADVANCED_FLAGS,
+  type AdvancedCognitiveExtension,
   type AdvancedModule,
   type AdvancedModuleFlagMap,
   type AdvancedModuleId,
 } from '@server/advanced/index.js';
-import {
-  AdvancedModuleCognitiveHook,
-  createDefaultAdvancedCognitiveHook,
-  createAdvancedCognitiveHook,
-} from '@server/advanced/cognitive-hook.js';
-import type { CycleRecord } from '@server/cognition/types.js';
+import type { CycleRecord, RawStimulus } from '@server/cognition/types.js';
+
+const repoRoot = path.resolve(__dirname, '..', '..');
+const migrationsDir = path.join(repoRoot, 'server/persistence/migrations');
 
 // ── Helpers ──
-
-function makeCycle(opts: { stageCount?: number; identityId?: string; conversationId?: string } = {}): CycleRecord {
-  const stageCount = opts.stageCount ?? 12;
-  const stages = Array.from({ length: stageCount }, (_, i) => ({
-    stage: (i + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12,
-    stageName: `STAGE_${i + 1}`,
-    startedAt: 1000,
-    completedAt: 2000,
-    inputJson: JSON.stringify({ hello: 'world', index: i + 1 }),
-    outputJson: JSON.stringify({ ok: true, index: i + 1 }),
-  }));
-  return {
-    id: 'cycle-test',
-    identityId: opts.identityId ?? 'identity-1',
-    conversationId: opts.conversationId ?? 'conv-1',
-    status: 'completed',
-    startedAt: 1000,
-    completedAt: 2000,
-    stages,
-  };
-}
 
 function makeThrowingModule(id: AdvancedModuleId, flag: keyof AdvancedModuleFlagMap, hooks: readonly (1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12)[]): AdvancedModule {
   return {
@@ -278,54 +274,99 @@ describe('P24 AdvancedModuleRegistry (Part XX, M16)', () => {
   });
 });
 
-describe('P24 AdvancedModuleCognitiveHook (Part XX.2 — wire into cycles)', () => {
-  it('returns an empty extension when registry is undefined (MVP path)', async () => {
-    const hook = createDefaultAdvancedCognitiveHook();
-    const cycle = makeCycle();
-    const ext = await hook.afterCycle(cycle, {
-      source: 'text',
-      payload: 'hello',
-      receivedAt: 1000,
-      identityId: 'ident-1',
-    });
+const IDENTITY = 'ident-A';
+const CONVERSATION = 'conv-A';
+
+/**
+ * One full twelve-stage cycle over a fresh migrated database, and the module
+ * reports it produced.
+ *
+ * A bare `CognitiveRuntime` with no LLM wired is exactly right here: every stage
+ * still runs and still hands its input to the modules, and what this file is about
+ * is *when a module is invoked*, not what it decides. `onCycle` is the only place
+ * the extension is observable — it is on `CycleOutcome`, deliberately not on
+ * `CycleRecord` — so a test cannot reach it any other way.
+ */
+async function cycleWith(
+  advanced: { registry: AdvancedModuleRegistry; flags: AdvancedModuleFlagMap } | undefined,
+  text = 'hello',
+): Promise<{ ext: AdvancedCognitiveExtension; record: CycleRecord }> {
+  const db = new Database({ path: ':memory:' });
+  runMigrations(db, migrationsDir);
+  db.raw
+    .prepare(
+      `INSERT INTO identity (id, kind, display_name, status) VALUES (?, 'guest', 'Guest', 'active')`,
+    )
+    .run(IDENTITY);
+  db.raw
+    .prepare(`INSERT INTO conversation (id, identity_id) VALUES (?, ?)`)
+    .run(CONVERSATION, IDENTITY);
+
+  let ext: AdvancedCognitiveExtension | undefined;
+  const runtime = new CognitiveRuntime({
+    db,
+    ...(advanced ? { advanced } : {}),
+    onCycle: (_record, extras) => {
+      ext = extras.advanced;
+    },
+  });
+
+  const stimulus: RawStimulus = {
+    source: 'text',
+    payload: { text },
+    receivedAt: 1_700_000_000_000,
+    identityId: IDENTITY,
+    conversationId: CONVERSATION,
+  };
+  const record = await runtime.runCycle(stimulus);
+
+  // Not ceremony: without this, a runtime that never notified would be
+  // indistinguishable from one whose modules all declined.
+  expect(ext).toBeDefined();
+  return { ext: ext!, record };
+}
+
+describe('P24 advanced modules inside a real cycle (Part XX.2 — wire into cycles)', () => {
+  it('reports an empty extension when no registry is wired', async () => {
+    const { ext, record } = await cycleWith(undefined);
+
     expect(ext.notes).toEqual([]);
     expect(ext.successCount).toBe(0);
     expect(ext.errorCount).toBe(0);
+    // The MVP path: she thinks a whole cycle through with no faculties attached.
+    expect(record.status).toBe('completed');
   });
 
-  it('returns an empty extension when all flags are off', async () => {
+  it('reports an empty extension when every flag is off', async () => {
     const registry = createDefaultAdvancedModuleRegistry();
-    const hook = new AdvancedModuleCognitiveHook({ registry, flags: DEFAULT_ADVANCED_FLAGS });
-    const cycle = makeCycle();
-    const ext = await hook.afterCycle(cycle, {
-      source: 'text',
-      payload: 'hello',
-      receivedAt: 1000,
-      identityId: 'ident-1',
-    });
+    const { ext, record } = await cycleWith({ registry, flags: DEFAULT_ADVANCED_FLAGS });
+
     expect(ext.notes).toEqual([]);
     expect(ext.successCount).toBe(0);
     expect(ext.errorCount).toBe(0);
+    expect(record.status).toBe('completed');
   });
 
-  it('invokes enabled modules at every stage they hook into', async () => {
+  it('invokes a module at every stage it hooks, inside the cycle it is reading', async () => {
     const { module, calls } = makeRecordingModule('emotion-reading', 'enableEmotionReading', [2, 4]);
     const registry = new AdvancedModuleRegistry([module]);
     const flags: AdvancedModuleFlagMap = { ...DEFAULT_ADVANCED_FLAGS, enableEmotionReading: true };
-    const hook = createAdvancedCognitiveHook({ registry, flags });
 
-    const ext = await hook.afterCycle(
-      makeCycle({ stageCount: 6 }),
-      { source: 'text', payload: 'hi', receivedAt: 1, identityId: 'ident-A' },
-    );
+    const { ext, record } = await cycleWith({ registry, flags });
 
-    expect(calls).toHaveLength(2);
-    expect(calls.map((c) => c.stage).sort()).toEqual([2, 4]);
+    expect(calls.map((c) => c.stage)).toEqual([2, 4]);
     expect(ext.successCount).toBe(2);
     expect(ext.errorCount).toBe(0);
+    // The point of the whole in-cycle path, and the one thing the deleted
+    // after-the-cycle mechanism could not do: the context a module is handed names
+    // the cycle *currently running*, so a stage that has not happened yet can still
+    // act on what the module found.
+    expect(calls.every((c) => c.cycleId === record.id)).toBe(true);
+    expect(calls.every((c) => c.identityId === IDENTITY)).toBe(true);
+    expect(ext.notes.map((n) => n.stage)).toEqual([2, 4]);
   });
 
-  it('isolates a throwing module so the cycle remains green', async () => {
+  it('isolates a throwing module and still finishes the cycle', async () => {
     const throwing = makeThrowingModule('emotion-reading', 'enableEmotionReading', [2]);
     const { module: ok, calls: okCalls } = makeRecordingModule(
       'relationship-context',
@@ -338,92 +379,104 @@ describe('P24 AdvancedModuleCognitiveHook (Part XX.2 — wire into cycles)', () 
       enableEmotionReading: true,
       enableRelationshipContext: true,
     };
-    const hook = createAdvancedCognitiveHook({ registry, flags });
 
-    const ext = await hook.afterCycle(
-      makeCycle({ stageCount: 6 }),
-      { source: 'text', payload: 'hi', receivedAt: 1, identityId: 'ident-A' },
-    );
+    const { ext, record } = await cycleWith({ registry, flags });
 
     expect(okCalls).toHaveLength(1);
     expect(ext.successCount).toBe(1);
     expect(ext.errorCount).toBe(1);
     expect(ext.notes).toHaveLength(2);
+    // 'degraded' is what a *stage* failing looks like. A module failing must not
+    // reach the status at all: these are advisory faculties, and one of them
+    // exploding cannot be allowed to change what the cycle reports about itself.
+    expect(record.status).toBe('completed');
+    expect(record.error).toBeUndefined();
   });
 
-  it('counts success and error totals correctly across stages', async () => {
-    const { module: a, calls: aCalls } = makeRecordingModule(
+  it('aggregates success and error totals across stages', async () => {
+    const { module: reader, calls } = makeRecordingModule(
       'emotion-reading',
       'enableEmotionReading',
       [2, 4],
     );
     const throwing = makeThrowingModule('relationship-context', 'enableRelationshipContext', [4]);
-    const registry = new AdvancedModuleRegistry([a, throwing]);
+    const registry = new AdvancedModuleRegistry([reader, throwing]);
     const flags: AdvancedModuleFlagMap = {
       ...DEFAULT_ADVANCED_FLAGS,
       enableEmotionReading: true,
       enableRelationshipContext: true,
     };
-    const hook = createAdvancedCognitiveHook({ registry, flags });
 
-    const ext = await hook.afterCycle(
-      makeCycle({ stageCount: 6 }),
-      { source: 'text', payload: 'hi', receivedAt: 1, identityId: 'ident-A' },
-    );
+    const { ext } = await cycleWith({ registry, flags });
 
-    expect(aCalls).toHaveLength(2);
+    expect(calls).toHaveLength(2);
     expect(ext.successCount).toBe(2);
     expect(ext.errorCount).toBe(1);
   });
 
-  it('preserves the cycle record shape (does not mutate CycleRecord)', async () => {
-    const { module } = makeRecordingModule('emotion-reading', 'enableEmotionReading', [2]);
-    const registry = new AdvancedModuleRegistry([module]);
+  it('records what a module returned without letting it change the cycle', async () => {
+    // A module that tries to be the answer. `AdvancedModuleDeps` calls this out as
+    // the contract: a faculty, not an authority.
+    const hijack: AdvancedModule = {
+      id: 'emotion-reading',
+      flag: 'enableEmotionReading',
+      hooks: [9],
+      async run(): Promise<Record<string, unknown>> {
+        return { text: 'HIJACKED', decision: { kind: 'refuse' } };
+      },
+    };
+    const registry = new AdvancedModuleRegistry([hijack]);
     const flags: AdvancedModuleFlagMap = { ...DEFAULT_ADVANCED_FLAGS, enableEmotionReading: true };
-    const hook = createAdvancedCognitiveHook({ registry, flags });
 
-    const cycle = makeCycle({ stageCount: 3 });
-    const before = JSON.parse(JSON.stringify(cycle));
-    await hook.afterCycle(cycle, {
-      source: 'text',
-      payload: 'hi',
-      receivedAt: 1,
-      identityId: 'ident-A',
-    });
-    const after = JSON.parse(JSON.stringify(cycle));
-    expect(after).toEqual(before);
+    const { ext, record } = await cycleWith({ registry, flags });
+
+    // Recorded: its report is exactly where a report goes.
+    expect(JSON.stringify(ext)).toContain('HIJACKED');
+    // Not obeyed: nothing it returned reached the response, the decision, or a trace.
+    expect(JSON.stringify(record)).not.toContain('HIJACKED');
+    expect(record.status).toBe('completed');
+  });
+
+  it('invokes the four real modules exactly six times across one cycle', async () => {
+    const registry = createDefaultAdvancedModuleRegistry();
+    const flags: AdvancedModuleFlagMap = {
+      enableEmotionReading: true,
+      enableRelationshipContext: true,
+      enableLongHorizonReflection: true,
+      enableDreamConsolidation: true,
+    };
+
+    const { ext, record } = await cycleWith({ registry, flags });
+
+    // 2, 4 (emotion) + 4 (relationship) + 10, 12 (dream) + 11 (long-horizon).
+    expect(ext.successCount).toBe(6);
+    expect(ext.errorCount).toBe(0);
+    expect(
+      ext.notes.flatMap((n) => n.results.map((r) => `${r.stage}:${r.moduleId}`)),
+    ).toEqual([
+      '2:emotion-reading',
+      '4:emotion-reading',
+      '4:relationship-context',
+      '10:dream-consolidation',
+      '11:long-horizon-reflection',
+      '12:dream-consolidation',
+    ]);
+    // Stage 12's pass runs after the commit, so a cycle it folded rows during is
+    // still a cycle that completed.
+    expect(record.status).toBe('completed');
   });
 });
 
 describe('P24 Feature flag integration (Part XX.2 — "All modules disable cleanly")', () => {
-  it('disabling every module leaves a working MVP (zero-op extension)', async () => {
-    const registry = createDefaultAdvancedModuleRegistry();
-    const flags: AdvancedModuleFlagMap = { ...DEFAULT_ADVANCED_FLAGS };
-    const hook = createAdvancedCognitiveHook({ registry, flags });
-
-    const cycle = makeCycle();
-    const ext = await hook.afterCycle(cycle, {
-      source: 'text',
-      payload: 'hi',
-      receivedAt: 1,
-      identityId: 'ident-A',
-    });
-
-    // MVP path: no advanced module touches anything.
-    expect(ext.notes).toEqual([]);
-    expect(ext.successCount).toBe(0);
-    expect(ext.errorCount).toBe(0);
-  });
-
   it('enabling a single flag activates only that module', async () => {
-    const registry = createDefaultAdvancedModuleRegistry();
     const { module, calls: erCalls } = makeRecordingModule(
       'emotion-reading',
       'enableEmotionReading',
       [2, 4],
     );
-    // override the registered module with our recording one
-    const overridden = new AdvancedModuleRegistry([
+    // The recording module stands in for the real emotion reader; the other three
+    // are the real ones, with their flags off.
+    const registry = new AdvancedModuleRegistry([
       module,
       createRelationshipContextModule(),
       createLongHorizonReflectionModule(),
@@ -433,64 +486,32 @@ describe('P24 Feature flag integration (Part XX.2 — "All modules disable clean
       ...DEFAULT_ADVANCED_FLAGS,
       enableEmotionReading: true,
     };
-    const hook = createAdvancedCognitiveHook({ registry: overridden, flags });
 
-    const ext = await hook.afterCycle(
-      makeCycle({ stageCount: 12 }),
-      { source: 'text', payload: 'hi', receivedAt: 1, identityId: 'ident-A' },
-    );
+    const { ext } = await cycleWith({ registry, flags });
 
-    expect(erCalls).toHaveLength(2);
+    expect(erCalls.map((c) => c.stage)).toEqual([2, 4]);
     expect(ext.successCount).toBe(2);
     expect(ext.errorCount).toBe(0);
-    // The other three modules' flags are off, so they do not run.
-    void registry;
+    // Every note came from the one enabled module. A flag that is off is not a
+    // module that ran and returned nothing.
+    expect(ext.notes.flatMap((n) => n.results.map((r) => r.moduleId))).toEqual([
+      'emotion-reading',
+      'emotion-reading',
+    ]);
   });
 
-  it('toggling flags between calls does not leak state across cycles', async () => {
+  it('does not carry a flag decision from one cycle into the next', async () => {
     const { module, calls } = makeRecordingModule('emotion-reading', 'enableEmotionReading', [2]);
     const registry = new AdvancedModuleRegistry([module]);
 
-    const offHook = createAdvancedCognitiveHook({ registry, flags: DEFAULT_ADVANCED_FLAGS });
-    await offHook.afterCycle(
-      makeCycle({ stageCount: 3 }),
-      { source: 'text', payload: 'a', receivedAt: 1, identityId: 'ident-A' },
-    );
+    await cycleWith({ registry, flags: DEFAULT_ADVANCED_FLAGS }, 'first');
+    expect(calls).toHaveLength(0);
 
-    const onHook = createAdvancedCognitiveHook({
-      registry,
-      flags: { ...DEFAULT_ADVANCED_FLAGS, enableEmotionReading: true },
-    });
-    await onHook.afterCycle(
-      makeCycle({ stageCount: 3 }),
-      { source: 'text', payload: 'b', receivedAt: 2, identityId: 'ident-A' },
+    await cycleWith(
+      { registry, flags: { ...DEFAULT_ADVANCED_FLAGS, enableEmotionReading: true } },
+      'second',
     );
-
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.input).toMatchObject({ hello: 'world' });
-  });
-});
-
-describe('P24 Smoke (Part XX.3 — verification)', () => {
-  it('default modules run as a no-op without crashing across the 12-stage cycle', async () => {
-    const registry = createDefaultAdvancedModuleRegistry();
-    const flags: AdvancedModuleFlagMap = {
-      ...DEFAULT_ADVANCED_FLAGS,
-      enableEmotionReading: true,
-      enableRelationshipContext: true,
-      enableLongHorizonReflection: true,
-      enableDreamConsolidation: true,
-    };
-    const hook = createAdvancedCognitiveHook({ registry, flags });
-
-    const ext = await hook.afterCycle(
-      makeCycle({ stageCount: 12 }),
-      { source: 'text', payload: 'hello', receivedAt: 100, identityId: 'ident-A' },
-    );
-
-    // Stages hooked: 2,4 (emotion) + 4 (relationship) + 11 (long-horizon) + 10,12 (dream) = 6
-    expect(ext.successCount).toBe(6);
-    expect(ext.errorCount).toBe(0);
   });
 });
 

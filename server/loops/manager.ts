@@ -11,7 +11,7 @@
  * per loop.
  */
 
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 import type { Database } from '@server/persistence/db.js';
 import type { EventBus } from '@server/events/event-bus.js';
 import type { TaskExecutor } from '@server/tasks/executor.js';
@@ -77,6 +77,11 @@ export interface LoopManagerOptions {
    * against an event storm producing one task per event.
    */
   triggerCooldownMs?: number;
+  /**
+   * Where a failed event publish is reported. Defaults to `console.error`.
+   * The same seam `EventBus` and `TaskExecutor` have, for the same reason.
+   */
+  report?: ((what: string, error: unknown) => void) | undefined;
 }
 
 interface TriggerState {
@@ -102,6 +107,7 @@ export class LoopManager {
   private readonly taskExecutor: TaskExecutor;
   private readonly pollIntervalMs: number;
   private readonly triggerCooldownMs: number;
+  private readonly report: (what: string, error: unknown) => void;
 
   private running = false;
   private stopRequested = false;
@@ -121,6 +127,11 @@ export class LoopManager {
     this.taskExecutor = taskExecutor;
     this.pollIntervalMs = options.pollIntervalMs ?? 900_000; // 15 minutes
     this.triggerCooldownMs = options.triggerCooldownMs ?? 1000;
+    this.report =
+      options.report ??
+      ((what, error) => {
+        console.error(`[loops] ${what}:`, error);
+      });
   }
 
   start(): void {
@@ -220,7 +231,7 @@ export class LoopManager {
       this.registerEventTrigger(id, input.triggerSpec);
     }
 
-    void this.publish('loop.opened', { loopId: id, topic: input.topic, identityId: input.identityId });
+    this.publish('loop.opened', { loopId: id, topic: input.topic, identityId: input.identityId });
     return id;
   }
 
@@ -245,7 +256,7 @@ export class LoopManager {
       this.unregisterEventTrigger(loopId);
       this.triggerStates.delete(loopId);
       this.specs.delete(loopId);
-      void this.publish('loop.closed', { loopId });
+      this.publish('loop.closed', { loopId });
       return true;
     }
     return false;
@@ -259,7 +270,7 @@ export class LoopManager {
       .run(new Date().toISOString(), loopId);
     if (result.changes > 0) {
       this.unregisterEventTrigger(loopId);
-      void this.publish('loop.paused', { loopId });
+      this.publish('loop.paused', { loopId });
       return true;
     }
     return false;
@@ -279,7 +290,7 @@ export class LoopManager {
       if (meta?.triggerSpec?.type === 'event') {
         this.registerEventTrigger(loopId, meta.triggerSpec);
       }
-      void this.publish('loop.resumed', { loopId });
+      this.publish('loop.resumed', { loopId });
       return true;
     }
     return false;
@@ -440,8 +451,8 @@ export class LoopManager {
       )
       .run(new Date(now).toISOString(), new Date(now).toISOString(), new Date(now).toISOString(), loop.id);
 
-    void this.publish('loop.evaluated', { loopId: loop.id, triggerSatisfied: true, taskCreated: true, taskId, reason });
-    void this.publish('loop.task_created', { loopId: loop.id, taskId });
+    this.publish('loop.evaluated', { loopId: loop.id, triggerSatisfied: true, taskCreated: true, taskId, reason });
+    this.publish('loop.task_created', { loopId: loop.id, taskId });
 
     return this.makeEval(loop, true, taskId, reason);
   }
@@ -521,19 +532,28 @@ export class LoopManager {
     };
   }
 
-  private async publish(
-    type: DomainEventType,
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    await this.eventBus.publish({
-      type,
-      payload,
-      identityId: undefined,
-      cycleId: undefined,
-      timestamp: Date.now(),
-      causationId: undefined,
-      correlationId: undefined,
-      version: 1,
-    });
+  /**
+   * Announce a loop transition, fire-and-forget, with the failure reported
+   * rather than thrown at the process.
+   *
+   * See `TaskExecutor.publish` for the full reasoning: the six call sites here
+   * all ran `void this.publish(...)`, and an unhandled rejection is a shutdown.
+   * A loop that could not announce it opened is still open.
+   */
+  private publish(type: DomainEventType, payload: Record<string, unknown>): void {
+    void this.eventBus
+      .publish({
+        type,
+        payload,
+        identityId: undefined,
+        cycleId: undefined,
+        timestamp: Date.now(),
+        causationId: undefined,
+        correlationId: undefined,
+        version: 1,
+      })
+      .catch((error: unknown) => {
+        this.report(`publishing ${type}`, error);
+      });
   }
 }

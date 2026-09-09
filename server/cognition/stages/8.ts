@@ -69,7 +69,6 @@ export async function verify(
   // No action was taken, so there is nothing to disprove.
   if (results.length === 0) {
     return {
-      preconditionsMet: true,
       postconditionsMet: true,
       discrepancies: [],
       results: [],
@@ -87,19 +86,25 @@ export async function verify(
   const checked: ActionResult[] = [];
 
   for (const result of results) {
-    // Precondition for verification: the call was addressed to an identified
-    // tool. An 'unknown' tool means stage 7 refused before dispatch.
+    // Nothing to re-read: an 'unknown' tool means stage 7 refused before dispatch,
+    // so there is no state this could confirm and no id to look one up by.
     if (!result.toolId || result.toolId === 'unknown') {
       discrepancies.push(
-        `An action was attempted without an identified tool: ${result.error ?? 'no reason recorded'}`,
+        `A tool call was decided on without an identified tool: ${result.error ?? 'no reason recorded'}`,
       );
       checked.push({ ...result, verified: false });
       continue;
     }
 
     if (!result.success) {
+      // "did not execute" was written over both halves of `!success`, and one of them
+      // did execute — it was dispatched and threw. The distinction is `attempted`, and
+      // it is the difference between "the world may be half-changed, go and look" and
+      // "nothing was touched".
       discrepancies.push(
-        `'${result.toolId}' did not execute: ${result.error ?? 'no error recorded'}`,
+        result.attempted
+          ? `'${result.toolId}' was called and did not complete: ${result.error ?? 'no error recorded'}`
+          : `'${result.toolId}' was never called: ${result.error ?? 'no reason recorded'}`,
       );
       checked.push({ ...result, verified: false });
       continue;
@@ -138,10 +143,7 @@ export async function verify(
     }
   }
 
-  const preconditionsMet = results.every((r) => Boolean(r.toolId) && r.toolId !== 'unknown');
-
   return {
-    preconditionsMet,
     postconditionsMet: discrepancies.length === 0 && checked.every((r) => r.verified),
     discrepancies,
     results: checked,

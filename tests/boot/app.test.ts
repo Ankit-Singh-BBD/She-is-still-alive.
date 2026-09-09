@@ -30,6 +30,7 @@ import { runMigrations } from '@server/persistence/migrate.js';
 import { loadConfig } from '@server/config/env.js';
 import { createApp, type MadhuritaApp } from '@server/app.js';
 import { DEFAULT_PERMISSIONS } from '@server/identity/repository.js';
+import { EventBus } from '@server/events/event-bus.js';
 import type { ProactiveCandidate } from '@server/proactive/types.js';
 import type { PersistedDomainEvent } from '@server/events/types.js';
 
@@ -191,7 +192,7 @@ describe('Composition root (server/app.ts)', () => {
         description: 'Registered behind installTool’s back',
         inputSchema: z.object({}),
         clearanceRequired: 'safe',
-        retryPolicy: { maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 1, retryableErrors: [] },
+        retryPolicy: { maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 1, retryableErrors: [], retryOnDeadline: false },
         timeoutMs: 1000,
         execute: async () => ({}),
       });
@@ -215,7 +216,12 @@ describe('Composition root (server/app.ts)', () => {
 
       expect(app.taskExecutor.isRunning()).toBe(true);
       expect(app.loopManager.isRunning()).toBe(true);
-      expect(report.started.join('\n')).toMatch(/proactive deferral sweep/);
+      // The autonomic loop replaced the standalone deferral sweep, because it
+      // calls `processDeferred` itself and then speaks what the tree authorized.
+      // Asserted on the object as well as the banner: a boot line is a claim,
+      // and `isRunning()` is the thing that makes it true.
+      expect(app.autonomic.isRunning()).toBe(true);
+      expect(report.started.join('\n')).toMatch(/autonomic loop/);
     });
 
     it('admits that BACKUP_ENABLED cannot mean an unattended timer', async () => {
@@ -254,6 +260,102 @@ describe('Composition root (server/app.ts)', () => {
       const report = await app.start();
       expect(report.auditRowsChained).toBe(2);
       expect(app.audit.verifyIntegrity().valid).toBe(true);
+    });
+
+    /**
+     * Book VI.6 — durable state reconstruction, in the one case where it shows.
+     *
+     * The setup is a process that died at stage 5 of a cycle: a `cycle_record`
+     * still saying `running`, and an event log that stops at
+     * `cycle.stage.completed`. Nothing reconstructed either half, so the row
+     * claimed a cycle was in flight in a process that no longer existed, and
+     * `GET /api/state` answered `cycleId: ''` with `lastCompletedStage:
+     * undefined` — which reads as *she has never thought about anything*
+     * rather than *she is not thinking right now*.
+     */
+    it('reconstructs the cycle it was interrupted in, and closes the row it left open', async () => {
+      const ownerId = 'usr_restart00000000000000001';
+      db.raw
+        .prepare(
+          `INSERT INTO identity (id, kind, display_name, status, enrolled_at, last_seen_at)
+           VALUES (?, 'owner', 'Owner', 'active', 0, 0)`,
+        )
+        .run(ownerId);
+      db.raw
+        .prepare(`INSERT INTO permission (identity_id, version, json) VALUES (?, 1, ?)`)
+        .run(ownerId, JSON.stringify(DEFAULT_PERMISSIONS.owner));
+      db.raw
+        .prepare(`INSERT INTO conversation (id, identity_id, channel) VALUES ('conv_1', ?, 'text')`)
+        .run(ownerId);
+      db.raw
+        .prepare(
+          `INSERT INTO cycle_record (id, conversation_id, status, started_at)
+           VALUES ('cyc_dead', 'conv_1', 'running', ?)`,
+        )
+        .run(new Date(5000).toISOString());
+
+      const priorBus = new EventBus(db);
+      priorBus.append({
+        type: 'cycle.started',
+        payload: { cycleId: 'cyc_dead' },
+        identityId: ownerId,
+        cycleId: 'cyc_dead',
+        timestamp: 5000,
+      });
+      priorBus.append({
+        type: 'cycle.stage.completed',
+        payload: { stage: 'REASON' },
+        cycleId: 'cyc_dead',
+        timestamp: 6000,
+      });
+      // The voice socket the dead process held. Replaying this back would be the
+      // same lie pointed the other way: no socket survives a restart.
+      priorBus.append({
+        type: 'session.connected',
+        payload: { channel: 'voice', canHear: true },
+        identityId: ownerId,
+        timestamp: 6500,
+      });
+
+      app = buildApp();
+      const report = await app.start();
+
+      // The durable half: the row no longer claims a cycle is running.
+      expect(report.cyclesReconciled).toBe(1);
+      const row = db.raw
+        .prepare(`SELECT status, error FROM cycle_record WHERE id = 'cyc_dead'`)
+        .get() as { status: string; error: string | null };
+      expect(row.status).toBe('failed');
+      expect(row.error).toContain('process ended');
+      // Reconciling publishes the terminal event the crash never wrote, so the
+      // log and the table say the same thing.
+      expect(events('cycle.failed')).toHaveLength(1);
+
+      // The in-memory half: she knows which cycle she was in and how far it got.
+      expect(report.eventsReplayed).toBeGreaterThanOrEqual(4);
+      const owner = app.identityRepo.getIdentity(ownerId);
+      expect(owner).not.toBeNull();
+      const state = app.projector.buildInitial(owner!);
+      expect(state.cognitive.cycleId).toBe('cyc_dead');
+      // REASON, not PERSIST. The reconciler's terminal event says the cycle
+      // ended; it does not say she got to the end of it, and folding it the
+      // ordinary way would have rewritten a death at stage 5 into a clean
+      // finish. The furthest she actually got is the last stage the log holds.
+      expect(state.cognitive.lastCompletedStage).toBe('REASON');
+      expect(state.cognitive.currentStage).toBe('REASON');
+      // ...and that the socket is gone, whatever the log's last word on it was.
+      expect(state.voice.canHear).toBe(false);
+      expect(state.voice.live).toBe('disconnected');
+      expect(state.presence.activeActor).toBeNull();
+      // Who has been here is history, and history survives a restart.
+      expect(state.presence.recentActors).toContain(ownerId);
+    });
+
+    it('reconciles nothing and replays nothing on a fresh database', async () => {
+      app = buildApp();
+      const report = await app.start();
+      expect(report.cyclesReconciled).toBe(0);
+      expect(report.eventsReplayed).toBe(0);
     });
   });
 

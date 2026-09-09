@@ -1,0 +1,33 @@
+-- A cycle that can be described back.
+--
+-- `cycle_record` was written with an `output_json` column that nothing ever filled and
+-- no column at all for the verdict the cycle reached. So a row read back said only
+-- *that* a cycle ran, its status, and how long it took. What she decided and what she
+-- answered were recoverable only from `stage_trace` — one row per stage, keyed by
+-- number, kept for tracing rather than for reading — or from the transcript, which
+-- holds her words but not the decision behind them.
+--
+-- Two things needed it and were quietly doing without:
+--
+--  * `server/learning/extractor.ts` builds the model's prompt from
+--    `cycle.decision` and `cycle.answered`. Both came back `undefined` on every
+--    stored cycle, so the consolidation sweep asked what was worth learning from a
+--    transcript with the cycle's own verdict missing beside it. The functions that
+--    render those two fields — `describeDecision`, `describeAnswer` — were
+--    unreachable in production and tested only against hand-built rows.
+--  * Her own account of herself. She is meant to know what she did and why, and an
+--    answer about a turn from an hour ago has to come from the row, because the
+--    runtime that held it in memory is long gone.
+--
+-- `decision_json` holds the authorized decision — proposal, authorization and
+-- clearance — and `output_json` now holds the authorized response. Both are written
+-- by stage 12 inside the same transaction that closes the cycle, so a row is never
+-- half a verdict: either the cycle committed with both, or it kept its `running`
+-- status with neither.
+--
+-- Nullable, because a cycle can legitimately reach neither. A stimulus refused at
+-- the gate has no authorized decision; an interrupted cycle has no response. And
+-- every row written before this migration has both as NULL, which the readers
+-- already handle — that was the state they were all built for.
+
+ALTER TABLE cycle_record ADD COLUMN decision_json TEXT;

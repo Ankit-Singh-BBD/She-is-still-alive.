@@ -48,6 +48,7 @@ import type {
   VerificationReport,
 } from '@server/cognition/types.js';
 import type { MemoryDomain, Sensitivity, SubjectKind } from '@server/memory/types.js';
+import type { ToolSpec } from '@server/tools/roster.js';
 
 import {
   buildDecidePrompt,
@@ -81,13 +82,32 @@ export interface ExtractionProposal {
 export interface LanguageFacultiesOptions {
   model: LanguageModel;
   /**
-   * The tools stage 6 may name, read at call time rather than captured.
+   * The tools stage 6 may name — with what each does and what it takes — read at
+   * call time rather than captured.
    *
    * A function because the registry is populated during boot and can grow: a
    * snapshot taken when the faculties were constructed would tell her about a
    * roster that no longer matches what stage 7 can actually run.
+   *
+   * `ToolSpec` rather than an id, because an id is not enough to call anything.
+   * See `server/tools/roster.ts`.
    */
-  toolIds: () => readonly string[];
+  tools: () => readonly ToolSpec[];
+  /**
+   * Her current register for one identity, as prompt lines — or `''` for none.
+   *
+   * A function for the same reason as `toolIds`, and more so: the tone profile is
+   * recomputed from live persona overrides that expire, so anything captured at
+   * construction would be a mood frozen at boot.
+   *
+   * Reached only by `draftResponse`, and that restriction is the design. Stages 4,
+   * 5, 6 and 10 return structured JSON — an intent, a step list, a decision, a set
+   * of extractions — where warmth and verbosity have nothing to act on; telling the
+   * model to be brief while asking it for an enum would be noise in the prompt at
+   * best and a nudge toward fewer extractions at worst. Stage 9 is the only stage
+   * whose output he actually hears.
+   */
+  tone?: ((identityId: string) => string) | undefined;
 }
 
 /**
@@ -99,11 +119,13 @@ export interface LanguageFacultiesOptions {
  */
 export class LanguageFaculties implements DecideFaculty, ResponseFaculty, LearningFaculty {
   private readonly model: LanguageModel;
-  private readonly toolIds: () => readonly string[];
+  private readonly tools: () => readonly ToolSpec[];
+  private readonly tone: ((identityId: string) => string) | undefined;
 
   constructor(options: LanguageFacultiesOptions) {
     this.model = options.model;
-    this.toolIds = options.toolIds;
+    this.tools = options.tools;
+    this.tone = options.tone;
   }
 
   /** The model that answers, for the boot banner and for provenance. */
@@ -148,18 +170,21 @@ export class LanguageFaculties implements DecideFaculty, ResponseFaculty, Learni
     stimulus: IdentifiedStimulus;
     reasoning: ReasoningTraceProposal;
   }): Promise<DecisionProposal> {
-    const toolIds = this.toolIds();
+    const tools = this.tools();
     const wire = await this.ask(
       'DECIDE',
       decisionSchema,
-      buildDecidePrompt({ ...input, toolIds }),
+      buildDecidePrompt({ ...input, tools }),
     );
 
     // A tool she was never shown is not a proposal, it is a hallucination, and
     // stage 6 would authorize it against the authz matrix rather than against
     // the roster. Reducing it to `clarify` here keeps the two consistent: the
     // application refuses, and the refusal is recorded in the rationale.
-    if (wire.action === 'execute_tool' && (!wire.toolId || !toolIds.includes(wire.toolId))) {
+    if (
+      wire.action === 'execute_tool' &&
+      (!wire.toolId || !tools.some((tool) => tool.id === wire.toolId))
+    ) {
       return {
         action: 'clarify',
         rationale: `Proposed a tool that is not installed: ${wire.toolId ?? '(none named)'}`,
@@ -170,20 +195,31 @@ export class LanguageFaculties implements DecideFaculty, ResponseFaculty, Learni
       action: wire.action,
       toolId: wire.toolId,
       toolInput: wire.toolInput,
-      taskSpec: wire.taskSpec,
       rationale: wire.rationale,
     };
   }
 
   // ── Stage 9: RESPOND ─────────────────────────────────────────────────────
 
+  /**
+   * The draft he hears — the one call that carries her register.
+   *
+   * The tone lines are appended to RESPOND's system instruction rather than to the
+   * prompt because they describe *how to speak*, which is what a system instruction
+   * is for, and because the prompt already contains recalled memories: a persona
+   * line buried among them reads as content she was told rather than as a direction.
+   *
+   * Whatever comes back is still a proposal. Stage 9 runs the disclosure policy over
+   * it afterwards, so a tone that made her chattier cannot make her leak.
+   */
   async draftResponse(input: {
     recalled: RecalledContext;
     decision: AuthorizedDecision;
     results: ActionResult[];
     verification: VerificationReport | undefined;
   }): Promise<{ text: string; voicePreferred?: boolean | undefined }> {
-    const wire = await this.ask('RESPOND', responseSchema, buildRespondPrompt(input));
+    const tone = this.tone?.(input.recalled.stimulus.identityId) ?? '';
+    const wire = await this.ask('RESPOND', responseSchema, buildRespondPrompt(input), tone);
     return { text: wire.text, voicePreferred: wire.voicePreferred };
   }
 
@@ -246,15 +282,22 @@ export class LanguageFaculties implements DecideFaculty, ResponseFaculty, Learni
   /**
    * Ask, then check. The provider's structured output is a convenience; this
    * parse is the actual gate on shape.
+   *
+   * `extraInstruction` is appended to the stage's fixed instruction, never
+   * substituted for it: the constant in `SYSTEM_INSTRUCTIONS` carries the rules that
+   * make the answer safe to parse, and a caller must not be able to displace them.
    */
   private async ask<T>(
     stage: CognitiveStageKey,
     schema: FacultySchema<T>,
     prompt: string,
+    extraInstruction = '',
   ): Promise<T> {
+    const base = SYSTEM_INSTRUCTIONS[stage];
+    const trimmed = extraInstruction.trim();
     const result = await this.model.generateJson({
       stage,
-      systemInstruction: SYSTEM_INSTRUCTIONS[stage],
+      systemInstruction: trimmed === '' ? base : `${base}\n\n${trimmed}`,
       prompt,
       schema: schema.json,
     });

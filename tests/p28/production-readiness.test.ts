@@ -11,15 +11,19 @@
  * 7. 6 Memory Domains with provenance and sensitivity gating.
  * 8. Autonomous Loops and Task Scheduler integration.
  * 9. 7-Stage Realtime Monotonic Flow contract.
- * 10. Voice pipeline and audio visualizer synchronization.
- * 11. Liquid Glass UI, Orb, and Atmosphere visual state projection.
+ * 10. Voice session state machine, and the two sample rates both ends must share.
+ * 11. Security hardening and audit-chain integrity.
  * 12. Failure injection and state resilience recovery.
+ *
+ * The old section 11 (Liquid Glass UI, Orb, Atmosphere) went with the UI it described.
+ * Its replacement is `tests/presence/presence-mapper.test.ts`, which projects the same
+ * authoritative `RuntimeState` onto the layer that exists now.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import { z } from 'zod';
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 
 // Subsystems imports
 import { Database } from '@server/persistence/db.js';
@@ -36,7 +40,11 @@ import { ProactiveEngine } from '@server/proactive/engine.js';
 import { LearningPipeline } from '@server/learning/pipeline.js';
 import { CognitiveRuntime } from '@server/cognition/runtime.js';
 import { LiveSessionStateMachine } from '@server/voice/session.js';
-import { MockAudioCapture, MockAudioPlayback } from '@server/voice/adapters/mock.js';
+import {
+  INPUT_MIME_TYPE,
+  INPUT_SAMPLE_RATE,
+  OUTPUT_SAMPLE_RATE,
+} from '@server/voice/live/transport.js';
 import { RealtimeFlow } from '@server/realtime/flow.js';
 import { PersonalityRegistry } from '@server/personality/registry.js';
 import { PersonalityEngine } from '@server/personality/engine.js';
@@ -48,6 +56,13 @@ import {
   type AdvancedModuleFlagMap,
 } from '@server/advanced/index.js';
 import type { RuntimeState, Subscriber, BroadcastMessage } from '@server/realtime/types.js';
+
+// The client half of the one voice fact that spans both ends. Imported by relative
+// path because `src` is the browser bundle, not a server alias.
+import {
+  INPUT_SAMPLE_RATE as CLIENT_INPUT_SAMPLE_RATE,
+  OUTPUT_SAMPLE_RATE as CLIENT_OUTPUT_SAMPLE_RATE,
+} from '../../src/lib/audio/pcm.js';
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const migrationsDir = path.join(repoRoot, 'server/persistence/migrations');
@@ -238,7 +253,7 @@ describe('Phase P28 — Production Readiness Validation (M18)', () => {
         description: 'Creates a user table in database',
         inputSchema: z.object({ tableName: z.string() }),
         clearanceRequired: 'all',
-        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [] },
+        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [], retryOnDeadline: false },
         timeoutMs: 1000,
         execute: async (input: unknown) => {
           const { tableName } = input as { tableName: string };
@@ -387,7 +402,7 @@ describe('Phase P28 — Production Readiness Validation (M18)', () => {
         description: 'Admin command',
         inputSchema: z.object({}),
         clearanceRequired: 'all',
-        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [] },
+        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [], retryOnDeadline: false },
         timeoutMs: 1000,
         execute: async () => ({ shutdown: true }),
       });
@@ -472,7 +487,7 @@ describe('Phase P28 — Production Readiness Validation (M18)', () => {
 
       expect(result.status).toBe('completed');
       expect(result.id).toBeDefined();
-      expect((result.response as unknown as { text: string })?.text).toBe('The system is 100% operational and healthy.');
+      expect(result.response?.text).toBe('The system is 100% operational and healthy.');
 
       const traces = db.raw
         .prepare(`SELECT stage, stage_name FROM stage_trace WHERE cycle_id = ? ORDER BY stage ASC`)
@@ -521,7 +536,7 @@ describe('Phase P28 — Production Readiness Validation (M18)', () => {
         description: 'Claims completion without doing anything',
         inputSchema: z.object({ expectedRow: z.string() }),
         clearanceRequired: 'safe',
-        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [] },
+        retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10, retryableErrors: [], retryOnDeadline: false },
         timeoutMs: 1000,
         execute: async () => ({ claimed: true }),
       });
@@ -690,14 +705,11 @@ describe('Phase P28 — Production Readiness Validation (M18)', () => {
           cycleId: 'cyc-rt-1',
           cycleStartedAt: Date.now(),
           lastCompletedStage: 'PERSIST',
-          attention: {},
         },
         voice: {
           live: 'listening',
-          energy: 0.5,
-          ttsEnergy: 0,
-          frequencyBands: [0.1, 0.2, 0.4],
-          voiceId: 'female_natural',
+          reason: 'connected',
+          canHear: true,
         },
         memory: {
           episodicCount: 1,
@@ -710,7 +722,6 @@ describe('Phase P28 — Production Readiness Validation (M18)', () => {
         },
         loops: { activeCount: 1, pausedCount: 0 },
         tasks: { pendingCount: 0, runningCount: 0, failedCount: 0 },
-        pendingActions: [],
         lastMutation: {
           eventId: 'evt-0',
           type: 'init',
@@ -738,7 +749,7 @@ describe('Phase P28 — Production Readiness Validation (M18)', () => {
   });
 
   describe('9. Voice Pipeline & Audio State Synchronization', () => {
-    it('manages LiveSessionStateMachine transitions and coordinates with AudioCapture/AudioPlayback', async () => {
+    it('manages LiveSessionStateMachine transitions and agrees with the client on both rates', async () => {
       const session = new LiveSessionStateMachine();
       expect(session.state).toBe('disconnected');
 
@@ -762,29 +773,22 @@ describe('Phase P28 — Production Readiness Validation (M18)', () => {
         session.transitionTo('connecting');
       }).toThrow();
 
-      const capture = new MockAudioCapture({ sampleRate: 16000, chunkMs: 100 });
-      const playback = new MockAudioPlayback({ sampleRate: 24000, volume: 1.0 });
-
-      await capture.start({
-        onChunk: () => {},
-        onStart: () => {},
-        onStop: () => {},
-        onPermissionDenied: () => {},
-        onDeviceNotFound: () => {},
-      });
-      expect(capture.getState().state).toBe('capturing');
-
-      await playback.init();
-      const testChunkBase64 = 'UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQYAAAD//w==';
-      await playback.playChunk(testChunkBase64, 'pcm16_base64', { durationMs: 100 });
-      expect(playback.getState().isSpeaking).toBe(true);
-
-      const waveform = new Uint8Array(64);
-      playback.getWaveformData(waveform);
-      expect(new Set(waveform).size).toBeGreaterThan(1);
-
-      await capture.dispose();
-      await playback.dispose();
+      // The audio halves used to be asserted here through a mock capture and a mock
+      // playback that only ever talked to each other. Both are gone: capture is
+      // `src/lib/audio/capture.ts` in the browser and playback is
+      // `src/lib/audio/playback.ts`, neither of which has a server-side stand-in, and
+      // the conversions between them are covered sample by sample in
+      // `tests/voice/pcm.test.ts`.
+      //
+      // What is left for this suite is the one fact that spans both ends and that no
+      // single-sided test can see: the two rates. The server declares them in its
+      // `ready` frame, the client hard-codes them, and a disagreement makes her
+      // mishear everything or speak half a tone slow — symptoms that read as a model
+      // fault rather than as arithmetic. `useVoice` refuses the microphone when they
+      // differ; this is what keeps them from differing.
+      expect(INPUT_SAMPLE_RATE).toBe(CLIENT_INPUT_SAMPLE_RATE);
+      expect(OUTPUT_SAMPLE_RATE).toBe(CLIENT_OUTPUT_SAMPLE_RATE);
+      expect(INPUT_MIME_TYPE).toBe(`audio/pcm;rate=${CLIENT_INPUT_SAMPLE_RATE}`);
     });
   });
 
@@ -892,7 +896,7 @@ describe('Phase P28 — Production Readiness Validation (M18)', () => {
       });
 
       expect(recoveredResult.status).toBe('completed');
-      expect((recoveredResult.response as unknown as { text: string })?.text).toBe('Recovered cleanly');
+      expect(recoveredResult.response?.text).toBe('Recovered cleanly');
     });
   });
 });

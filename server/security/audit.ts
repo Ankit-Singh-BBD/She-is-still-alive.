@@ -1,4 +1,4 @@
-import { ulid } from 'ulid';
+import { ulid } from '../persistence/ids.js';
 import { createHash } from 'node:crypto';
 import type { Database } from '../persistence/db.js';
 import { REDACTION } from '../cognition/stages/9.js';

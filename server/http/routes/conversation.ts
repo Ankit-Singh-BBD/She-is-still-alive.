@@ -34,11 +34,13 @@
 
 import type { Router } from 'express';
 
-import type { ActionResult, AuthorizedResponse, CycleRecord } from '@server/cognition/types.js';
+import type { ActionResult, CycleRecord } from '@server/cognition/types.js';
 
 import type { RouteDeps } from '../deps.js';
 import { asyncRoute, HttpError } from '../errors.js';
 import { requireCaller } from '../guard.js';
+import { check } from '@server/authz/index.js';
+import type { AuthzCaller } from '@server/authz/types.js';
 import {
   ChatBodySchema,
   HISTORY_DEFAULT_LIMIT,
@@ -50,6 +52,14 @@ import {
 /** One action, as a client is allowed to see it. */
 interface ActionSummary {
   readonly toolId: string;
+  /**
+   * Whether the call was dispatched at all. See `ActionResult.attempted`.
+   *
+   * On the wire because "1 failed" is what the client used to say about a capability
+   * that is simply switched off, and a reading of "it broke" where the truth is "it is
+   * not turned on" sends someone to debug a setting.
+   */
+  readonly attempted: boolean;
   readonly success: boolean;
   /** Set only by stage 8, only from a re-read. See the header. */
   readonly verified: boolean;
@@ -123,12 +133,11 @@ export function mountConversationRoutes(router: Router, deps: RouteDeps): void {
         throw error;
       }
 
-      // The projector holds who spoke last and what her last cycle did, because
-      // neither is cheaply queryable. This route is the only place both are known
-      // at once. It does not broadcast — the cycle published its own events, and
-      // the next projection folds this in.
-      deps.projector.noteCycle(record);
-
+      // No `projector.noteCycle` here. It used to be called on this line, and that
+      // was the defect: this route was the *only* caller, so the `cognitive` block
+      // reported nothing for every cycle she ran herself. The runtime now notifies
+      // the projector for every cycle from every door (`onCycle` in
+      // `server/app.ts`), which covers this one too.
       res.json(chatBody(record));
     }),
   );
@@ -144,6 +153,7 @@ export function mountConversationRoutes(router: Router, deps: RouteDeps): void {
     '/conversations',
     asyncRoute('GET /api/conversations', deps.report, (req, res) => {
       const caller = requireCaller(req, deps);
+      mayReadConversations(caller.identity);
       const includeEnded = req.query['includeEnded'] === 'true';
       res.json({
         conversations: deps.conversations.listForIdentity(caller.identity.id, includeEnded),
@@ -159,11 +169,15 @@ export function mountConversationRoutes(router: Router, deps: RouteDeps): void {
    * rather than from a check this route remembered to write. The 404 below is for
    * a conversation that does not exist *or* is not theirs — deliberately the same
    * answer, because distinguishing them would confirm that a guessed id is real.
+   *
+   * The 403 above it is a different failure and says so: it is about the caller, not
+   * about the id, so it leaks nothing a caller does not already know about themselves.
    */
   router.get(
     '/conversations/:id/messages',
     asyncRoute('GET /api/conversations/:id/messages', deps.report, (req, res) => {
       const caller = requireCaller(req, deps);
+      mayReadConversations(caller.identity);
       const id = req.params['id'] ?? '';
       const conversation = deps.conversations.get(id);
       if (conversation === null || conversation.identityId !== caller.identity.id) {
@@ -180,16 +194,40 @@ export function mountConversationRoutes(router: Router, deps: RouteDeps): void {
 }
 
 /**
+ * `mayReadConversations`, asked out loud.
+ *
+ * Both read routes scoped their answer by identity equality and never consulted the
+ * permission, so `PermissionSet.mayReadConversations` was a field the wire claimed and
+ * no code honoured. The two rules are not the same rule: equality decides *which*
+ * conversations are yours, this decides whether you may read conversations at all, and
+ * only the second is something the owner can revoke.
+ *
+ * Not folded into `requireCaller`, because `POST /api/chat` writes a conversation and
+ * must stay reachable for a caller who may speak without reading history back.
+ */
+function mayReadConversations(caller: AuthzCaller): void {
+  const decision = check(caller, 'conversation:read', { type: 'conversation' });
+  if (!decision.allowed) {
+    throw new HttpError('forbidden', 'You are not permitted to read conversations.');
+  }
+}
+
+/**
  * The cycle record as a client may see it.
  *
- * `CycleRecord.response` and `.actionResults` are typed `unknown` — the record is
- * a trace, and its stage outputs are only as well-typed as the stage that wrote
- * them. So they are narrowed here rather than cast: a record whose stage 9 threw
- * has no `response` at all, and the honest thing to put on the wire for that is
- * the sentence she falls back to, not `undefined` dressed up as speech.
+ * A projection and not a cast. `record.response` is `AuthorizedResponse | undefined`,
+ * and the `undefined` is real — a cycle whose stage 9 threw has no response at all, and
+ * the honest thing to put on the wire for that is the sentence she falls back to rather
+ * than `undefined` dressed up as speech.
+ *
+ * The action list is narrowed for a second reason, which is disclosure rather than
+ * shape: `ActionResult.output` is whatever the tool returned — row ids, raw API bodies,
+ * the inside of the machine — and none of it belongs on the wire. `ActionSummary` is
+ * the four fields a caller may know, so the mapping below is what keeps a tool's
+ * output from reaching a client by being on a field nobody remembered to strip.
  */
 function chatBody(record: CycleRecord): ChatBody {
-  const response = asResponse(record.response);
+  const response = record.response;
   return {
     conversationId: record.conversationId,
     cycleId: record.id,
@@ -201,41 +239,20 @@ function chatBody(record: CycleRecord): ChatBody {
     fellBackAt: record.stages
       .filter((stage) => stage.error !== undefined)
       .map((stage) => stage.stageName),
-    actions: asActions(record.actionResults),
+    actions: (record.actionResults ?? []).map(summarize),
     startedAt: record.startedAt,
     completedAt: record.completedAt,
   };
 }
 
-function asResponse(value: unknown): AuthorizedResponse | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const candidate = value as Partial<AuthorizedResponse>;
-  if (typeof candidate.text !== 'string') return undefined;
+function summarize(result: ActionResult): ActionSummary {
   return {
-    text: candidate.text,
-    voiceEnabled: candidate.voiceEnabled === true,
-    disclosuresApplied: Array.isArray(candidate.disclosuresApplied)
-      ? candidate.disclosuresApplied.filter((item): item is string => typeof item === 'string')
-      : [],
-    redacted: candidate.redacted === true,
+    toolId: result.toolId,
+    attempted: result.attempted,
+    success: result.success,
+    // Never inferred from `success`. Only stage 8 may say an action is proven, so an
+    // unverified call reports as unproven rather than as probably fine.
+    verified: result.verified,
+    error: result.error,
   };
-}
-
-function asActions(value: unknown): readonly ActionSummary[] {
-  if (!Array.isArray(value)) return [];
-  const summaries: ActionSummary[] = [];
-  for (const item of value) {
-    if (typeof item !== 'object' || item === null) continue;
-    const candidate = item as Partial<ActionResult>;
-    if (typeof candidate.toolId !== 'string') continue;
-    summaries.push({
-      toolId: candidate.toolId,
-      success: candidate.success === true,
-      // Never inferred from `success`. Only stage 8 may say an action is proven,
-      // so an absent flag reports as unproven rather than as probably fine.
-      verified: candidate.verified === true,
-      error: typeof candidate.error === 'string' ? candidate.error : undefined,
-    });
-  }
-  return summaries;
 }

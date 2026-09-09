@@ -14,13 +14,20 @@
  *
  *  - The model names are the ones this application was asked for. Pinning them
  *    means a later edit cannot quietly substitute a different model.
+ *
+ *  - `.env.example` is checked against the schema in both directions. It is the
+ *    only place an operator learns what is configurable, so a variable missing
+ *    from it is a variable that effectively does not exist.
  */
+
+import { readFileSync } from 'node:fs';
 
 import { describe, it, expect } from 'vitest';
 import {
   loadConfig,
   describeConfig,
   ConfigError,
+  DECLARED_ENV_VARS,
   DEFAULT_REASONING_MODEL,
   DEFAULT_LIVE_MODEL,
 } from '@server/config/env.js';
@@ -40,7 +47,10 @@ describe('Configuration (server/config/env.ts)', () => {
       expect(config.proactivity.quietHoursEnd).toBe(7);
       expect(config.backup.enabled).toBe(false);
       expect(config.flags.cognition).toBe(true);
-      expect(config.flags.advancedModules).toBe(false);
+      // Every faculty on from an empty environment, the advanced four included — see
+      // `tests/wiring/personality-advanced.test.ts` for why that default changed, and
+      // for the switches that turn them off one at a time.
+      expect(config.flags.advancedModules).toBe(true);
     });
 
     it('binds loopback by default rather than every interface', () => {
@@ -54,9 +64,14 @@ describe('Configuration (server/config/env.ts)', () => {
 
     it('uses the models this application was built around', () => {
       const config = loadConfig({});
-      expect(config.llm.reasoningModel).toBe('gemini-2.5-flash-lite');
+      // Pinned ids, asserted literally rather than against the constants, so that
+      // changing a default is a deliberate act with a test to update — the reason
+      // this assertion earns its keep is that `gemini-2.5-flash-lite` stopped
+      // answering (404, "no longer available to new users") while it was still
+      // the default, and every thinking stage threw.
+      expect(config.llm.reasoningModel).toBe('gemini-3.5-flash-lite');
       expect(config.llm.liveModel).toBe('gemini-3.1-flash-live-preview');
-      expect(DEFAULT_REASONING_MODEL).toBe('gemini-2.5-flash-lite');
+      expect(DEFAULT_REASONING_MODEL).toBe('gemini-3.5-flash-lite');
       expect(DEFAULT_LIVE_MODEL).toBe('gemini-3.1-flash-live-preview');
     });
   });
@@ -219,8 +234,80 @@ describe('Configuration (server/config/env.ts)', () => {
       const summary = describeConfig(loadConfig({ PORT: '4100', DATABASE_PATH: './x/y.db' }));
       expect(summary).toContain('4100');
       expect(summary).toContain('./x/y.db');
-      expect(summary).toContain('gemini-2.5-flash-lite');
+      expect(summary).toContain('gemini-3.5-flash-lite');
       expect(summary).toContain('gemini-3.1-flash-live-preview');
+    });
+
+    /**
+     * Proactivity has two switches and the banner used to read only one of them.
+     *
+     * `server/app.ts:960` starts the sweep on `flags.proactivity && proactivity.enabled`.
+     * With `FLAG_PROACTIVITY=false` and the default `PROACTIVITY_ENABLED=true` the banner
+     * printed "proactivity  enabled · quiet 22:00-07:00" and then listed `proactivity`
+     * under `flags off` four lines below it — about a runtime in which she can never
+     * speak first. Observed while running the e2e voice probe, which sets exactly that.
+     */
+    it('reports proactivity as it will actually behave, not as one of its two switches', () => {
+      const both = describeConfig(loadConfig({}));
+      expect(both).toMatch(/proactivity\s+enabled · quiet 22:00-07:00/);
+
+      const flagOff = describeConfig(loadConfig({ FLAG_PROACTIVITY: 'false' }));
+      expect(flagOff).toMatch(/proactivity\s+disabled by FLAG_PROACTIVITY/);
+      expect(flagOff).not.toMatch(/proactivity\s+enabled/);
+
+      // Named rather than a bare "disabled", because an operator looking at
+      // `PROACTIVITY_ENABLED=true` in their own `.env` would hunt the wrong variable.
+      const settingOff = describeConfig(loadConfig({ PROACTIVITY_ENABLED: 'false' }));
+      expect(settingOff).toMatch(/proactivity\s+disabled by PROACTIVITY_ENABLED/);
+
+      const neither = describeConfig(
+        loadConfig({ FLAG_PROACTIVITY: 'false', PROACTIVITY_ENABLED: 'false' }),
+      );
+      expect(neither).toMatch(/proactivity\s+disabled \(FLAG_PROACTIVITY, PROACTIVITY_ENABLED\)/);
+    });
+  });
+
+  describe('.env.example documents exactly what is read', () => {
+    // Drift here is silent in both directions and neither direction is caught by
+    // anything else. A variable the schema reads but the example omits is
+    // undiscoverable — the operator would have to read `server/config/env.ts` to
+    // find out it exists. A variable the example advertises but the schema does
+    // not read is worse: it invites someone to set it and then ignores them.
+    //
+    // Both were real. `LLM_VOICE_NAME` and `LLM_VOICE_LANGUAGE` were read at boot
+    // and documented nowhere until 2026-09-05.
+    const example = readFileSync(new URL('../../.env.example', import.meta.url), 'utf8');
+
+    /** Assignment lines only — `KEY=`, at the start of a line, comments ignored. */
+    const documented = new Set(
+      example
+        .split('\n')
+        .map((line) => /^([A-Z][A-Z0-9_]*)=/.exec(line)?.[1])
+        .filter((name): name is string => name !== undefined),
+    );
+
+    it('is actually comparing two populated lists', () => {
+      // Both sides of the comparison are derived — one from a Zod shape, one from
+      // a regex over a text file — and either could silently yield nothing, which
+      // would make the two tests below pass while checking no variables at all.
+      expect(DECLARED_ENV_VARS.length).toBeGreaterThan(30);
+      expect(documented.size).toBeGreaterThan(30);
+    });
+
+    it('documents every variable the schema declares', () => {
+      const undocumented = DECLARED_ENV_VARS.filter((name) => !documented.has(name));
+      expect(undocumented).toEqual([]);
+    });
+
+    it('advertises no variable the schema ignores', () => {
+      const declared = new Set(DECLARED_ENV_VARS);
+      const unread = [...documented].filter((name) => !declared.has(name));
+      expect(unread).toEqual([]);
+    });
+
+    it('leaves the credential blank, so a fresh copy runs without one', () => {
+      // The absent-faculty tests above depend on this exact line shipping empty.
+      expect(example).toMatch(/^GOOGLE_API_KEY=\s*$/m);
     });
   });
 });

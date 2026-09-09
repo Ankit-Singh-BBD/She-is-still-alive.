@@ -35,6 +35,7 @@ import { Database, setDatabase, closeDatabase } from '@server/persistence/db.js'
 import { runMigrations } from '@server/persistence/migrate.js';
 import { AuditLogService } from '@server/security/audit.js';
 import { EventBus } from '@server/events/event-bus.js';
+import type { PersistedDomainEvent } from '@server/events/types.js';
 import { IdentityRepository } from '@server/identity/repository.js';
 import { MemoryRepository } from '@server/memory/repository.js';
 import { MemoryRetrieval } from '@server/memory/retrieval.js';
@@ -49,24 +50,44 @@ import {
   PipelineToolExecutor,
   installCoreTools,
   clearanceLookup,
+  toolRoster,
 } from '@server/tools/index.js';
 import { CognitiveRuntime } from '@server/cognition/runtime.js';
+import { CycleGate } from '@server/cognition/gate.js';
 import { TaskExecutor } from '@server/tasks/executor.js';
 import { LoopManager } from '@server/loops/manager.js';
 import { ProactiveEngine } from '@server/proactive/engine.js';
+import { AutonomicLoop, Noticing } from '@server/autonomic/index.js';
+import type { TickReport } from '@server/autonomic/index.js';
 import { PersonalityRegistry } from '@server/personality/registry.js';
 import { PersonalityEngine } from '@server/personality/engine.js';
+import { PersonalityService, timeOfDayDeltas } from '@server/personality/index.js';
+import {
+  createDefaultAdvancedModuleRegistry,
+  type AdvancedModuleFlagMap,
+} from '@server/advanced/index.js';
 import { LearningPipeline } from '@server/learning/pipeline.js';
+import { ConsolidationSweep } from '@server/learning/consolidation.js';
+import type { ConsolidationPassReport } from '@server/learning/consolidation.js';
 import { createLearningExtractor, knownMemoryLookupFrom } from '@server/learning/extractor.js';
+import { createIntentRecognizer } from '@server/cognition/intent/index.js';
 import { createLanguageFaculties } from '@server/llm/index.js';
 import type { LanguageFaculties, LanguageModel } from '@server/llm/index.js';
+import {
+  createGeminiLiveTransportFactory,
+  RENDERER_INSTRUCTION,
+  type VoiceEar,
+} from '@server/voice/live/index.js';
 import { createEncryptedBackup } from '@server/backup/backup.js';
 import type { BackupManifest } from '@server/backup/backup.js';
+import { seedOrigin } from '@server/origin/index.js';
+import type { OriginSeedReport } from '@server/origin/index.js';
 import type { Identity } from '@server/identity/types.js';
 import { RealtimeFlow } from '@server/realtime/flow.js';
 import { RuntimeStateProjector } from '@server/http/state.js';
 import { RateLimiter } from '@server/http/rate-limit.js';
 import { devOrigins } from '@server/http/server.js';
+import { VOICE_PATH } from '@server/http/ws.js';
 import type { RouteDeps } from '@server/http/deps.js';
 
 /** Where the numbered migration files live, resolved relative to this module. */
@@ -139,6 +160,16 @@ export interface AppOptions {
 export interface BootReport {
   /** Audit rows written before the chain migration that this boot chained. */
   auditRowsChained: number;
+  /**
+   * Cycles left `running` by a process that died mid-thought, closed by this
+   * boot. Zero after a clean shutdown, which is the normal case.
+   */
+  cyclesReconciled: number;
+  /**
+   * Events replayed into `RuntimeStateProjector` to rebuild `presence`, `voice`
+   * and `cognitive` (Book VI.6). Zero on a fresh database.
+   */
+  eventsReplayed: number;
   /** Registered tool ids, in registration order. */
   tools: readonly string[];
   /** Whether an owner identity exists. False on a fresh database. */
@@ -179,7 +210,39 @@ export interface MadhuritaApp {
   readonly taskExecutor: TaskExecutor;
   readonly loopManager: LoopManager;
   readonly proactive: ProactiveEngine;
-  readonly personality: PersonalityEngine;
+  /**
+   * Her unprompted half: the sensors, and the heartbeat that gives them a turn.
+   *
+   * Exposed so a test can drive one tick with `autonomic.tick()` instead of
+   * waiting for the timer, and so an operator can read `autonomic.report()` to
+   * see what the last tick actually did — noticed, authorized, spoken, yielded.
+   */
+  readonly autonomic: AutonomicLoop;
+  /**
+   * The sensors on their own, without the heartbeat.
+   *
+   * Exposed because "what does she notice about the state right now" is a
+   * question worth being able to ask — of a test, and of an operator — without
+   * running a cycle and speaking the answer.
+   */
+  readonly noticing: Noticing;
+  /** The last autonomic tick, or `undefined` before the first one. */
+  autonomicReport(): TickReport | undefined;
+  /**
+   * How she sounds, per caller.
+   *
+   * `PersonalityService` rather than the bare `PersonalityEngine` this used to be.
+   * The engine was constructed here and read by nothing — a `new` with no reader,
+   * which is the same defect as a status nothing writes. The service is what the
+   * two consumers actually need: `instructionFor` for the model's system
+   * instruction, `profileFor` for stage 9's choice between sentences it already
+   * has.
+   *
+   * Exposed because "what register is she in for this person, and why" is worth
+   * being able to ask — `profileFor(id).sources` names the signals currently
+   * shaping it.
+   */
+  readonly personality: PersonalityService;
   /**
    * Where she is and what the sky is doing.
    *
@@ -198,6 +261,15 @@ export interface MadhuritaApp {
    */
   readonly learning: LearningPipeline;
   /**
+   * The sweep that calls `learning.processCycle`, started under `FLAG_LEARNING`.
+   *
+   * Exposed so a test can drive one pass with `pass()` rather than wait for the
+   * timer, and so an operator can ask where consolidation has read to.
+   */
+  readonly consolidation: ConsolidationSweep;
+  /** The last consolidation pass, or `undefined` before the first one. */
+  consolidationReport(): ConsolidationPassReport | undefined;
+  /**
    * The language faculty, or `undefined` when none is configured.
    *
    * `undefined` is a supported way to run, not a broken one: stages 4-6, 9 and
@@ -205,6 +277,21 @@ export interface MadhuritaApp {
    * configuration this is.
    */
   readonly faculties: LanguageFaculties | undefined;
+
+  /**
+   * The live model as an ear and a mouth, or `undefined` when she is text-only.
+   *
+   * Passed to `attachVoiceGateway` by `server/main.ts`, which is the only thing
+   * that has an `http.Server` to attach to. Exposed rather than attached here
+   * because construction must not need a listener: a test builds the app, reads
+   * `voiceEar`, and drives a `VoiceSession` over a fake channel with no socket
+   * anywhere.
+   *
+   * `undefined` is a supported configuration, not a fault — `FLAG_VOICE` off or
+   * no `GOOGLE_API_KEY`. The socket still opens, `ready.canHear` says `false`,
+   * and `say` still runs the twelve stages.
+   */
+  readonly voiceEar: VoiceEar | undefined;
 
   /**
    * Reads the parts of `RuntimeState` that live in the database, and holds the
@@ -341,6 +428,17 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
   const toolExecutor = new PipelineToolExecutor({ pipeline, identityRepo });
   const clearanceFor = clearanceLookup(registry);
 
+  /**
+   * How stage 6 chooses a tool when there is no model to choose one.
+   *
+   * Built over `tools` — the ids `installCoreTools` actually installed — so the
+   * recogniser can only ever name something this process can run. It reads a time
+   * and an imperative out of a sentence in Hinglish or English and proposes the
+   * matching tool; everything it cannot read without guessing, it declines to
+   * propose. See `server/cognition/intent/` for the two rules it holds to.
+   */
+  const intentRecognizer = createIntentRecognizer({ availableTools: tools });
+
   // ── Proactivity ──────────────────────────────────────────────────────────
   // Quiet hours come from configuration, not from the engine's defaults, so
   // that the window an operator set is the window she actually honours.
@@ -357,8 +455,100 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     },
   });
 
+  // ── Autonomic layer ──────────────────────────────────────────────────────
+  //
+  // The half of her that runs when nobody is typing. Every piece of this existed
+  // and none of it was connected: `ProactiveEngine` could judge an unprompted
+  // thought, `runIfIdle` could run one, and nothing ever *proposed* one —
+  // `runCycle` had exactly one caller in the repository and it was a test.
+  //
+  // `runtimeFor` and `publishError` are function declarations below, so they are
+  // hoisted and the loop can be fully constructed here. `start()` only switches
+  // it on.
+  const noticing = new Noticing({ tasks: taskExecutor, loops: loopManager });
+
+  const autonomic = new AutonomicLoop({
+    noticing,
+    proactive,
+    // Resolved per tick, never captured: an owner who was suspended between
+    // ticks must stop being spoken to, and on a fresh database there is nobody
+    // to capture yet.
+    owner: () => identityRepo.getOwner(),
+    runtimeFor: (identity) => runtimeFor(identity),
+    report: (where, error) => {
+      void publishError(where, error);
+    },
+    // The same cadence the deferral sweep used, because this loop now *is* the
+    // deferral sweep — see `start()`.
+    tickMs: config.intervals.proactiveSweepMs,
+  });
+
+  // Reminders stop being discarded here.
+  //
+  // `TaskExecutor.executePayload` completed a reminder and returned when no
+  // handler was registered, on the reasonable-sounding grounds that a missing
+  // dispatcher is not the executor's fault. The effect was that every reminder he
+  // ever set was marked delivered and never said. This is the dispatcher; it
+  // returns whether she actually spoke, so an undelivered reminder retries
+  // instead of being marked done.
+  taskExecutor.setHandlers({
+    onReminder: (identityId, message) => autonomic.deliverReminder(identityId, message),
+  });
+
   // ── Personality ──────────────────────────────────────────────────────────
-  const personality = new PersonalityEngine(new PersonalityRegistry());
+  //
+  // The five internal flags move together, off one env switch. Partial
+  // combinations — warmth on, formality off — are not deployment decisions anyone
+  // makes; they are a matrix of states nobody would test. `FLAG_PERSONALITY`
+  // answers the question an operator actually has: does she adapt how she speaks,
+  // or does everyone get the same neutral register.
+  const personalityFlags = {
+    enablePersonalityModulation: config.flags.personality,
+    enablePersonaOverride: config.flags.personality,
+    enableVerbosityControl: config.flags.personality,
+    enableFormalityControl: config.flags.personality,
+    enableWarmthControl: config.flags.personality,
+  };
+  const personality = new PersonalityService({
+    engine: new PersonalityEngine(new PersonalityRegistry()),
+    flags: personalityFlags,
+  });
+
+  // ── Advanced faculties ───────────────────────────────────────────────────
+  //
+  // Built once for the process and handed to every runtime, because two of the
+  // four hold state that must not be per-request: the reflection module's idea of
+  // what it has already written, and the dream module's fold history. A registry
+  // rebuilt per cycle would rediscover the same patterns forever.
+  //
+  // The flags come from config already `AND`ed with the master switch, so this map
+  // is a straight rename with no logic in it — the decision was made in
+  // `loadConfig` and is printed at boot.
+  const advancedFlags: AdvancedModuleFlagMap = {
+    enableEmotionReading: config.flags.emotionReading,
+    enableRelationshipContext: config.flags.relationshipContext,
+    enableLongHorizonReflection: config.flags.longHorizonReflection,
+    enableDreamConsolidation: config.flags.dreamConsolidation,
+  };
+  const advancedRegistry = createDefaultAdvancedModuleRegistry({
+    personality,
+    memory: memoryRepo,
+    // Dream consolidation is the one faculty whose effect nothing else would
+    // notice. It folds rows *after* `cycle.completed` has been published, so the
+    // memory counts in `RuntimeState` were recomputed a moment before those rows
+    // left the default view — and during quiet hours the next cycle that would fix
+    // them may be hours away. `memory.consolidated` is already routed to a recount
+    // in `server/http/state.ts`; this is what gives it a publisher.
+    eventBus,
+    // The same window `ProactiveEngine` honours, from the same source. Dream
+    // consolidation folds memories during the hours she is not speaking, and two
+    // definitions of "quiet" would eventually mean she reorganised her memory in
+    // the middle of a conversation.
+    quietHours: {
+      startHour: config.proactivity.quietHoursStart,
+      endHour: config.proactivity.quietHoursEnd,
+    },
+  });
 
   // ── Environment ──────────────────────────────────────────────────────────
   //
@@ -386,17 +576,62 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
   // inside `createGeminiTransport`.
   const faculties = createLanguageFaculties({
     config,
-    toolIds: () => registry.list().map((tool) => tool.id),
+    // Descriptions and argument shapes, not ids: `registry.list().map(t => t.id)` told
+    // her the seven names and left her to invent every field the executor validates.
+    tools: () => toolRoster(registry.list()),
+    // Her register as prompt lines, resolved per draft rather than baked in at
+    // construction — the overrides expire, and a system instruction captured once
+    // at boot would describe a mood she was in when the process started. `''` when
+    // personality is off, which the faculty treats as "no tone block".
+    tone: (identityId) => personality.instructionFor(identityId),
     ...(options.languageModel ? { model: options.languageModel } : {}),
   });
+
+  // ── Her ear and her mouth ────────────────────────────────────────────────
+  //
+  // Built here for the same reason the language faculty is: this is the only
+  // place in the process that turns `config.llm.apiKey` into a client, and the
+  // key stays inside the closure `createGeminiLiveTransportFactory` returns.
+  //
+  // Three conditions, and each `undefined` means something different to the
+  // browser — all of which arrive as `ready.canHear: false` and none of which
+  // closes the socket. `FLAG_VOICE` off is an operator who does not want a
+  // microphone in the building. No `GOOGLE_API_KEY` is the no-key configuration
+  // that stages 4-6, 9 and 10 already degrade for. Either way `say` still runs
+  // the twelve stages in the same conversation with the same memory, so she is
+  // narrowed to text rather than switched off.
+  //
+  // `RENDERER_INSTRUCTION` rather than her personality instruction, and that is
+  // the whole design: this model is a mouth. Her register is decided by stage 9
+  // on the reasoning model, and by the time a line reaches here it has been
+  // authorized word for word. A tone block here would invite the mouth to
+  // rephrase, which is exactly what the drift check exists to catch.
+  const voiceEar: VoiceEar | undefined =
+    config.flags.voice && config.llm.enabled && config.llm.apiKey !== undefined
+      ? {
+          connect: createGeminiLiveTransportFactory(config.llm.apiKey),
+          config: {
+            model: config.llm.liveModel,
+            systemInstruction: RENDERER_INSTRUCTION,
+            voiceName: config.llm.voiceName,
+            languageCode: config.llm.voiceLanguage,
+            temperature: config.llm.temperature,
+          },
+        }
+      : undefined;
 
   // ── Out-of-band learning ─────────────────────────────────────────────────
   //
   // Stages 10 and 11 already learn *inside* a cycle. This is the other path: it
-  // takes a stored `cycle_record` and its conversation, and is what would run
-  // over cycles that completed without the learn stage, or in a later
-  // consolidation pass. It refuses by default to process a cycle that already
-  // wrote memories of its own, so having both wired cannot double-write.
+  // takes a stored `cycle_record` and its conversation, and runs over cycles
+  // that finished without the learn stage keeping anything — a `degraded` cycle
+  // whose stage 10 threw, or one that predates a rule that now exists. It
+  // refuses by default to process a cycle that already wrote memories of its
+  // own, so having both wired cannot double-write.
+  //
+  // `ConsolidationSweep` below is its caller. Until it existed, `processCycle`
+  // was constructed here, named in the boot banner, and reachable from nothing
+  // but a test.
   //
   // The extractor is the model-backed one when a model exists and the
   // rule-based one when it does not — there is always a way to keep what was
@@ -415,9 +650,27 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     }),
   });
 
+  const consolidation = new ConsolidationSweep({
+    db,
+    learning,
+    report: (where, error) => {
+      void publishError(where, error);
+    },
+    intervalMs: config.intervals.learningSweepMs,
+  });
+
+  /**
+   * One lane per identity, for the whole process (Build Book VII.3: never two
+   * cycles at once for the same identity).
+   *
+   * Constructed here, once, and handed to every runtime `runtimeFor` builds. It
+   * cannot live inside `CognitiveRuntime`, because `runtimeFor` returns a *new*
+   * runtime for every caller — a gate held in runtime state would be a lock each
+   * request takes against itself, which serializes nothing.
+   */
+  const cycleGate = new CycleGate();
+
   let running = false;
-  let deferralTimer: ReturnType<typeof setTimeout> | undefined;
-  let deferralSweepInFlight = false;
   let weatherTimer: ReturnType<typeof setTimeout> | undefined;
   let bootReport: BootReport | undefined;
 
@@ -427,6 +680,14 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
   // a test can mount the same routes on the same deps with no listener at all.
 
   const projector = new RuntimeStateProjector({ db, identityRepo, environment });
+
+  // The projector folds `presence`, `voice` and `cognitive` out of the event log,
+  // and it has to keep doing that whether or not anyone is streaming: with
+  // realtime off, `GET /api/state` answers from `buildInitial`, and a fold driven
+  // only by `RealtimeFlow` would have left her reporting no thoughts and no voice
+  // for the whole life of the process. `observe` is idempotent per event id, so
+  // this costs nothing when the flow is folding the same event.
+  const unfollow = eventBus.subscribe((event) => projector.observe(event));
 
   const limits = {
     credential: new RateLimiter(CREDENTIAL_LIMIT),
@@ -462,6 +723,10 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
       // The hook that makes `RuntimeState` a projection rather than a frozen
       // literal. Bound through an arrow because it reads `this.presence`.
       project: (previous, event) => projector.project(previous, event),
+      // No `report` hook on purpose — see `RealtimeFlowOptions.report`. The
+      // reporter this file passes everywhere else publishes `error.raised`, and
+      // the flow subscribes to that bus: a subscriber whose write failed would
+      // have its failure broadcast back to it, fail again, and publish again.
     });
     flow.start();
     return flow;
@@ -484,6 +749,20 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     // `exactOptionalPropertyTypes`, so passing an explicit `undefined` would
     // not compile.
     const llm = faculties ? { llm: faculties } : {};
+
+    // Her baseline, from this identity's own kind — the only thing that stops the
+    // first sentence of a new conversation coming from nowhere. Idempotent, and it
+    // leaves an existing persona alone, so calling it on every runtime build is
+    // cheap and cannot flatten an override written a moment ago.
+    personality.ensureBaseline(identity);
+
+    // What the hour is doing to her, refreshed here because this is the one place
+    // that runs before every cycle and already knows who is asking.
+    // `environment.snapshot()` triggers no network call — it reads the last
+    // observation and re-derives the band from the clock — and `day` clears the
+    // slot rather than writing a zero.
+    personality.noteTimeOfDay(identity.id, timeOfDayDeltas(environment.snapshot().timeOfDay));
+
     return new CognitiveRuntime({
       db,
       identityRepo,
@@ -492,19 +771,90 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
       conversations,
       transcript: messages,
       identity,
+      // The shared gate, so two requests for one identity queue against each
+      // other rather than each against a private lane of its own.
+      gate: cycleGate,
+      // What the cycle could not tell anyone else. `RuntimeState.cognitive` no
+      // longer arrives here — it is projected from `cycle.started`,
+      // `cycle.stage.completed` and the terminal event, because this observer
+      // fires *after* the terminal event and so was always a cycle behind.
+      //
+      // What is left is the advanced modules' own report. Their failures are
+      // isolated by design (a module that throws must not take the cycle with
+      // it), collected into `extras.advanced`, and written to no row — so
+      // without this, an entire opt-in subsystem could fail on every cycle and
+      // say nothing at all. Each isolated failure becomes an `error.raised`,
+      // which is where every other swallowed error in this file reports to.
+      onCycle: (_record, extras) => {
+        for (const note of extras.advanced.notes) {
+          for (const failure of note.errors) {
+            void publishError(`advanced:${failure.moduleId}:stage-${note.stage}`, failure.message);
+          }
+        }
+      },
       understand: llm,
       reason: llm,
-      decide: llm,
+      // With a faculty, the model proposes the tool and its arguments. Without one,
+      // `intentRecognizer` reads what it can out of the words — a time, an
+      // imperative — and stage 6's authorization gate runs over either proposal
+      // unchanged. Before it existed, a process with no key could never choose any
+      // of the seven tools installed above, whatever was asked of her.
+      // `clearanceFor` here as well as in `act` below, and for the same reason: both
+      // gates call `check()` with the same inputs, so a hardcoded `'safe'` at DECIDE
+      // only moved the refusal to a later stage and misattributed it.
+      decide: { ...llm, intent: intentRecognizer, clearanceFor },
       // Stage 7 dispatches through the pipeline; stage 8 re-reads authoritative
       // state through the same registry the pipeline verified against.
-      act: { executor: toolExecutor, clearanceFor },
+      //
+      // `FLAG_ACTIONS` turns off the executor and nothing else, which is the whole
+      // of its meaning. It was read nowhere before this line — assigned from env,
+      // printed in the boot banner among the flags that were on, and turning it off
+      // changed not one thing she did. Withholding the executor is how it was always
+      // documented to work: `server/cognition/stages/7.ts` re-checks authorization,
+      // finds no executor, and records `refusal(toolId, 'No tool executor is wired;
+      // action is disabled')` — its P09 rollback contract, written years before
+      // anything could reach it.
+      //
+      // `clearanceFor` stays either way. It is what stage 7 checks the decision
+      // against *before* it looks for an executor, and a refusal that skipped the
+      // authorization check would report the wrong reason for the same silence.
+      //
+      // Note what is deliberately not gated: stage 6 still proposes the tool. She
+      // decides what the sentence asked for, the boundary refuses to perform it, and
+      // stage 9 says so. Gating the *decision* instead would put her back where an
+      // earlier defect had her — answering "Kal 7 baje yaad dilana" with a greeting
+      // and scheduling nothing, with no trace saying anything was declined.
+      act: config.flags.actions
+        ? { executor: toolExecutor, clearanceFor }
+        : { clearanceFor },
       verify: { verifiers },
-      respond: llm,
+      // Stage 9 gets the numbers, not the prose: it is choosing between sentences
+      // it already holds. Resolved per call, inside the stage, so a module that
+      // read affect at stage 2 of *this* cycle has already landed by the time the
+      // register is decided.
+      respond: { ...llm, tone: (identityId: string) => personality.profileFor(identityId) },
       // `memoryRepo` is passed whether or not a model is wired: stage 10's
       // deduplication is application logic, and without the repository it was
       // silently trusting within-candidate dedup alone.
       learn: { ...llm, memoryRepo },
+      // The advanced modules, run stage by stage as the cycle proceeds. This is the
+      // only path — the after-the-cycle one is gone, because its writes always
+      // landed a turn late. See `CognitiveRuntimeOptions.advanced`.
+      advanced: { registry: advancedRegistry, flags: advancedFlags },
     });
+  }
+
+  /**
+   * Writes whatever of her origin story is not in memory yet.
+   *
+   * A function declaration for the same reason `runtimeFor` is one: `routeDeps` needs it,
+   * and so does `start()`. Two callers, one moment each — `POST /api/bootstrap` calls it
+   * for a brand-new owner, and `start()` calls it for a database that already had one
+   * before this module existed. Neither has to know which case it is in, because the seed
+   * is keyed by content and writing nothing is a valid outcome.
+   */
+  function rememberOrigin(owner: Identity): OriginSeedReport {
+    return seedOrigin({ memory: memoryRepo, owner });
   }
 
   const routeDeps: RouteDeps = {
@@ -518,6 +868,7 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     projector,
     realtime,
     runtimeFor,
+    rememberOrigin,
     bootReport: () => bootReport,
     // `publishError` writes an `error.raised` event and an audit row, and
     // swallows its own failure. A route that reported into a `console.error`
@@ -528,40 +879,6 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     limits,
     allowedOrigins: devOrigins(config.isProduction),
   };
-
-
-  /**
-   * The deferral sweep.
-   *
-   * `ProactiveEngine.processDeferred()` exists and is tested, but until now
-   * nothing outside a test ever called it — which meant a candidate held back
-   * for quiet hours was deferred forever. This is the caller: it wakes on the
-   * configured interval, asks the database for deferrals that have come due,
-   * and re-evaluates each against the world as it is now.
-   *
-   * No `UserContext` is passed on purpose. The engine already knows the
-   * configured quiet-hours window and reads the wall clock itself, so passing
-   * a second opinion here would create two places that decide whether it is
-   * night — and eventually they would disagree.
-   */
-  async function sweepDeferrals(): Promise<void> {
-    if (deferralSweepInFlight) return;
-    deferralSweepInFlight = true;
-    try {
-      await proactive.processDeferred();
-    } catch (error) {
-      // A sweep that throws must not kill the timer: she would go quiet for
-      // the rest of the process's life and nothing would say why.
-      await publishError('proactive deferral sweep', error);
-    } finally {
-      deferralSweepInFlight = false;
-      if (running) {
-        deferralTimer = setTimeout(() => {
-          void sweepDeferrals();
-        }, config.intervals.proactiveSweepMs);
-      }
-    }
-  }
 
   /**
    * Looking up at the sky, on a timer.
@@ -611,6 +928,84 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     }
   }
 
+  /**
+   * How much of the event log a boot folds back into the projector.
+   *
+   * The three fields `restore` rebuilds are last-writer-wins over a handful of
+   * event types, and one cycle publishes at most about twenty events — so this
+   * window covers the last several cycles with room to spare, while keeping boot
+   * time flat as the log grows. Missing the window is not a failure mode: a
+   * field the tail never mentions keeps the honest default it has today, which
+   * is exactly the state this whole path improves on.
+   */
+  const BOOT_REPLAY_EVENTS = 512;
+
+  /** The tail of the log, oldest first, so a fold applies it in order. */
+  function replayTail(): readonly PersistedDomainEvent[] {
+    const last = eventBus.lastSequence();
+    return eventBus.replay(Math.max(0, last - BOOT_REPLAY_EVENTS), BOOT_REPLAY_EVENTS);
+  }
+
+  /**
+   * Closes every cycle the last process left mid-thought.
+   *
+   * `cycle_record.status` is set to `'running'` when a cycle is admitted and
+   * moved to its terminal value by stage 12. A process that dies in between
+   * leaves the row saying a cycle is in flight — in a process that no longer
+   * exists. Nothing reconciled that, so every crash left a permanent row
+   * claiming she is still thinking about something, and `GET /api/state` counts
+   * from these tables.
+   *
+   * `'failed'` and not `'interrupted'`: interruption is specifically a later
+   * stimulus displacing an earlier cycle (Book VII.5) and names the cycle that
+   * displaced it. Nothing displaced this one; the process ended.
+   *
+   * Row and event in one transaction, through the synchronous `append`, for the
+   * reason Book IX.5 gives — a status the log does not carry is a status the
+   * stream will never show, and the projector's fold reads the log.
+   */
+  function closeAbandonedCycles(): number {
+    const abandoned = db.raw
+      .prepare(
+        // The identity comes through the conversation: `cycle_record` is keyed by
+        // `conversation_id` and holds no caller of its own. `LEFT JOIN` so a cycle
+        // whose conversation row is gone is still closed rather than skipped.
+        `SELECT c.id AS id, v.identity_id AS identity_id, c.started_at AS started_at
+           FROM cycle_record c
+           LEFT JOIN conversation v ON v.id = c.conversation_id
+          WHERE c.status = 'running'`,
+      )
+      .all() as { id: string; identity_id: string | null; started_at: string | null }[];
+    if (abandoned.length === 0) return 0;
+
+    const completedAt = Date.now();
+    const reason = 'The process ended before this cycle reached PERSIST.';
+
+    db.raw.transaction(() => {
+      const close = db.raw.prepare(
+        `UPDATE cycle_record SET status = 'failed', completed_at = ?, error = ? WHERE id = ?`,
+      );
+      for (const row of abandoned) {
+        close.run(new Date(completedAt).toISOString(), reason, row.id);
+        eventBus.append({
+          type: 'cycle.failed',
+          payload: {
+            status: 'failed' as const,
+            startedAt: row.started_at === null ? completedAt : Date.parse(row.started_at),
+            completedAt,
+            abandoned: true,
+            reason,
+          },
+          identityId: row.identity_id ?? undefined,
+          cycleId: row.id,
+          timestamp: completedAt,
+        });
+      }
+    })();
+
+    return abandoned.length;
+  }
+
   async function start(): Promise<BootReport> {
     if (running) {
       throw new Error('start() called on an app that is already running');
@@ -642,6 +1037,14 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     // writes any of its own. Idempotent, so a normal boot chains zero rows.
     const auditRowsChained = audit.backfillChain();
 
+    // ── Book VI.6: durable state reconstruction ──────────────────────────────
+    //
+    // Two steps, in this order, and both before anything can serve a request or
+    // start a cycle. The first makes the durable record true; the second makes
+    // the in-memory projection agree with it.
+    const cyclesReconciled = closeAbandonedCycles();
+    const eventsReplayed = projector.restore(replayTail());
+
     const started: string[] = [];
     const absent: string[] = [];
 
@@ -657,18 +1060,64 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
       absent.push('scheduling — FLAG_TASKS is off; reminders and open loops will not fire');
     }
 
-    if (config.flags.proactivity && config.proactivity.enabled) {
-      deferralTimer = setTimeout(() => {
-        void sweepDeferrals();
-      }, config.intervals.proactiveSweepMs);
-      started.push(`proactive deferral sweep (every ${config.intervals.proactiveSweepMs}ms)`);
+    // The out-of-band learner, gated on the flag that names it. `FLAG_LEARNING`
+    // had no consumer anywhere in the tree before this line: the banner printed
+    // it among the flags that were on, and turning it off changed nothing.
+    //
+    // What it covers is exactly this sweep. Stages 10 and 11 learn inside the
+    // cycle and are not gated — a cycle without them would answer from a memory
+    // it then refused to update — so the honest reading of the flag is "she goes
+    // back over old cycles", and that is what the absent line below says.
+    if (config.flags.learning) {
+      consolidation.start();
+      started.push(
+        `learning consolidation (every ${config.intervals.learningSweepMs}ms — cycles the ` +
+          `in-cycle learn stage kept nothing from)`,
+      );
     } else {
       absent.push(
-        'proactivity — deferred candidates will not be re-evaluated while it is off',
+        'learning consolidation — FLAG_LEARNING is off; stages 10 and 11 still learn inside ' +
+          'each cycle, but a cycle they kept nothing from is never revisited',
+      );
+    }
+
+    if (config.flags.proactivity && config.proactivity.enabled) {
+      // One timer, two jobs, and they must not be two timers. The autonomic tick
+      // calls `processDeferred` itself and then *speaks* what the tree
+      // authorized; a separate deferral sweep would consume the same claimed
+      // rows and drop them, so half her deferred thoughts would vanish
+      // depending on which timer fired first.
+      autonomic.start();
+      started.push(
+        `autonomic loop (every ${config.intervals.proactiveSweepMs}ms — sensors, ` +
+          `deferral replay, unprompted cycles)`,
+      );
+    } else {
+      absent.push(
+        'proactivity — she will answer when spoken to but will never start anything herself, ' +
+          'and deferred candidates will not be re-evaluated',
       );
     }
 
     const ownerEnrolled = identityRepo.hasOwner();
+
+    // Her origin story, for a database that had an owner before this code existed.
+    // `POST /api/bootstrap` seeds a new owner the moment it creates one, so this only ever
+    // does anything on the first boot after the feature landed — or after `story.ts` grew
+    // a line, which is the case that makes it worth calling every time rather than once.
+    // Reported only when it actually wrote something: "seeded 0 facts" on every boot for
+    // the rest of the process's life would be noise dressed as news.
+    const owner = identityRepo.getOwner();
+    if (owner !== null) {
+      const seeded = rememberOrigin(owner);
+      if (seeded.changed) {
+        started.push(
+          `origin story (${seeded.factsWritten} fact${seeded.factsWritten === 1 ? '' : 's'} written` +
+            `${seeded.firstMemoryWritten ? ', first memory' : ''}` +
+            `${seeded.makerWritten ? ', maker' : ''})`,
+        );
+      }
+    }
 
     // Weather only runs when there is somewhere to ask about. Starting the sweep
     // without coordinates would be a timer that can never do anything, and
@@ -716,8 +1165,38 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
         'language faculty — configured but not constructed; stages 4-6, 9 and 10 use their fallbacks',
       );
     }
+    // Reported here rather than beside the timers above because nothing starts or
+    // stops: the flag decides whether `runtimeFor` hands stage 7 an executor, and
+    // that is a property of every cycle rather than of a running loop. Off, she still
+    // reasons her way to the right tool and the boundary declines to run it — so the
+    // line has to say that the decision survives, or a reader will assume the tool
+    // call was never chosen and go looking for the bug in stage 6.
+    if (!config.flags.actions) {
+      absent.push(
+        'actions — FLAG_ACTIONS is off; stage 6 still chooses the tool and stage 7 refuses to ' +
+          'run it, so every tool call is recorded as a refusal and she says so instead of doing it',
+      );
+    }
     if (tools.length === 0) {
       absent.push('tools — none registered; stage 7 has nothing it can execute');
+    }
+    // Same rule as the faculty above: reported off the thing that was built.
+    // `FLAG_VOICE` on with no key would otherwise print "voice" and mean text.
+    if (voiceEar !== undefined) {
+      started.push(
+        `voice (${voiceEar.config.model}) — ear and mouth on ${VOICE_PATH}; the twelve stages ` +
+          'stay on the reasoning model',
+      );
+    } else if (!config.flags.voice) {
+      absent.push(
+        `voice — FLAG_VOICE is off; ${VOICE_PATH} still accepts a socket for text, and ` +
+          'she answers there without being heard or heard back',
+      );
+    } else {
+      absent.push(
+        `voice — no GOOGLE_API_KEY; ${VOICE_PATH} accepts a socket and reports canHear: false, ` +
+          'so a spoken turn is impossible but a typed one still runs the full cycle',
+      );
     }
     if (!ownerEnrolled) {
       absent.push(
@@ -732,7 +1211,15 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
       );
     }
 
-    bootReport = { auditRowsChained, tools, ownerEnrolled, started, absent };
+    bootReport = {
+      auditRowsChained,
+      cyclesReconciled,
+      eventsReplayed,
+      tools,
+      ownerEnrolled,
+      started,
+      absent,
+    };
 
     await eventBus.publish({
       type: 'boot.completed',
@@ -762,16 +1249,14 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     if (!running) return;
     running = false;
 
-    if (deferralTimer) {
-      clearTimeout(deferralTimer);
-      deferralTimer = undefined;
-    }
     if (weatherTimer) {
       clearTimeout(weatherTimer);
       weatherTimer = undefined;
     }
+    autonomic.stop();
     loopManager.stop();
     taskExecutor.stop();
+    consolidation.stop();
 
     // Before the database closes, and deliberately so. `RealtimeFlow` projects
     // through `RuntimeStateProjector`, which runs six `COUNT(*)` subselects on
@@ -782,6 +1267,10 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
       flow.stop();
       flow = undefined;
     }
+    // The projector's own fold, for the same reason and in the same breath. It
+    // touches no table, but a handler left on a bus after `stop()` is a handler
+    // that can still be called.
+    unfollow();
 
     // Their sweeps are `unref`'d and would not hold the process open, but a
     // `stop()` that leaves a live `setInterval` behind is a `stop()` a test
@@ -819,10 +1308,16 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     taskExecutor,
     loopManager,
     proactive,
+    autonomic,
+    noticing,
+    autonomicReport: () => autonomic.report(),
     personality,
     environment,
     learning,
+    consolidation,
+    consolidationReport: () => consolidation.report(),
     faculties,
+    voiceEar,
     projector,
     realtime,
     limits,

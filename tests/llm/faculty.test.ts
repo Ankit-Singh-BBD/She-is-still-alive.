@@ -34,6 +34,7 @@ import {
   type GeminiTransportRequest,
 } from '@server/llm/gemini.js';
 import { LanguageFacultyError } from '@server/llm/types.js';
+import type { ToolSpec } from '@server/tools/roster.js';
 
 // ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -71,7 +72,12 @@ function facultiesWith(
   transport: GeminiTransport,
   toolIds: readonly string[] = [],
 ): LanguageFaculties {
-  return new LanguageFaculties({ model: modelWith(transport), toolIds: () => toolIds });
+  return new LanguageFaculties({ model: modelWith(transport), tools: () => toolIds.map(spec) });
+}
+
+/** A roster entry for a test that only cares about the id. */
+function spec(id: string): ToolSpec {
+  return { id, description: `does ${id}`, args: 'text: string', clearance: 'all' };
 }
 
 const PERMISSIONS: PermissionSet = {
@@ -356,10 +362,10 @@ describe('LanguageFaculties', () => {
 
   it('reads the tool roster at call time, so a tool registered later is offered', async () => {
     const { transport, sent } = stubTransport({ action: 'respond', rationale: 'talking' });
-    const roster: string[] = ['memory.remember'];
+    const roster: ToolSpec[] = [spec('memory.remember')];
     const faculties = new LanguageFaculties({
       model: modelWith(transport),
-      toolIds: () => roster,
+      tools: () => roster,
     });
     const call = {
       stimulus: stimulus(),
@@ -367,11 +373,40 @@ describe('LanguageFaculties', () => {
     };
 
     await faculties.proposeDecision(call);
-    roster.push('task.schedule');
+    roster.push(spec('task.schedule'));
     await faculties.proposeDecision(call);
 
     expect(sent[0]?.contents).not.toContain('task.schedule');
     expect(sent[1]?.contents).toContain('task.schedule');
+  });
+
+  it('shows each tool its arguments, not just its id', async () => {
+    // The whole point of the roster: `toolInput` is JSON *text* the model writes, and
+    // stage 7 validates it against `inputSchema`. A prompt naming only `reminder.schedule`
+    // left the field names to be guessed, and a guess is a cycle recorded as an attempted
+    // action that could never have validated.
+    const { transport, sent } = stubTransport({ action: 'respond', rationale: 'talking' });
+    const faculties = new LanguageFaculties({
+      model: modelWith(transport),
+      tools: () => [
+        {
+          id: 'reminder.schedule',
+          description: 'Schedules a reminder',
+          args: 'message: string, when: string, repeat?: string',
+          clearance: 'all',
+        },
+      ],
+    });
+
+    await faculties.proposeDecision({
+      stimulus: stimulus(),
+      reasoning: { steps: [], optionsConsidered: [], recommendedApproach: 'respond' as const },
+    });
+
+    const prompt = sent[0]?.contents ?? '';
+    expect(prompt).toContain('Schedules a reminder');
+    expect(prompt).toContain('input: {message: string, when: string, repeat?: string}');
+    expect(prompt).toContain('[changes something]');
   });
 });
 
@@ -380,11 +415,11 @@ describe('LanguageFaculties', () => {
 const DECISION: AuthorizedDecision = {
   proposal: { action: 'execute_tool', toolId: 'memory.remember', rationale: 'she asked' },
   authorized: true,
-  clearanceChecked: true,
+  clearance: { kind: 'granted', action: 'tool:execute' },
 };
 
 function ran(overrides: Partial<ActionResult> = {}): ActionResult {
-  return { toolId: 'memory.remember', success: true, verified: false, ...overrides };
+  return { toolId: 'memory.remember', attempted: true, success: true, verified: false, ...overrides };
 }
 
 describe('the RESPOND prompt', () => {
@@ -420,7 +455,6 @@ describe('the RESPOND prompt', () => {
     const prompt = await promptFor({
       results: [ran({ verified: false })],
       verification: {
-        preconditionsMet: true,
         postconditionsMet: false,
         discrepancies: ['no row found for the id the tool returned'],
         results: [ran({ verified: false })],

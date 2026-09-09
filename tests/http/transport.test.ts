@@ -671,6 +671,45 @@ describe('HTTP transport (server/http)', () => {
       // Deliberately indistinguishable: a different answer would confirm the id.
       expect(await mine.text()).toBe(await nothing.text());
     });
+
+    /**
+     * `mayReadConversations`, revoked and honoured.
+     *
+     * Both read routes scoped their answer by identity equality and never consulted the
+     * permission, so this field was one the wire declared and no code asked about. The
+     * two rules are not the same rule: equality decides *which* conversations are yours,
+     * this decides whether you may read conversations at all, and only the second is
+     * something the owner can revoke.
+     *
+     * 403 and not 404, because this failure is about the caller rather than the id — it
+     * leaks nothing they do not already know about themselves.
+     */
+    it('refuses both read routes to a caller whose permission to read was revoked', async () => {
+      await bootstrap();
+      const turn = (await (await postJson('/api/chat', { text: 'one' })).json()) as {
+        conversationId: string;
+      };
+      expect((await api('/api/conversations')).status).toBe(200);
+
+      const owner = app.identityRepo.getOwner();
+      app.identityRepo.updatePermissions(owner!.id, {
+        ...DEFAULT_PERMISSIONS.owner,
+        mayReadConversations: false,
+      });
+
+      for (const path of ['/api/conversations', `/api/conversations/${turn.conversationId}/messages`]) {
+        const res = await api(path);
+        expect(res.status).toBe(403);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe('forbidden');
+        expect(body.error.message).toContain('not permitted to read conversations');
+      }
+
+      // Still able to speak. The guard is deliberately not folded into
+      // `requireCaller`: writing a turn is a different authority from reading history
+      // back, and a caller may hold one without the other.
+      expect((await postJson('/api/chat', { text: 'two' })).status).toBe(200);
+    });
   });
 
   // ── State and stream ──────────────────────────────────────────────────────

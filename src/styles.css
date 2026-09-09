@@ -19,9 +19,13 @@
  * and gets the cut, which is the correct degradation — the colours are still right,
  * they just arrive at once.
  *
- * The `initial-value` of each is her night palette, the same three hexes `mood.ts`
- * falls back to. That is what paints in the moment between the document loading and
- * React reading `GET /api/state`: a plausible hour rather than a white flash.
+ * The `initial-value` of each is her night palette with no weather applied — exactly
+ * what `paletteVars(derivePalette('night', 'unknown'))` returns, which is also what
+ * `mood.ts` hands the shader before the first read. This is the one place those numbers
+ * have to be written out by hand, because an at-rule cannot call a function, so
+ * `tests/presence/stylesheet.test.ts` parses this block and fails if the two drift.
+ * It is what paints in the moment between the document loading and React reading
+ * `GET /api/state`: a plausible hour rather than a white flash.
  *
  * ## Type
  *
@@ -32,20 +36,27 @@
  * rasterised, and on the two platforms this will actually run on it is very good.
  */
 
-@property --primary { syntax: '<color>'; inherits: true; initial-value: #0c0c17; }
-@property --secondary { syntax: '<color>'; inherits: true; initial-value: #1a1a2c; }
-@property --accent { syntax: '<color>'; inherits: true; initial-value: #8f6ee0; }
-@property --ground { syntax: '<color>'; inherits: true; initial-value: #05050a; }
-@property --surface { syntax: '<color>'; inherits: true; initial-value: rgba(39, 39, 56, 0.06); }
-@property --surface-strong { syntax: '<color>'; inherits: true; initial-value: rgba(47, 48, 64, 0.11); }
+@property --primary { syntax: '<color>'; inherits: true; initial-value: #0c0c18; }
+@property --secondary { syntax: '<color>'; inherits: true; initial-value: #1a1c2d; }
+@property --accent { syntax: '<color>'; inherits: true; initial-value: #9462da; }
+@property --ground { syntax: '<color>'; inherits: true; initial-value: #05050b; }
+@property --surface { syntax: '<color>'; inherits: true; initial-value: rgba(39, 41, 57, 0.06); }
+@property --surface-strong { syntax: '<color>'; inherits: true; initial-value: rgba(47, 49, 65, 0.11); }
 @property --ink { syntax: '<color>'; inherits: true; initial-value: rgba(240, 242, 247, 0.96); }
 @property --ink-soft { syntax: '<color>'; inherits: true; initial-value: rgba(240, 242, 247, 0.72); }
 @property --ink-dim { syntax: '<color>'; inherits: true; initial-value: rgba(240, 242, 247, 0.46); }
 @property --ink-faint { syntax: '<color>'; inherits: true; initial-value: rgba(240, 242, 247, 0.26); }
-@property --accent-soft { syntax: '<color>'; inherits: true; initial-value: rgba(143, 110, 224, 0.44); }
-@property --accent-faint { syntax: '<color>'; inherits: true; initial-value: rgba(143, 110, 224, 0.16); }
-@property --glow { syntax: '<color>'; inherits: true; initial-value: rgba(143, 110, 224, 0.3); }
+@property --accent-soft { syntax: '<color>'; inherits: true; initial-value: rgba(148, 98, 218, 0.44); }
+@property --accent-faint { syntax: '<color>'; inherits: true; initial-value: rgba(148, 98, 218, 0.16); }
+@property --glow { syntax: '<color>'; inherits: true; initial-value: rgba(148, 98, 218, 0.3); }
 @property --hairline { syntax: '<color>'; inherits: true; initial-value: rgba(240, 242, 247, 0.09); }
+
+/* The only one of these that is not a colour and not part of the palette: the
+   microphone's own loudness, written per animation frame by `src/ui/Voice.tsx`.
+   Registered so it is a real number in `calc()` rather than a token that silently
+   invalidates the declaration, and `inherits: true` because the ring that reads it is
+   a pseudo-element — a non-inherited custom property would never reach it. */
+@property --level { syntax: '<number>'; inherits: true; initial-value: 0; }
 
 :root {
   /* One curve for everything that moves. It decelerates hard and never overshoots,
@@ -93,6 +104,30 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+/**
+ * The room's height, and the one number CSS cannot work out for itself.
+ *
+ * `100%` resolves against the *large* viewport on a phone, so the composer would sit
+ * behind the browser's own chrome until you scrolled. `100dvh` fixes that — but
+ * neither unit moves when the on-screen keyboard opens: on iOS the keyboard shrinks
+ * only the *visual* viewport, which no CSS length tracks. `main.tsx` measures it and
+ * writes `--viewport`, so the grid re-lays out and the composer stays above the keys.
+ *
+ * The three layers are the degradation path, in order: the measured height when
+ * `visualViewport` exists, `100dvh` when only the unit does, `100%` when neither.
+ * `--viewport` is deliberately not in the transition list above — a height that eased
+ * would lag the keyboard by 900 ms.
+ */
+#root {
+  height: var(--viewport, 100%);
+}
+
+@supports (height: 100dvh) {
+  #root {
+    height: var(--viewport, 100dvh);
+  }
 }
 
 body {
@@ -466,4 +501,556 @@ textarea {
   color: var(--ink-faint);
 }
 
-/* CHUNK-MARKER */
+/**
+ * The stream, as one 6 px dot.
+ *
+ * Four states and no words: accent and breathing slowly when frames are arriving,
+ * a faster and dimmer pulse while connecting, a hollow ring when there is no stream
+ * to open at all, and flat ink when it has closed. The hollow ring is the important
+ * one — it is the shape that says "what you are reading is the last thing she said,
+ * not what she is saying".
+ */
+@keyframes breathe {
+  50% {
+    opacity: 0.42;
+  }
+}
+
+.dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  transition:
+    background var(--calm) var(--ease),
+    box-shadow var(--calm) var(--ease);
+}
+
+.dot[data-status='live'] {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-faint);
+  animation: breathe 4.2s var(--ease) infinite;
+}
+
+.dot[data-status='connecting'] {
+  background: var(--accent-soft);
+  animation: breathe 1.4s ease-in-out infinite;
+}
+
+.dot[data-status='unavailable'] {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--ink-dim);
+}
+
+.bar-quiet {
+  font: var(--label);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  transition: color var(--quick) var(--ease);
+}
+
+.bar-quiet:hover,
+.bar-quiet:focus-visible {
+  color: var(--ink-soft);
+}
+
+/* ------------------------------------------------------------- the transcript */
+
+/**
+ * No bubbles.
+ *
+ * Her lines are simply the largest, lightest text in the room, set at 1.65 line
+ * height because it is the only thing here anyone reads at length. Your own lines
+ * are dimmer and carry a single hairline to their left — enough to tell the two
+ * apart at a glance without drawing two chat clients' worth of chrome. The mask at
+ * the top fades the oldest visible turn into the field instead of cutting it against
+ * an edge, which is what keeps a scrolling list from looking like a scrolling list.
+ */
+.scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  padding: 0 clamp(1.1rem, 3.5vw, 2.25rem);
+  mask-image: linear-gradient(to bottom, transparent, #000 4.5rem);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4.5rem);
+}
+
+.scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Bottom-aligned: an almost-empty transcript sits just above the composer rather
+   than stranded at the top of a tall column. */
+.turns {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2.25rem;
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 5.5rem 0 1.5rem;
+}
+
+.turn {
+  animation: rise var(--calm) var(--ease) both;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.turn[data-role='assistant'] {
+  font-size: 1.0625rem;
+  font-weight: 300;
+  line-height: 1.65;
+  color: var(--ink);
+  letter-spacing: -0.003em;
+}
+
+.turn[data-role='user'] {
+  padding-left: 1rem;
+  border-left: 1px solid var(--accent-faint);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+/* `MessageRole` has a third value. Nothing writes a system turn today, but the
+   transcript reads whatever is in the table, and an unstyled line would look like a
+   bug rather than like a note. */
+.turn[data-role='system'] {
+  font: var(--label);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+/* A turn that is still in the air: her cycle has not answered yet. Marked by
+   opacity alone, so it reads as unfinished rather than as failed. */
+.turn[data-pending='true'] {
+  opacity: 0.62;
+}
+
+.turn-time {
+  display: block;
+  margin-top: 0.4rem;
+  font: var(--label);
+  letter-spacing: var(--track);
+  color: var(--ink-faint);
+}
+
+.transcript-empty {
+  max-width: 30rem;
+  margin: 0 auto;
+  font-size: 1.0625rem;
+  font-weight: 300;
+  line-height: 1.65;
+  color: var(--ink-dim);
+  text-align: center;
+  animation: rise var(--slow) var(--ease) both;
+}
+
+/* --------------------------------------------------------------- the composer */
+
+.foot {
+  padding: 0.35rem clamp(1.1rem, 3.5vw, 2.25rem) calc(1.15rem + env(safe-area-inset-bottom));
+}
+
+.foot-inner {
+  width: 100%;
+  max-width: 44rem;
+  margin: 0 auto;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  padding: 0.6rem 0.6rem 0.6rem 1.1rem;
+  background: var(--surface);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-radius: 1.15rem;
+  transition: background var(--calm) var(--ease);
+}
+
+.composer:focus-within {
+  background: var(--surface-strong);
+}
+
+/* Grows with its own content up to nine rems, then scrolls. `rows={1}` plus a
+   height set from `scrollHeight` — a one-line field that becomes a paragraph. */
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0;
+  background: none;
+  border: 0;
+  outline: none;
+  resize: none;
+  max-height: 9rem;
+  overflow-y: auto;
+  scrollbar-width: none;
+  font-weight: 300;
+  line-height: 1.55;
+}
+
+.composer-input::-webkit-scrollbar {
+  width: 0;
+}
+
+.composer-input::placeholder {
+  color: var(--ink-faint);
+}
+
+/* Send is a dot, not a word or an arrow glyph. While a cycle is running it emits a
+   slow ring — the same rhythm as the orb's breath, so the two read as one thing
+   working rather than as a spinner bolted onto a page. */
+@keyframes ring {
+  0% {
+    box-shadow: 0 0 0 0 var(--glow);
+  }
+  70% {
+    box-shadow: 0 0 0 0.75rem rgb(0 0 0 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(0 0 0 / 0);
+  }
+}
+
+.send {
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  transition:
+    background var(--quick) var(--ease),
+    opacity var(--quick) var(--ease);
+}
+
+.send:hover:not(:disabled),
+.send:focus-visible:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+.send:disabled {
+  opacity: 0.3;
+}
+
+.send-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  transition: transform var(--quick) var(--ease);
+}
+
+.send:hover:not(:disabled) .send-dot {
+  transform: scale(1.18);
+}
+
+.send[data-thinking='true'] .send-dot {
+  animation: ring 1.9s var(--ease) infinite;
+}
+
+/* ------------------------------------------------------------- the microphone */
+
+/* The mic is the send dot's mirror: same 2.25 rem circle at the other end of the
+   row, so the composer reads as one object with an ear and a mouth rather than a
+   text field with buttons stuck to it.
+
+   It only exists when the server has an ear — see `Mic` in `src/ui/Voice.tsx` — so
+   the left padding has to follow it. `:has()` rather than a class on `.composer`,
+   because the condition is literally "is there a mic in here" and duplicating that
+   into React state would be two sources of truth for one layout. */
+.composer:has(.mic) {
+  padding-left: 0.6rem;
+}
+
+.mic {
+  position: relative;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  transition: opacity var(--quick) var(--ease);
+}
+
+.mic:disabled {
+  opacity: 0.3;
+}
+
+/* The ring is the waveform. It is a pseudo-element rather than a shadow on the dot
+   so that scale and opacity are all that move — both compositor-only, which is what
+   makes a per-frame write to `--level` cost nothing. */
+.mic::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--accent-faint);
+  transform: scale(calc(0.5 + var(--level) * 0.55));
+  opacity: calc(var(--level) * 1.7);
+  pointer-events: none;
+}
+
+.mic[data-open='false']::after,
+.mic[data-muted='true']::after {
+  opacity: 0;
+}
+
+.mic:hover:not(:disabled)::after,
+.mic:focus-visible:not(:disabled)::after {
+  background: var(--surface-strong);
+  transform: scale(1);
+  opacity: 1;
+}
+
+.mic-dot {
+  position: relative;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--ink-dim);
+  transition:
+    background var(--calm) var(--ease),
+    box-shadow var(--calm) var(--ease);
+}
+
+.mic[data-open='true'] .mic-dot {
+  background: var(--accent);
+}
+
+/* Muted is hollow, not dim: the ear is held open — the browser's own recording
+   indicator is still lit — and nothing is being heard through it. Dimming would say
+   "closed", which is the one thing this state is not. */
+.mic[data-muted='true'] .mic-dot {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--accent-soft);
+}
+
+/* While she talks the dot carries her voice instead of his, and says so by glowing
+   rather than by pulsing — the ring is already busy with the level. */
+.mic[data-speaking='true'] .mic-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0.6rem var(--glow);
+}
+
+/* ------------------------------------------------------------ the live caption */
+
+/* What she is hearing right now, or what she is saying. Never what she has said:
+   that is the transcript's, and this line is gone the moment the transcript has it.
+
+   Tail-anchored on purpose. It is clipped to about three lines, and `align-items:
+   flex-end` on the anonymous text run means a long utterance loses its beginning
+   rather than its newest words — the opposite of what `overflow: hidden` does on its
+   own, and the beginning is the part already heard. */
+.voice-line {
+  display: flex;
+  align-items: flex-end;
+  max-height: 4.4rem;
+  overflow: hidden;
+  margin: 0;
+  padding: 0 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 300;
+  line-height: 1.5;
+  color: var(--ink-dim);
+  transition: color var(--calm) var(--ease);
+}
+
+/* Her half is a shade brighter than his, the same ordering the transcript uses: what
+   she says is the thing being waited for. */
+.voice-line[data-from='her'] {
+  color: var(--ink-soft);
+}
+
+/* ---------------------------------------------------------------- the whisper */
+
+/* Exactly one line, and the smallest text in the room. It is the honest channel:
+   what she is doing, or which stages fell back, or that nothing is keeping this
+   fresh. Never two lines — if there were two, neither would be read. */
+.whisper {
+  min-height: 1.1rem;
+  padding: 0 0.35rem;
+  font-size: 0.6875rem;
+  letter-spacing: 0.01em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--calm) var(--ease);
+}
+
+.whisper[data-kind='degraded'],
+.whisper[data-kind='stale'] {
+  color: var(--ink-dim);
+}
+
+.whisper-ask {
+  font: inherit;
+  color: var(--ink-dim);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-faint);
+  text-underline-offset: 0.25em;
+  transition: color var(--quick) var(--ease);
+}
+
+.whisper-ask:hover,
+.whisper-ask:focus-visible {
+  color: var(--ink-soft);
+}
+
+/* ----------------------------------------------------------------- the ledger */
+
+/**
+ * Closed by default, and a slide-over rather than a sidebar.
+ *
+ * This is the surface that answers "how is she built" — memory counts, loops,
+ * tasks, in-flight actions, the state version, the last mutation, and what she is
+ * running without. All of it is a distraction from talking to her, so none of it is
+ * on screen until a 6 px dot is pressed. It stays mounted so it can slide out as
+ * well as in; `visibility: hidden` is what keeps it out of the accessibility tree
+ * and out of the tab order while it is closed, which `opacity: 0` would not do.
+ */
+.ledger-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  background: rgb(0 0 0 / 0.42);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--calm) var(--ease),
+    visibility var(--calm);
+}
+
+.ledger-scrim[data-open='true'] {
+  opacity: 1;
+  visibility: visible;
+}
+
+.ledger {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  width: min(23rem, 92vw);
+  padding: calc(1.5rem + env(safe-area-inset-top)) 1.6rem calc(1.6rem + env(safe-area-inset-bottom));
+  background: var(--surface-strong);
+  backdrop-filter: blur(32px) saturate(1.35);
+  -webkit-backdrop-filter: blur(32px) saturate(1.35);
+  overflow-y: auto;
+  visibility: hidden;
+  transform: translateX(100%);
+  transition:
+    transform var(--calm) var(--ease),
+    visibility var(--calm);
+}
+
+.ledger[data-open='true'] {
+  visibility: visible;
+  transform: none;
+}
+
+.ledger-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.7rem;
+}
+
+.ledger-group {
+  margin: 0 0 1.6rem;
+}
+
+.ledger-group > .label {
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.ledger-rows {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.ledger-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
+.ledger-row > b {
+  font-weight: 400;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-note {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+
+/* -------------------------------------------------------------- accommodations */
+
+/**
+ * `prefers-reduced-motion`, honoured by the stylesheet as well as by the canvas.
+ *
+ * Durations collapse to 1 ms rather than to 0 so that `transitionend` still fires
+ * for anything that ever comes to depend on it, and the state changes still land —
+ * this removes the movement, not the interface. The canvas is stilled separately by
+ * `useMotionAllowed`, because CSS cannot reach inside a shader.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* On a phone the bar's environment line is the first thing to go: the name and the
+   stream dot are what it is for, and the same words are in the whisper. */
+@media (max-width: 30rem) {
+  .bar-env {
+    display: none;
+  }
+
+  .turns {
+    gap: 1.9rem;
+    padding-top: 4.5rem;
+  }
+
+  .turn[data-role='assistant'] {
+    font-size: 1rem;
+  }
+}
+
+/* A short landscape window — a phone on its side — has no room for a tall
+   transcript above a composer, so the top padding that keeps text clear of the orb
+   is dropped and she is simply behind the words. */
+@media (max-height: 32rem) {
+  .turns {
+    padding-top: 1.5rem;
+  }
+}

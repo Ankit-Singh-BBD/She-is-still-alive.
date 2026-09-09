@@ -32,9 +32,33 @@
  * the render scale drops after a sustained run of slow frames. It never rises
  * again — oscillating between two resolutions is more visible than sitting at the
  * lower one.
+ *
+ * What is measured is the interval between animation callbacks, which is the only
+ * cost signal available from JavaScript — the GPU's own timing is not. So a display
+ * *presenting* below about 42 Hz reads as a GPU that cannot keep up and also drops the
+ * scale. That is left as it is on purpose: a cadence that low almost always means a
+ * device throttled for heat or battery, and a cheaper frame is the right answer there
+ * too. Only frames that were actually rendered are counted, so an idle loop cannot
+ * degrade the picture (see below).
+ *
+ * ## Idling
+ *
+ * When motion is off, time is pinned to a fixed frame and every time-dependent term
+ * in the shader is constant — so once the eased values have stopped travelling, the
+ * next frame would be the frame already on screen. Redrawing it would cost a
+ * full-viewport noise pass, at up to 2× device pixel ratio, at the display's refresh
+ * rate, forever: real heat and battery for a still picture, and exactly the wrong
+ * thing to hand someone who asked for reduced motion. So the draw is skipped. A WebGL
+ * canvas is only re-presented after something is drawn to it, so the composited image
+ * stays put.
+ *
+ * The `requestAnimationFrame` loop itself keeps running, because `sizeToCanvas` is the
+ * only thing in the client watching for a resize — there is no `resize` listener and
+ * no `ResizeObserver`. An idle callback that resizes nothing and draws nothing costs
+ * a few dozen floating-point comparisons.
  */
 
-import type { Mood } from './mood.js';
+import { AWAITING, type Mood } from './mood.js';
 import { FRAGMENT_SOURCE, UNIFORM_NAMES, VERTEX_SOURCE, type UniformName } from './shaders/presence.js';
 
 /** Device pixel ratio is capped here: past 2 the shader costs more than it shows. */
@@ -47,6 +71,16 @@ const SCALE_STEPS = [1, 0.72, 0.5] as const;
 
 /** Where the frozen frame sits when motion is off. Chosen for a pleasant composition. */
 const STILL_TIME = 11.5;
+
+/**
+ * How close an eased value has to get to its target before it stops mattering.
+ *
+ * `ease` is exponential: it approaches and never arrives, so an equality test would
+ * never fire and the loop would never idle. This is half a step of an 8-bit channel —
+ * the colours drive an 8-bit framebuffer and the scalars only scale things that land
+ * in one, so a difference smaller than this cannot move a pixel.
+ */
+const SETTLED = 1 / 512;
 
 export interface PresenceRenderer {
   /** The target mood. Approached over the next few frames, never applied at once. */
@@ -121,7 +155,7 @@ function ease(current: number, target: number, rate: number, dt: number): number
  * WebGL2. A `null` return is an expected outcome, not an error.
  */
 export function createPresenceRenderer(canvas: HTMLCanvasElement): PresenceRenderer | null {
-  const gl = canvas.getContext('webgl2', {
+  const context = canvas.getContext('webgl2', {
     alpha: false,
     antialias: false,
     depth: false,
@@ -131,7 +165,10 @@ export function createPresenceRenderer(canvas: HTMLCanvasElement): PresenceRende
     preserveDrawingBuffer: false,
     powerPreference: 'high-performance',
   }) as WebGL2RenderingContext | null;
-  if (gl === null) return null;
+  if (context === null) return null;
+  // This alias is deliberately created after the null check. TypeScript can then
+  // retain the non-null type inside animation and context-restoration closures.
+  const gl = context;
 
   let program = link(gl);
   if (program === null) return null;
@@ -139,17 +176,17 @@ export function createPresenceRenderer(canvas: HTMLCanvasElement): PresenceRende
 
   // A VAO is required by the spec even with no attributes; without one bound,
   // `drawArrays` is an INVALID_OPERATION in a core WebGL2 context.
-  let vao = gl.createVertexArray();
+  let vao: WebGLVertexArrayObject | null = gl.createVertexArray();
 
-  const target: Mood = {
-    primary: [0.05, 0.05, 0.09],
-    secondary: [0.1, 0.1, 0.17],
-    accent: [0.56, 0.43, 0.88],
-    dayness: 0,
-    turbulence: 0.14,
-    energy: 0,
-    presence: 0.34,
-  };
+  /**
+   * Where the easing starts, and the only palette this file names.
+   *
+   * `AWAITING` is the same object `moodFrom` returns before the first read, so the
+   * shader's first frame and the stylesheet's `@property` initial values are the same
+   * colours — a copy here would be a fourth place for the night palette to drift.
+   * Spread into a mutable object because `setMood` replaces these fields in place.
+   */
+  const target: Mood = { ...AWAITING };
   /**
    * What is actually on screen this frame, eased towards `target`.
    *
@@ -181,6 +218,14 @@ export function createPresenceRenderer(canvas: HTMLCanvasElement): PresenceRende
   let slowRun = 0;
   let width = 0;
   let height = 0;
+  /**
+   * Something changed that the eased values cannot report — a reallocated drawing
+   * buffer, a restored context, motion being switched. True at construction so the
+   * first frame is drawn even though `shown` starts already at `target`.
+   */
+  let dirty = true;
+  /** Whether the previous callback drew. Only those frames measure the GPU. */
+  let drew = false;
 
   function sizeToCanvas(): void {
     const scale = SCALE_STEPS[scaleIndex] ?? 1;
@@ -202,6 +247,33 @@ export function createPresenceRenderer(canvas: HTMLCanvasElement): PresenceRende
     canvas.width = width;
     canvas.height = height;
     gl.viewport(0, 0, width, height);
+    // Resizing a canvas clears its drawing buffer, so this frame has to be drawn even
+    // if nothing else about the room changed.
+    dirty = true;
+  }
+
+  /**
+   * Whether any eased value is still travelling far enough to move a pixel.
+   *
+   * Only consulted when motion is off, where `uTime` is pinned and the shader is
+   * therefore a pure function of these values. The pointer is compared against zero
+   * rather than against `pointerTarget` because that is where it eases to when motion
+   * is off.
+   */
+  function easing(): boolean {
+    for (let i = 0; i < 3; i++) {
+      if (Math.abs(shown.primary[i]! - target.primary[i]!) > SETTLED) return true;
+      if (Math.abs(shown.secondary[i]! - target.secondary[i]!) > SETTLED) return true;
+      if (Math.abs(shown.accent[i]! - target.accent[i]!) > SETTLED) return true;
+    }
+    return (
+      Math.abs(shown.dayness - target.dayness) > SETTLED ||
+      Math.abs(shown.turbulence - target.turbulence) > SETTLED ||
+      Math.abs(shown.energy - target.energy) > SETTLED ||
+      Math.abs(shown.presence - target.presence) > SETTLED ||
+      Math.abs(pointer[0]) > SETTLED ||
+      Math.abs(pointer[1]) > SETTLED
+    );
   }
 
   function draw(now: number): void {
@@ -212,16 +284,25 @@ export function createPresenceRenderer(canvas: HTMLCanvasElement): PresenceRende
     const frameMs = last === 0 ? 0 : now - last;
     last = now;
 
-    if (frameMs > SLOW_FRAME_MS) {
-      slowRun += 1;
-      if (slowRun >= SLOW_FRAME_RUN && scaleIndex < SCALE_STEPS.length - 1) {
-        scaleIndex += 1;
-        slowRun = 0;
-        width = 0; // force `sizeToCanvas` to reallocate at the new scale
+    // Only a frame that was actually rendered says anything about what this GPU can
+    // afford. A skipped frame's interval is the display's cadence and nothing else, so
+    // counting it would let an idle loop permanently degrade a still picture.
+    if (drew) {
+      if (frameMs > SLOW_FRAME_MS) {
+        slowRun += 1;
+        if (slowRun >= SLOW_FRAME_RUN && scaleIndex < SCALE_STEPS.length - 1) {
+          scaleIndex += 1;
+          slowRun = 0;
+          width = 0; // force `sizeToCanvas` to reallocate at the new scale
+        }
+      } else if (slowRun > 0) {
+        slowRun -= 1;
       }
-    } else if (slowRun > 0) {
-      slowRun -= 1;
     }
+
+    // Asked before the eases run, so the step that finally lands inside `SETTLED` is
+    // still drawn rather than being the one that gets skipped.
+    const travelling = easing();
 
     sizeToCanvas();
     if (motion) time += dt;
@@ -240,7 +321,14 @@ export function createPresenceRenderer(canvas: HTMLCanvasElement): PresenceRende
     pointer[0] = ease(pointer[0], motion ? pointerTarget[0] : 0, 3.5, dt);
     pointer[1] = ease(pointer[1], motion ? pointerTarget[1] : 0, 3.5, dt);
 
+    drew = false;
     if (program === null || vao === null) return;
+    // The idle case. See the header: with motion off and nothing travelling, the next
+    // frame is the frame already on screen, and not drawing leaves it there.
+    if (!motion && !dirty && !travelling) return;
+    dirty = false;
+    drew = true;
+
     gl.useProgram(program);
     gl.bindVertexArray(vao);
 
@@ -282,6 +370,8 @@ export function createPresenceRenderer(canvas: HTMLCanvasElement): PresenceRende
     width = 0;
     height = 0;
     last = 0;
+    dirty = true;
+    drew = false;
     frame = requestAnimationFrame(draw);
   }
 
@@ -303,6 +393,10 @@ export function createPresenceRenderer(canvas: HTMLCanvasElement): PresenceRende
       pointerTarget = [x, y];
     },
     setMotion: (enabled: boolean): void => {
+      // Switching motion swaps `uTime` between the running clock and `STILL_TIME`,
+      // which moves every pixel — and no eased value reports it, so it has to be said
+      // out loud or the idle check would skip the frame that shows the change.
+      if (enabled !== motion) dirty = true;
       motion = enabled;
     },
     dispose: (): void => {
@@ -313,9 +407,15 @@ export function createPresenceRenderer(canvas: HTMLCanvasElement): PresenceRende
       canvas.removeEventListener('webglcontextrestored', onRestored);
       if (vao !== null) gl.deleteVertexArray(vao);
       if (program !== null) gl.deleteProgram(program);
-      // Asking for the context to be released matters on a page that mounts and
-      // unmounts: browsers cap live WebGL contexts and silently drop the oldest.
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      // Deliberately *not* `WEBGL_lose_context.loseContext()`.
+      //
+      // Losing it would be the tidy thing on a page that mounts many canvases —
+      // browsers cap live contexts and silently drop the oldest. This page has
+      // exactly one, for its whole life, so there is nothing to reclaim. And a lost
+      // context stays lost: a later `getContext('webgl2')` on the same element hands
+      // back the same dead context, which is precisely what React's StrictMode does
+      // in development when it runs every effect twice. Losing it here would turn
+      // the room black in dev and leave the production path untested.
     },
   };
 }

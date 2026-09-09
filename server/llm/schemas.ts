@@ -15,12 +15,11 @@
  *
  * ## Why free-form objects travel as strings
  *
- * `DecisionProposal.toolInput`, `taskSpec` and a learning candidate's `data`
- * are `unknown` by design: their shape belongs to whichever tool or memory
- * domain they are for, and no single schema covers them. A JSON Schema cannot
- * describe "any object", so those fields cross the wire as JSON *text* and are
- * parsed here. A model that returns malformed text for one of them loses that
- * field rather than the whole proposal.
+ * `DecisionProposal.toolInput` and a learning candidate's `data` are `unknown` by
+ * design: their shape belongs to whichever tool or memory domain they are for, and
+ * no single schema covers them. A JSON Schema cannot describe "any object", so those
+ * fields cross the wire as JSON *text* and are parsed here. A model that returns
+ * malformed text for one of them loses that field rather than the whole proposal.
  */
 
 import { z } from 'zod';
@@ -201,7 +200,6 @@ export const reasoningSchema: FacultySchema<ReasoningWire> = {
 export const DECISION_ACTIONS = [
   'respond',
   'execute_tool',
-  'schedule_task',
   'learn',
   'noop',
   'clarify',
@@ -211,7 +209,6 @@ export interface DecisionWire {
   action: (typeof DECISION_ACTIONS)[number];
   toolId: string | undefined;
   toolInput: unknown;
-  taskSpec: unknown;
   rationale: string;
 }
 
@@ -232,10 +229,6 @@ export const decisionSchema: FacultySchema<DecisionWire> = {
         type: 'string',
         description: 'The tool input as a JSON object, encoded as a string.',
       },
-      taskSpecJson: {
-        type: 'string',
-        description: 'The task specification as a JSON object, encoded as a string.',
-      },
       rationale: {
         type: 'string',
         description: 'One sentence on why. This is recorded.',
@@ -248,14 +241,12 @@ export const decisionSchema: FacultySchema<DecisionWire> = {
       action: z.enum(DECISION_ACTIONS),
       toolId: z.string().min(1).max(120).optional(),
       toolInputJson: jsonText,
-      taskSpecJson: jsonText,
       rationale: z.string().min(1).max(600),
     })
     .transform((value) => ({
       action: value.action,
       toolId: value.toolId,
       toolInput: value.toolInputJson,
-      taskSpec: value.taskSpecJson,
       rationale: value.rationale,
     })),
 };

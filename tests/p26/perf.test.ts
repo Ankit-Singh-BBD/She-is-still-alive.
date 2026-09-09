@@ -48,14 +48,11 @@ function createInitialState(): RuntimeState {
       cycleId: 'test-cycle',
       cycleStartedAt: Date.now(),
       lastCompletedStage: 'PERSIST',
-      attention: {},
     },
     voice: {
       live: 'disconnected',
-      energy: 0,
-      ttsEnergy: 0,
-      frequencyBands: [],
-      voiceId: 'test-voice',
+      reason: '',
+      canHear: false,
     },
     memory: {
       episodicCount: 0,
@@ -68,7 +65,6 @@ function createInitialState(): RuntimeState {
     },
     loops: { activeCount: 0, pausedCount: 0 },
     tasks: { pendingCount: 0, runningCount: 0, failedCount: 0 },
-    pendingActions: [],
     lastMutation: {
       eventId: '',
       type: '',
@@ -108,7 +104,14 @@ describe('P26: Performance Pass (Part XXII.2 / XXII.3)', () => {
       expect(flow.coalesceWindowMs).toBe(50);
     });
 
-    it('coalesces 10 rapid mutations on same key within 50ms window without dropped data', async () => {
+    it('collapses 10 rapid mutations on one key into the newest, dropping the nine behind it', async () => {
+      // The old name for this test said "without dropped data", and the assertions
+      // below are that nine of the ten were dropped. Coalescing *is* dropping
+      // frames: `server/http/routes/presence.ts` follows every event frame with a
+      // full state snapshot read at send time, so what survives is the state, and
+      // the frames a client missed are replayed out of `domain_event` by
+      // `Last-Event-ID`. That is the guarantee — the newest wins and nothing stale
+      // arrives after it — and it is not the one the old name claimed.
       flow.start();
       const subscriber = createMockSubscriber('sub-1');
       flow.subscribe(subscriber);
@@ -123,10 +126,12 @@ describe('P26: Performance Pass (Part XXII.2 / XXII.3)', () => {
       // Wait for the coalesce window + processing
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Should receive exactly 1 coalesced message (the last one)
+      // One frame, and it is the last of the ten rather than the first.
       expect(subscriber.messages.length).toBe(1);
       expect(subscriber.messages[0]!.seq).toBe(10);
       expect(subscriber.messages[0]!.payload).toEqual({ id: 10 });
+      // The state kept every one of them: ten rows, so the high-water mark is 10.
+      expect(flow.getSnapshot().version).toBe(10);
     });
 
     it('does not coalesce events of different types (different coalesceKeys)', async () => {

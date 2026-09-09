@@ -333,4 +333,78 @@ describe('Phase P05: Memory Domains & Knowledge Retrieval Policy', () => {
       expect(ids).not.toContain(mem.id);
     });
   });
+
+  /**
+   * The ranking term that was silently zero.
+   *
+   * `bagOfWordsSimilarity` tokenized with `\w`, which is `[A-Za-z0-9_]` and nothing
+   * else, so a query in Devanagari produced an empty token set and the function
+   * returned 0 from its empty-set guard — not from any judgement about the words. The
+   * ear transcribes speech into Devanagari (`server/lang/script.ts`), so that
+   * was *every spoken turn*: recalled on importance and recency alone, and nothing
+   * anywhere said so.
+   *
+   * Every case below sets `similarityWeight: 1` with the other two at 0, so the
+   * reported score *is* the similarity. Under the old tokenizer each of these
+   * assertions reads `expect(0).toBeGreaterThan(0)`. With importance or recency left
+   * in the sum they would all pass while measuring nothing.
+   */
+  describe('8. Similarity across scripts and spellings', () => {
+    const onlySimilarity = {
+      callerId: ownerId,
+      callerKind: 'owner' as const,
+      domains: ['episodic' as const],
+      limit: 10,
+      recencyWeight: 0,
+      importanceWeight: 0,
+      similarityWeight: 1,
+      excludeSoftDeleted: true,
+    };
+
+    /** One memory, and the score a query earns against it. */
+    const scoreOf = async (summary: string, query: string): Promise<number> => {
+      const mem = repo.createEpisodic({ identityId: ownerId, summary, provenance: mockProvenance });
+      const result = await retrieval.retrieve({ ...onlySimilarity, query });
+      return result.items.find((item) => item.id === mem.id)?.similarityScore ?? -1;
+    };
+
+    it('scores a Devanagari query against a Devanagari memory above zero', async () => {
+      expect(await scoreOf('आज मौसम अच्छा था', 'मौसम')).toBeGreaterThan(0);
+    });
+
+    it('folds vowel length, so what she heard matches what he typed', async () => {
+      // The ear renders short — "thik", "hun", "yad" — because Devanagari vowel length
+      // is thrown away at the transliterator. The owner types long: "theek", "hoon",
+      // "yaad". Without the fold these are different words and a spoken turn recalls
+      // none of the typed history it belongs to.
+      expect(await scoreOf('Ankit ne kaha theek hoon', 'thik hun')).toBeGreaterThan(0);
+      expect(await scoreOf('yaad rakhna hai', 'yad')).toBeGreaterThan(0);
+      // And the other direction, because the fold is applied to both sides.
+      expect(await scoreOf('sab thik hai', 'theek')).toBeGreaterThan(0);
+    });
+
+    it('still tells unrelated words apart', async () => {
+      // The fold costs precision, and the guard against having folded too far is that
+      // a word which shares nothing still scores nothing.
+      expect(await scoreOf('mausam acha tha', 'gaadi')).toBe(0);
+    });
+
+    it('ranks the memory the query is about first', async () => {
+      // A score above zero is not yet useful recall; the ordering is what the caller
+      // acts on.
+      repo.createEpisodic({
+        identityId: ownerId,
+        summary: 'kal train se Delhi gaya tha',
+        provenance: mockProvenance,
+      });
+      repo.createEpisodic({
+        identityId: ownerId,
+        summary: 'मौसम बहुत अच्छा था कल',
+        provenance: mockProvenance,
+      });
+
+      const result = await retrieval.retrieve({ ...onlySimilarity, query: 'mausam kaisa tha' });
+      expect(result.items[0]?.summary).toBe('मौसम बहुत अच्छा था कल');
+    });
+  });
 });

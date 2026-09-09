@@ -135,6 +135,8 @@ export interface Session {
 /** One action, as `POST /api/chat` reports it. Declared inline by the route. */
 export interface ActionSummary {
   readonly toolId: string;
+  /** The call was dispatched. `false` means nothing was touched, so nothing changed. */
+  readonly attempted: boolean;
   /** The call returned. Not a claim that anything changed. */
   readonly success: boolean;
   /** A re-read of authoritative state confirmed the change. Only stage 8 sets this. */

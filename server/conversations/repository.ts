@@ -11,7 +11,7 @@
  * and closed.
  */
 
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 import type { Database } from '@server/persistence/db.js';
 import { getDatabase } from '@server/persistence/db.js';
 

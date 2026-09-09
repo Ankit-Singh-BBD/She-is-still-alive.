@@ -6,7 +6,14 @@
  * dedupes, limits, and records provenance.
  */
 
-import type { MemoryDomain, MemoryProvenance, Sensitivity, SubjectKind, SourceKind } from '@server/memory/types.js';
+import type {
+  LifecycleStatus,
+  MemoryDomain,
+  MemoryProvenance,
+  Sensitivity,
+  SubjectKind,
+  SourceKind,
+} from '@server/memory/types.js';
 import type { IdentityKind } from '@server/identity/types.js';
 
 /** A candidate memory proposed by the LLM for extraction */
@@ -37,20 +44,42 @@ export interface LearningCandidate {
   extractor?: 'rule' | 'llm';
 }
 
-/** Result of applying the Scoped Guest Learning Policy */
+/**
+ * Result of applying the Scoped Learning Policy (Build Book XIII.4).
+ *
+ * Every field is required, and that is the point: the writers used to fill the gaps
+ * themselves — `persistQuarantine` hardcoded all four of subject kind, sensitivity,
+ * source kind and lifecycle status, and took `_decision` unused — so the table lived
+ * half in the policy and half in the SQL. A decision a writer cannot complete is a
+ * decision a writer cannot quietly overrule.
+ *
+ * `'update'` is gone from the action union. Nothing ever returned it, and nothing read
+ * it: the choice between inserting and updating comes from `DedupeResult`, one step
+ * later and on evidence the policy does not have.
+ */
 export interface ScopedLearningDecision {
-  /** Whether to proceed with this candidate */
-  action: 'persist' | 'update' | 'quarantine' | 'discard';
-  /** If quarantine: requires owner confirmation before becoming active */
-  quarantineReason?: string;
-  /** If discard: why it was rejected */
-  discardReason?: string;
-  /** Sensitivity level to assign if persisted */
-  sensitivity?: Sensitivity;
-  /** Subject kind to assign if persisted */
-  subjectKind?: SubjectKind;
-  /** Source kind to assign if persisted */
-  sourceKind?: SourceKind;
+  /** Whether to keep this candidate, hold it for confirmation, or drop it. */
+  action: 'persist' | 'quarantine' | 'discard';
+  /** Why — recorded on a quarantine, logged on a discard. */
+  reason: string;
+  /**
+   * Whose memory this joins.
+   *
+   * The caller who said it, always. A candidate proposing its own `identityId` is a
+   * candidate proposing which person it belongs to, which is the isolation the policy
+   * exists to enforce.
+   */
+  identityId: string;
+  /** Who the memory is *about* — a separate question from whose record holds it. */
+  subjectKind: SubjectKind;
+  /** Who may read it back. */
+  sensitivity: Sensitivity;
+  /** Whether a person stated it or the system inferred it. */
+  sourceKind: SourceKind;
+  /** `archived` on a quarantine: held out of ordinary recall until the owner confirms. */
+  lifecycleStatus: LifecycleStatus;
+  /** The provenance claim that goes with it. Never `app_rule` on a quarantined row. */
+  validatedBy: 'app_rule' | 'owner_confirmation' | 'auto_policy';
 }
 
 /** Result of the dedupe stage */
@@ -131,10 +160,21 @@ export interface LearningProvenance extends MemoryProvenance {
   tokensUsed?: number;
 }
 
-/** Scoped Guest Learning Policy types */
+/** Scoped Learning Policy seam — see `policy.ts` for the one implementation. */
 export interface GuestLearningPolicy {
-  /** Evaluate a candidate against the guest learning policy */
-  evaluate(candidate: LearningCandidate, callerId: string, callerKind: IdentityKind): ScopedLearningDecision;
+  /**
+   * Evaluate a candidate against the Scoped Learning Policy.
+   *
+   * `ownerName` is what makes the quarantine row work off this seam as well as in
+   * cognition: "Ankit ko chai pasand hai" names him without using the word "owner", and
+   * a policy that is not told his enrolled name cannot see that it is a claim about him.
+   */
+  evaluate(
+    candidate: LearningCandidate,
+    callerId: string,
+    callerKind: IdentityKind,
+    ownerName?: string,
+  ): ScopedLearningDecision;
 }
 
 /** Learning extractor interface - can be LLM-based or rule-based */
@@ -150,7 +190,21 @@ export interface CycleRecord {
   conversationId: string;
   startedAt: number;
   completedAt: number;
-  status: 'completed' | 'interrupted' | 'failed';
+  /**
+   * Includes `'degraded'`, which is a status the runtime actually writes.
+   *
+   * `server/cognition/runtime.ts` derives the status from the stage traces and
+   * settles on `'degraded'` when a stage threw and was replaced by its fallback;
+   * migration `0010_cycle_status_guard.sql` permits it by trigger. This union
+   * omitted it, so the out-of-band learner had no type for a cycle that finished
+   * with a bruise — and a degraded cycle is exactly the kind the in-cycle learn
+   * stage may have missed, which makes it the *most* interesting one to
+   * consolidate later.
+   *
+   * Widening is safe for every existing consumer: the field is only ever read as
+   * a string, into a prompt or a report line.
+   */
+  status: 'completed' | 'degraded' | 'interrupted' | 'failed';
   inputJson?: string;
   outputJson?: string;
   proposedDecision?: unknown;

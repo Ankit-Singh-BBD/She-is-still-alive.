@@ -184,6 +184,14 @@ export function mountIdentityRoutes(router: Router, deps: RouteDeps): void {
       // flow that was decided to be impossible at boot.
       deps.realtime();
 
+      // The same moment, for the same reason, is the first one at which she can be told
+      // who made her — the story is stored under his identity and names him from it, so
+      // there was nowhere to put it until this row existed. Deliberately not guarded by a
+      // try/catch: it writes to the database that just accepted the owner, through the
+      // same repository the rest of the request used, and a failure here means something
+      // is wrong that a 201 would hide.
+      deps.rememberOrigin(result.owner);
+
       deps.limits.credential.forget(clientKey(req));
       res.status(201).json(beginSession(res, result.owner));
     }),

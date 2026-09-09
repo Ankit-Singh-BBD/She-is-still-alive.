@@ -264,6 +264,7 @@ describe('P28: tamper-evident audit chain', () => {
         {
           cycleId,
           status: 'completed',
+          startedAt: Date.now(),
           completedAt: Date.now(),
           identityId: 'actor-1',
           conversationId: 'conv-1',

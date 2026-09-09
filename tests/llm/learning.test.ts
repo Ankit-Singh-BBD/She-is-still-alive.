@@ -372,27 +372,39 @@ describe('LearningPipeline with a real extractor', () => {
     db = new Database({ path: ':memory:' });
     runMigrations(db, resolve(process.cwd(), 'server/persistence/migrations'));
 
-    for (const [id, kind] of [
-      [OWNER, 'owner'],
-      [GUEST, 'guest'],
+    /**
+     * Enrolled under names, not under their kinds.
+     *
+     * `display_name` used to be the string `'owner'` here, which quietly made two rules
+     * untestable: the quarantine matches the owner's *enrolled name* in the sentence, and
+     * `'owner'` is also the role word `OWNER_ROLE` matches, so a fixture named `'owner'`
+     * cannot tell the two paths apart. Naming him `Ankit` — and the guest someone else —
+     * is what makes "Ankit ko chai pasand hai" a claim about the owner and "mera naam
+     * Ankit hai" from a guest a self-report.
+     */
+    for (const [id, kind, displayName] of [
+      [OWNER, 'owner', 'Ankit'],
+      [GUEST, 'guest', 'Rohit'],
     ] as const) {
       db.raw
         .prepare(
           `INSERT INTO identity (id, kind, display_name, status, enrolled_at, last_seen_at)
            VALUES (?, ?, ?, 'active', 0, 0)`,
         )
-        .run(id, kind, kind);
+        .run(id, kind, displayName);
       db.raw
         .prepare(`INSERT INTO permission (identity_id, version, json) VALUES (?, 1, ?)`)
         .run(id, JSON.stringify(DEFAULT_PERMISSIONS[kind]));
     }
 
-    // Two conversations, so the owner's cycle and the guest's cycle are separate
-    // rows: the double-write guard counts by cycle id, and reusing one id would
-    // have the second case skipped by the first case's writes.
+    // Three conversations, so each case's cycle is its own row: the double-write guard
+    // counts by cycle id, and reusing one id would have the later cases skipped by the
+    // earlier cases' writes. `semantic_memory.source_cycle` is a foreign key, so a cycle
+    // a test invents has to exist here too.
     for (const [conversation, cycle, identity] of [
       ['conv_001', 'cyc_001', OWNER],
       ['conv_002', 'cyc_002', GUEST],
+      ['conv_003', 'cyc_003', GUEST],
     ] as const) {
       db.raw
         .prepare(
@@ -550,7 +562,7 @@ describe('LearningPipeline with a real extractor', () => {
     expect(row?.['source_cycle']).toBe('cyc_001');
   });
 
-  it('keeps a guest’s own preference and drops their statement of fact', async () => {
+  it('keeps a guest’s own preference and their own self-report, isolated from the owner', async () => {
     const extractor = createLearningExtractor({
       resolveKind: (id) => identityRepo.getIdentity(id)?.kind,
     });
@@ -566,20 +578,170 @@ describe('LearningPipeline with a real extractor', () => {
       said('mujhe chai pasand hai'),
     ]);
 
-    expect(result.count).toBe(1);
+    /**
+     * Both kept, and this test used to assert the opposite for the first one.
+     *
+     * Build Book XIII.4's table has five rows and forbids none of `episodic`,
+     * `relationship`, `habit`, or a guest's own `semantic` fact — but this pipeline's
+     * copy of the policy discarded all four by name, under a reason
+     * (`Guest semantic facts about non-owner subjects are not retained`) that appears
+     * nowhere in the book. Its quarantine branch was the reason: it tested
+     * `content['subject'] === 'owner'`, a literal `extractor.ts` is written never to
+     * emit, so the branch could not fire and the blanket discard beneath it swallowed
+     * everything. Fixing the detection removes the need for the blanket.
+     */
+    expect(result.count).toBe(2);
 
-    // Not quarantined: the subject is `speaker`, so this is a guest's claim about
-    // themselves, and the policy retains no guest semantic fact at all.
-    expect(rows('semantic_memory')).toEqual([]);
-    const dropped = result.details.find((detail) => detail.candidate.domain === 'semantic');
-    expect(dropped?.decision.action).toBe('discard');
-    expect(dropped?.decision.discardReason).toContain('not retained');
+    const [fact] = rows('semantic_memory');
+    expect(fact?.['subject']).toBe('speaker');
+    expect(fact?.['object']).toBe('Ankit');
+    expect(fact?.['identity_id']).toBe(GUEST);
+    // Not quarantined, though the sentence contains the owner's own name: the candidate
+    // says its subject is the speaker, and a guest introducing himself is not making a
+    // claim about the owner. `lifecycle_status` is what separates the two outcomes.
+    expect(fact?.['subject_kind']).toBe('guest');
+    expect(fact?.['lifecycle_status']).toBe('active');
 
     const [preference] = rows('preference');
     expect(preference?.['key']).toBe('likes');
     expect(preference?.['value']).toBe('chai');
     expect(preference?.['subject_kind']).toBe('guest');
-    expect(preference?.['sensitivity']).toBe('public');
     expect(preference?.['identity_id']).toBe(GUEST);
+    /**
+     * `person_shared`, not `public`, and the difference is the whole guest row.
+     *
+     * `public` is the one `Sensitivity` value that returns `true` from
+     * `MemoryRetrieval.isAllowedByPolicy` for every caller who clears identity
+     * isolation — so the copy of the policy whose own header quoted "Completely
+     * isolated from Owner" was the copy that un-isolated it. Stage 10's copy said
+     * `person_shared` and stage 10's copy was right.
+     */
+    expect(preference?.['sensitivity']).toBe('person_shared');
+  });
+
+  /**
+   * The quarantine, reachable off this path for the first time.
+   *
+   * It could not fire before: the branch tested `content['subject'] === 'owner'`, a
+   * literal the extractor is written never to emit. What makes it reachable is reading the
+   * sentence for the owner's *enrolled name*, which is why the fixture enrols him under
+   * one. The candidate is handed in rather than extracted because the rule extractor has
+   * no third-person pattern — "X ko Y pasand hai" yields nothing — and what is under test
+   * here is the policy and the writer, not the regular expressions.
+   */
+  it('quarantines a guest’s claim about the owner instead of learning it', async () => {
+    const guestCycle: CycleRecord = {
+      ...CYCLE,
+      id: 'cyc_003',
+      conversationId: 'conv_003',
+      identityId: GUEST,
+    };
+
+    const result = await pipelineWith(
+      fixedExtractor([
+        candidate({
+          domain: 'semantic',
+          callerId: GUEST,
+          callerKind: 'guest',
+          content: { subject: 'Ankit', predicate: 'likes', object: 'chai' },
+        }),
+      ]),
+    ).processCycle(guestCycle, [said('Ankit ko chai pasand hai')]);
+
+    expect(result.count).toBe(1);
+    const quarantined = result.details.find((d) => d.decision.action === 'quarantine');
+    expect(quarantined).toBeDefined();
+    expect(quarantined?.decision.validatedBy).toBe('owner_confirmation');
+
+    const [row] = rows('semantic_memory');
+    // Under the guest's identity — the book's "with Guest provenance" — while
+    // `subject_kind` records who the claim is *about*.
+    expect(row?.['identity_id']).toBe(GUEST);
+    expect(row?.['subject_kind']).toBe('owner');
+    // `owner_only` is the only setting under which the guest cannot read their own
+    // unconfirmed claim back out of her, and `archived` keeps it out of ordinary recall
+    // until he confirms it.
+    expect(row?.['sensitivity']).toBe('owner_only');
+    expect(row?.['lifecycle_status']).toBe('archived');
+    expect((JSON.parse(row?.['provenance_json'] as string) as MemoryProvenance).validatedBy).toBe(
+      'owner_confirmation',
+    );
+    // Traceable to the cycle that produced it. `persistNew` used to leave this null for
+    // accepted facts while the quarantine writer filled it in, which is the wrong way
+    // round; now both fill it.
+    expect(row?.['source_cycle']).toBe('cyc_003');
+
+    /**
+     * It reads back through the repository's own mapping.
+     *
+     * The old writer built its own INSERT beside `MemoryRepository`, listing this table's
+     * columns and formatting its timestamps by hand, because the repository hardcoded
+     * `lifecycle_status` and raw SQL was the only way to reach it. A second writer of one
+     * table is a second thing to keep in step with the schema; asserting on the mapped
+     * object rather than the raw row is what would have caught a drift in either.
+     */
+    const [mapped] = memoryRepo.listSemantic(GUEST, true);
+    expect(mapped?.subject).toBe('Ankit');
+    expect(mapped?.lifecycleStatus).toBe('archived');
+    expect(Number.isFinite(mapped?.createdAt)).toBe(true);
+    expect(mapped?.createdAt).toBeGreaterThan(1_600_000_000_000);
+
+    // And it is out of the default view, which is what "quarantine" has to mean to be
+    // more than a word.
+    expect(memoryRepo.listSemantic(GUEST)).toEqual([]);
+    expect(memoryRepo.listSemantic(GUEST, true)).toHaveLength(1);
+  });
+
+  /**
+   * A claim about the owner that was extracted as something other than a fact.
+   *
+   * The policy quarantines on the *sentence*, so any of the six domains can reach it — but
+   * the writer cast `content` to `{ subject, predicate, object }` unconditionally, so for
+   * the other five it bound `undefined` to three NOT NULL columns. The insert threw, the
+   * loop swallowed it into `details`, and the claim was held nowhere: the one outcome the
+   * table forbids is the one the writer produced.
+   */
+  it('holds a claim about the owner that was extracted as a preference', async () => {
+    const guestCycle: CycleRecord = {
+      ...CYCLE,
+      id: 'cyc_003',
+      conversationId: 'conv_003',
+      identityId: GUEST,
+    };
+
+    // The guest's own `likes` preference, already stored. `setPreference` matches on
+    // (identity_id, key), so a quarantine written into that table would have replaced it.
+    memoryRepo.createPreference({
+      identityId: GUEST,
+      key: 'likes',
+      value: 'coffee',
+      provenance: provenanceFor('cyc_002'),
+    });
+
+    const result = await pipelineWith(
+      fixedExtractor([
+        candidate({
+          domain: 'preference',
+          callerId: GUEST,
+          callerKind: 'guest',
+          // No `subject` field at all — a preference does not carry one. What makes this
+          // a claim about the owner is his name in the value.
+          content: { key: 'likes', value: 'Ankit likes chai' },
+        }),
+      ]),
+    ).processCycle(guestCycle, [said('Ankit ko chai pasand hai')]);
+
+    expect(result.details[0]?.error).toBeUndefined();
+    expect(result.count).toBe(1);
+
+    const [held] = rows('semantic_memory');
+    expect(held?.['subject']).toBe('Ankit');
+    expect(held?.['predicate']).toBe('prefers:likes');
+    expect(held?.['object']).toBe('Ankit likes chai');
+    expect(held?.['lifecycle_status']).toBe('archived');
+
+    // Untouched.
+    expect(rows('preference')).toHaveLength(1);
+    expect(rows('preference')[0]?.['value']).toBe('coffee');
   });
 });

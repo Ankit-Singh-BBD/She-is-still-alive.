@@ -7,7 +7,7 @@
 
 import type { Database } from '@server/persistence/db.js';
 import { getDatabase } from '@server/persistence/db.js';
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 import type {
   EpisodicMemory,
   SemanticMemory,
@@ -154,7 +154,23 @@ export class MemoryRepository {
       params.push(identityId);
     }
     if (!includeDeleted) {
-      conditions.push("lifecycle_status != 'soft_deleted' AND deleted_at IS NULL");
+      // 'consolidated' is excluded alongside 'soft_deleted' because that is what the
+      // status *means*: the row has been folded into an identical surviving row and
+      // is no longer retrieved on its own (see server/advanced/dream.ts). Without
+      // this clause the status would be a label the retrieval layer ignored, which
+      // is the class of dishonesty this codebase is spending its effort removing.
+      //
+      // 'archived' joins them for the same reason and is the same argument one step on.
+      // The Scoped Learning Policy writes a non-owner's unverified claim about the owner
+      // as `archived` — Build Book XIII.4's quarantine, "Owner confirmation required" —
+      // and nothing in the codebase reads `provenance.quarantined` or `validatedBy`. So
+      // if the default view returned archived rows, an unconfirmed claim would reach
+      // recall indistinguishable from something she knows, which is precisely the
+      // outcome the quarantine exists to prevent. `listSemantic(id, true)` still
+      // reaches them; that is the view a confirmation surface reads.
+      conditions.push(
+        "lifecycle_status NOT IN ('soft_deleted', 'consolidated', 'archived') AND deleted_at IS NULL",
+      );
     }
 
     if (conditions.length > 0) {
@@ -164,6 +180,33 @@ export class MemoryRepository {
 
     const rows = this.db.raw.prepare(query).all(...params) as Record<string, unknown>[];
     return rows.map((r) => this.mapEpisodicRow(r));
+  }
+
+  /**
+   * Fold a redundant recollection out of the default view.
+   *
+   * Distinct from `softDeleteEpisodic` in intent and in what it leaves behind: no
+   * `deleted_at`, no `deleted_by`, and no claim that anyone asked for it to go. The
+   * row is intact and still readable through `listEpisodic(id, true)` — it has only
+   * stopped being retrieved as a separate memory, because an identical one survives.
+   *
+   * Returns false when the row is already consolidated or already deleted, so a
+   * caller cannot double-count a fold, and cannot quietly hide a row that a person
+   * deleted on purpose.
+   */
+  markEpisodicConsolidated(id: string): boolean {
+    const now = new Date().toISOString();
+    const result = this.db.raw
+      .prepare(
+        `
+      UPDATE episodic_memory
+      SET lifecycle_status = 'consolidated', updated_at = ?
+      WHERE id = ? AND lifecycle_status = 'active' AND deleted_at IS NULL
+    `
+      )
+      .run(now, id);
+
+    return result.changes > 0;
   }
 
   softDeleteEpisodic(id: string, deletedBy: string): boolean {
@@ -181,6 +224,14 @@ export class MemoryRepository {
     return result.changes > 0;
   }
 
+  /**
+   * Bring a hidden recollection back into the default view.
+   *
+   * The `!= 'active'` predicate rather than `= 'soft_deleted'`: consolidation is now
+   * a second way for a row to leave that view, and a fold that could not be undone
+   * would be a deletion wearing a gentler name. Still returns false for a row that
+   * was already active, so "nothing to restore" stays distinguishable from "restored".
+   */
   restoreEpisodic(id: string): boolean {
     const now = new Date().toISOString();
     const result = this.db.raw
@@ -188,7 +239,7 @@ export class MemoryRepository {
         `
       UPDATE episodic_memory
       SET lifecycle_status = 'active', deleted_at = NULL, deleted_by = NULL, updated_at = ?
-      WHERE id = ? AND lifecycle_status = 'soft_deleted'
+      WHERE id = ? AND lifecycle_status != 'active'
     `
       )
       .run(now, id);
@@ -241,6 +292,17 @@ export class MemoryRepository {
     sourceKind?: SourceKind;
     provenance: MemoryProvenance;
     expiresAt?: number;
+    /**
+     * Written as `active` unless a caller has a reason it is not.
+     *
+     * The one reason today is quarantine: a non-owner's unverified claim about the owner
+     * is stored `archived`, which is what keeps it out of `listSemantic`'s default view
+     * until he confirms it. This used to be a hardcoded `const`, so the only way to
+     * express that was raw SQL beside the repository — `LearningPipeline.persistQuarantine`
+     * did exactly that, and so kept its own copy of this table's column list and timestamp
+     * format for one INSERT.
+     */
+    lifecycleStatus?: LifecycleStatus;
   }): SemanticMemory {
     const id = ulid();
     const now = Date.now();
@@ -248,7 +310,7 @@ export class MemoryRepository {
     const sensitivity = params.sensitivity ?? 'person_shared';
     const confidence = params.confidence ?? 1.0;
     const sourceKind = params.sourceKind ?? 'conversation';
-    const lifecycleStatus: LifecycleStatus = 'active';
+    const lifecycleStatus: LifecycleStatus = params.lifecycleStatus ?? 'active';
 
     const memory: SemanticMemory = {
       id,
@@ -333,7 +395,11 @@ export class MemoryRepository {
       params.push(identityId);
     }
     if (!includeDeleted) {
-      conditions.push("lifecycle_status != 'soft_deleted' AND deleted_at IS NULL");
+      // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
+      // retrieval layer ignores is worse than no status at all.
+      conditions.push(
+        "lifecycle_status NOT IN ('soft_deleted', 'archived') AND deleted_at IS NULL",
+      );
     }
 
     if (conditions.length > 0) {
@@ -543,7 +609,11 @@ export class MemoryRepository {
       params.push(identityId);
     }
     if (!includeDeleted) {
-      conditions.push("lifecycle_status != 'soft_deleted' AND deleted_at IS NULL");
+      // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
+      // retrieval layer ignores is worse than no status at all.
+      conditions.push(
+        "lifecycle_status NOT IN ('soft_deleted', 'archived') AND deleted_at IS NULL",
+      );
     }
 
     if (conditions.length > 0) {
@@ -715,7 +785,11 @@ export class MemoryRepository {
       params.push(identityId);
     }
     if (!includeDeleted) {
-      conditions.push("lifecycle_status != 'soft_deleted' AND deleted_at IS NULL");
+      // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
+      // retrieval layer ignores is worse than no status at all.
+      conditions.push(
+        "lifecycle_status NOT IN ('soft_deleted', 'archived') AND deleted_at IS NULL",
+      );
     }
 
     if (conditions.length > 0) {
@@ -887,7 +961,11 @@ export class MemoryRepository {
       params.push(ownerId);
     }
     if (!includeDeleted) {
-      conditions.push("lifecycle_status != 'soft_deleted' AND deleted_at IS NULL");
+      // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
+      // retrieval layer ignores is worse than no status at all.
+      conditions.push(
+        "lifecycle_status NOT IN ('soft_deleted', 'archived') AND deleted_at IS NULL",
+      );
     }
 
     if (conditions.length > 0) {
@@ -1067,7 +1145,11 @@ export class MemoryRepository {
       params.push(identityId);
     }
     if (!includeDeleted) {
-      conditions.push("lifecycle_status != 'soft_deleted' AND deleted_at IS NULL");
+      // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
+      // retrieval layer ignores is worse than no status at all.
+      conditions.push(
+        "lifecycle_status NOT IN ('soft_deleted', 'archived') AND deleted_at IS NULL",
+      );
     }
 
     if (conditions.length > 0) {

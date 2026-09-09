@@ -1,14 +1,18 @@
-import type { Identity } from '@server/identity/types.js';
-import type { AuthzAction, AuthzResource, AuthzDecision } from './types.js';
+import type { AuthzAction, AuthzCaller, AuthzResource, AuthzDecision } from './types.js';
 
 export * from './types.js';
 
 /**
  * Pure, deterministic, side-effect-free authorization check.
  * Evaluates caller permissions against the requested action and resource.
+ *
+ * Build Book V.4: *every* action — read, write, execute, broadcast — passes through
+ * here. That is a claim about call sites, not about this function, and it is the half
+ * that keeps going wrong: a permission this function honours perfectly is still
+ * decoration if the code that writes the row never asks.
  */
 export function check(
-  caller: Identity,
+  caller: AuthzCaller,
   action: AuthzAction,
   resource?: AuthzResource
 ): AuthzDecision {
@@ -31,10 +35,24 @@ export function check(
       }
       return allow(caller, action, resource);
 
+    // Writing into memory and enrolling knowledge are the same authority: something
+    // becomes part of what she knows. `mayEnrollNewKnowledge` is the switch, and the
+    // clause under it is the scope — the same shape `preference:mutate` and
+    // `conversation:write` already carry, and for the same reason.
+    //
+    // Without the scope clause this case was a bare boolean, so the only expressible
+    // rule was "this caller may write anywhere or nowhere". That is what forced
+    // `DEFAULT_PERMISSIONS` to say `false` for `person` and `guest` — the blanket ban
+    // Build Book XIII.4 opens by forbidding ("Madhurita does **not** implement a
+    // blanket 'guests teach nothing' rule") — and a `false` nothing enforced is how it
+    // stayed contradictory without anyone noticing.
     case 'memory:write':
     case 'knowledge:enroll':
       if (!perms.mayEnrollNewKnowledge) {
         return deny(caller, action, 'Missing mayEnrollNewKnowledge permission', resource);
+      }
+      if (resource?.ownerId && resource.ownerId !== caller.id && !isOwner) {
+        return deny(caller, action, "Cannot enroll into another identity's memory", resource);
       }
       return allow(caller, action, resource);
 
@@ -119,7 +137,7 @@ export function check(
   }
 }
 
-function allow(caller: Identity, action: AuthzAction, resource?: AuthzResource): AuthzDecision {
+function allow(caller: AuthzCaller, action: AuthzAction, resource?: AuthzResource): AuthzDecision {
   return {
     allowed: true,
     callerId: caller.id,
@@ -129,7 +147,7 @@ function allow(caller: Identity, action: AuthzAction, resource?: AuthzResource):
 }
 
 function deny(
-  caller: Identity,
+  caller: AuthzCaller,
   action: AuthzAction,
   reason: string,
   resource?: AuthzResource

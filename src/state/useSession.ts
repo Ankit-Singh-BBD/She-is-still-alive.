@@ -44,8 +44,13 @@ export interface SessionState {
     displayName: string;
     preferredName?: string;
     passphrase: string;
+    recoveryCode?: string;
   }) => Promise<boolean>;
-  enter: (passphrase: string) => Promise<boolean>;
+  /**
+   * Exactly one credential, because `POST /api/session` refuses both — the two
+   * shapes are kept apart in the type rather than sorted out at runtime.
+   */
+  enter: (credential: { passphrase: string } | { recoveryCode: string }) => Promise<boolean>;
   leave: () => Promise<void>;
   /** Called by other hooks when the server says this session is no longer good. */
   expire: () => void;
@@ -113,11 +118,11 @@ export function useSession(): SessionState {
     }
   }, []);
 
-  const enter = useCallback<SessionState['enter']>(async (passphrase) => {
+  const enter = useCallback<SessionState['enter']>(async (credential) => {
     setBusy(true);
     setNotice(undefined);
     try {
-      const session = await api.login({ passphrase });
+      const session = await api.login(credential);
       setIdentity(session.identity);
       setPhase('room');
       return true;

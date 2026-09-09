@@ -1,7 +1,7 @@
 import type { Database } from '@server/persistence/db.js';
 import { getDatabase } from '@server/persistence/db.js';
 import type { EventBus } from '@server/events/event-bus.js';
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type {
   AuthOutcome,
@@ -32,6 +32,32 @@ const SESSION_TOKEN_BYTES = 32;
 
 /**
  * Default permission sets per identity kind.
+ *
+ * The book specifies `PermissionSet`'s shape (V.2) and never its per-kind defaults, so
+ * these are the implementation's — and two of them used to contradict the book.
+ *
+ * `mayEnrollNewKnowledge` and `mayMutatePreferences` were `false` for both `person` and
+ * `guest`, which reads as "nothing they say is ever remembered". Build Book XIII.4 says
+ * the opposite in its first sentence — *"Madhurita does **not** implement a blanket
+ * 'guests teach nothing' rule"* — and its table stores a guest's own preferences and
+ * general behavioural patterns. The revision log records that this was deliberate:
+ * entry 12, *"Replace blanket bans with deterministic 5-outcome evaluation matrix."*
+ *
+ * The contradiction survived because neither field was enforced anywhere a memory is
+ * written, so the restrictive value cost nothing and bought nothing. Both are enforced
+ * now — `server/cognition/stages/10.ts` asks `check()` for every candidate — which is
+ * what makes the value here load-bearing, and what makes `false` a control the owner
+ * actually has: setting either one on an enrolled person stops her keeping anything
+ * from them, rather than reading as though it already had.
+ *
+ * `true` is not "may write anywhere": what stops a non-owner reaching the owner's
+ * memory is the scope clause in `check()`, which the resource stage 10 passes makes
+ * reachable. A non-owner may accumulate their own record and no one else's.
+ *
+ * `guest.mayReadConversations` stays `false`, and is now enforced on both conversation
+ * read routes. Nothing in the book asks for a guest to read a transcript, and V.1's
+ * table gives a guest "zero authority" — so this one is honoured as written rather than
+ * widened to match a UI no guest can currently reach.
  */
 export const DEFAULT_PERMISSIONS: Record<IdentityKind, PermissionSet> = {
   owner: {
@@ -48,8 +74,8 @@ export const DEFAULT_PERMISSIONS: Record<IdentityKind, PermissionSet> = {
     mayReadMemories: true,
     mayReadConversations: true,
     mayTriggerActions: 'safe',
-    mayEnrollNewKnowledge: false,
-    mayMutatePreferences: false,
+    mayEnrollNewKnowledge: true,
+    mayMutatePreferences: true,
     mayAccessTools: [],
     mayBeHeardInVoice: true,
     mayReceiveProactiveMessages: true,
@@ -58,8 +84,8 @@ export const DEFAULT_PERMISSIONS: Record<IdentityKind, PermissionSet> = {
     mayReadMemories: false,
     mayReadConversations: false,
     mayTriggerActions: 'none',
-    mayEnrollNewKnowledge: false,
-    mayMutatePreferences: false,
+    mayEnrollNewKnowledge: true,
+    mayMutatePreferences: true,
     mayAccessTools: [],
     mayBeHeardInVoice: false,
     mayReceiveProactiveMessages: false,

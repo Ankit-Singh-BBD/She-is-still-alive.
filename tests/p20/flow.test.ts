@@ -1,54 +1,72 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+/**
+ * The realtime contract of Build Book XVI, driven through a real event bus.
+ *
+ * `RealtimeFlow` is stage 4 of XVI.1 — the one place `RuntimeState` advances — plus
+ * the UI edge out of it. So everything asserted here is one of two things: what the
+ * state says after an event, and what one client is handed.
+ *
+ * ## What is deliberately not here
+ *
+ * The three "Disconnect/Reconnect Replay via fromSequence" cases this file used to
+ * carry called `eventBus.replayTo` and never touched the flow: they tested the bus
+ * through a variable that happened to be in scope. Replay from a sequence number is
+ * `EventBus`'s own contract and is covered in `tests/p06/events.test.ts`; the end of
+ * the wire a browser actually reconnects on — `Last-Event-ID`, bounded, against a
+ * version that must not run backwards — is `tests/http/transport.test.ts` ('replays
+ * only the events a reconnecting client missed', 'never sends a version that goes
+ * backwards, or an id a replay cannot use').
+ *
+ * The 50ms window's own value is `tests/p26/perf.test.ts`, along with the plain
+ * same-key collapse. Everything below runs with `coalesceWindowMs: 0`, which still
+ * collapses a synchronous burst — the drain lands on a microtask, so a producer
+ * cannot outrun it within one tick — without making a test sleep to see a frame.
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
+
+import { EventBus } from '@server/events/event-bus.js';
 import { Database } from '@server/persistence/db.js';
 import { runMigrations } from '@server/persistence/migrate.js';
 import { RealtimeFlow } from '@server/realtime/flow.js';
-import { EventBus } from '@server/events/event-bus.js';
-import type { RuntimeState, BroadcastMessage, Subscriber } from '@server/realtime/types.js';
-import type { Identity } from '@server/identity/types.js';
+import type { BroadcastMessage, RuntimeState, Subscriber } from '@server/realtime/types.js';
 
-const repoRoot = path.resolve(__dirname, '..', '..');
-const migrationsDir = path.join(repoRoot, 'server/persistence/migrations');
+const migrationsDir = path.join(path.resolve(__dirname, '..', '..'), 'server/persistence/migrations');
 
-// Helper to create a minimal RuntimeState for testing
-function createInitialState(): RuntimeState {
-  const identity: Identity = {
-    id: 'test-identity',
-    kind: 'owner',
-    displayName: 'Test Owner',
-    enrolledAt: Date.now(),
-    lastSeenAt: Date.now(),
-    status: 'active',
-  };
-
+/**
+ * A `RuntimeState` with nothing in it, built by hand on purpose.
+ *
+ * The flow must work with no database behind the state — `project` is an option, not
+ * a dependency — and that is the configuration every case below runs in except the
+ * one that passes the hook. Every count is zero because nothing has happened yet,
+ * and `lastCompletedStage` is `undefined` rather than a stage name for the same
+ * reason: naming one before a cycle has run reports work nobody did.
+ */
+function emptyState(): RuntimeState {
+  const enrolled = Date.UTC(2026, 8, 5, 9, 0, 0);
   return {
     version: 0,
-    identity,
-    presence: {
-      activeActor: 'test-identity',
-      recentActors: ['test-identity'],
-      sessionStartedAt: Date.now(),
+    identity: {
+      id: 'owner',
+      kind: 'owner',
+      displayName: 'Owner',
+      enrolledAt: enrolled,
+      lastSeenAt: enrolled,
+      status: 'active',
     },
+    presence: { activeActor: 'owner', recentActors: ['owner'], sessionStartedAt: enrolled },
     environment: {
       timeOfDay: 'day',
-      weather: { condition: 'clear' },
-      location: { lat: 0, lng: 0 },
-      derivedPalette: { primary: '#fff', secondary: '#ccc', accent: '#f00' },
+      weather: { condition: 'unknown' },
+      derivedPalette: { primary: '#0b0b0c', secondary: '#17171a', accent: '#8a8f98' },
     },
     cognitive: {
       currentStage: 'PERCEIVE',
-      cycleId: 'test-cycle',
-      cycleStartedAt: Date.now(),
-      lastCompletedStage: 'PERSIST',
-      attention: {},
+      cycleId: '',
+      cycleStartedAt: 0,
+      lastCompletedStage: undefined,
     },
-    voice: {
-      live: 'disconnected',
-      energy: 0,
-      ttsEnergy: 0,
-      frequencyBands: [],
-      voiceId: 'test-voice',
-    },
+    voice: { live: 'disconnected', reason: '', canHear: false },
     memory: {
       episodicCount: 0,
       semanticCount: 0,
@@ -60,436 +78,360 @@ function createInitialState(): RuntimeState {
     },
     loops: { activeCount: 0, pausedCount: 0 },
     tasks: { pendingCount: 0, runningCount: 0, failedCount: 0 },
-    pendingActions: [],
-    lastMutation: {
-      eventId: '',
-      type: '',
-      timestamp: 0,
+    lastMutation: { eventId: '', type: '', timestamp: 0 },
+  };
+}
+
+interface Recorder extends Subscriber {
+  /** Every message this subscriber was handed, in the order it was handed them. */
+  readonly seen: BroadcastMessage[];
+  /** How many times a `send` began while another was still in flight. Must stay 0. */
+  readonly overlaps: () => number;
+  /** From now on every `send` blocks until {@link Recorder.release}. */
+  hold: () => void;
+  release: () => void;
+  /** The next `send` rejects with this, once — a socket that has gone. */
+  rejectNext: (error: Error) => void;
+}
+
+/**
+ * A client that remembers what it received, and can stall or fail on demand.
+ *
+ * `overlaps` is the part that is not bookkeeping: two drains over one queue would not
+ * duplicate a message, they would interleave their awaits and write frames in an
+ * order neither of them chose. A subscriber is the only place that is observable.
+ */
+function recorder(id: string): Recorder {
+  const seen: BroadcastMessage[] = [];
+  let inFlight = 0;
+  let overlapped = 0;
+  let holding = false;
+  let release: (() => void) | undefined;
+  let rejection: Error | undefined;
+
+  return {
+    id,
+    seen,
+    async send(message: BroadcastMessage): Promise<void> {
+      seen.push(message);
+      inFlight += 1;
+      if (inFlight > 1) overlapped += 1;
+      try {
+        if (rejection !== undefined) {
+          const error = rejection;
+          rejection = undefined;
+          throw error;
+        }
+        if (holding) {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+      } finally {
+        inFlight -= 1;
+      }
+    },
+    overlaps: () => overlapped,
+    hold: () => {
+      holding = true;
+    },
+    release: () => {
+      holding = false;
+      release?.();
+      release = undefined;
+    },
+    rejectNext: (error: Error) => {
+      rejection = error;
     },
   };
 }
 
-// Helper to create a mock subscriber
-function createMockSubscriber(id: string): Subscriber & { messages: BroadcastMessage[] } {
-  const messages: BroadcastMessage[] = [];
-  return {
-    id,
-    send: vi.fn(async (msg: BroadcastMessage) => {
-      messages.push(msg);
-    }),
-    messages,
-  };
+/** One turn of the loop: enough for a zero-window drain and the sends inside it. */
+function settle(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
-describe('P20 Realtime Flow Contract', () => {
+describe('P20: RealtimeFlow — stage 4 of the XVI.1 chain, and the UI edge out of it', () => {
+  let db: Database;
   let eventBus: EventBus;
   let flow: RealtimeFlow;
-  let initialState: RuntimeState;
 
   beforeEach(() => {
-    initialState = createInitialState();
-    const db = new Database({ path: ':memory:' });
+    db = new Database({ path: ':memory:' });
     runMigrations(db, migrationsDir);
-    eventBus = new EventBus(db, { handlerDeadlineMs: 50 });
-    // Use 0ms coalescing for most tests to get immediate microtask draining
-    flow = new RealtimeFlow(eventBus, initialState, { coalesceWindowMs: 0 });
+    eventBus = new EventBus(db);
+    flow = new RealtimeFlow(eventBus, emptyState(), { coalesceWindowMs: 0 });
+    flow.start();
   });
 
-  describe('7-Stage Event Delivery and Monotonic Sequence Versioning', () => {
-    it('applies events to state and increments version monotonically', async () => {
-      flow.start();
+  afterEach(() => {
+    flow.stop();
+    db.close();
+  });
 
-      // Publish multiple events
-      await eventBus.publish({
+  describe('The state advance', () => {
+    it('folds every committed event into the version and the last mutation', async () => {
+      const first = await eventBus.publish({ type: 'memory.appended', payload: { id: 'm1' } });
+      const newest = await eventBus.publish({ type: 'task.scheduled', payload: { id: 't1' } });
+
+      // Read straight after `await publish` and already current: the flow's handler is
+      // synchronous, so the state is advanced before `deliver` returns and a publisher
+      // can read its own write back out. `presence.ts` depends on this — it answers a
+      // new connection with `getSnapshot()`.
+      const state = flow.getSnapshot();
+      expect(first.seq).toBeLessThan(newest.seq);
+      expect(state.version).toBe(newest.seq);
+      expect(state.lastMutation).toEqual({
+        eventId: newest.id,
         type: 'task.scheduled',
-        payload: { taskId: 'task-1' },
+        timestamp: newest.timestamp,
       });
-
-      await eventBus.publish({
-        type: 'task.scheduled',
-        payload: { taskId: 'task-2' },
-      });
-
-      await eventBus.publish({
-        type: 'task.completed',
-        payload: { taskId: 'task-1' },
-      });
-
-      const snapshot = flow.getSnapshot();
-      expect(snapshot.version).toBe(3); // 3 events = seq 1, 2, 3
-      expect(snapshot.lastMutation.type).toBe('task.completed');
-      expect(snapshot.lastMutation.eventId).toBeDefined();
-      expect(snapshot.lastMutation.timestamp).toBeGreaterThan(0);
     });
 
-    it('broadcasts messages with correct sequence numbers', async () => {
-      flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
+    it('does not walk the version backwards when an older event is delivered late', async () => {
+      const first = await eventBus.publish({ type: 'task.scheduled', payload: { n: 1 } });
+      const newest = await eventBus.publish({ type: 'task.completed', payload: { n: 2 } });
 
-      await eventBus.publish({
-        type: 'memory.appended',
-        payload: { memoryId: 'mem-1' },
-      });
+      // What stage 12 does: a cycle's events are committed in one transaction and then
+      // delivered one at a time, each awaited — and every one of those awaits lets an
+      // independent publisher (an SSE connect, the autonomic loop, a weather sweep)
+      // insert *and* deliver a later seq first. The flow then sees an older one.
+      await eventBus.deliver(first);
 
-      await eventBus.publish({
-        type: 'memory.appended',
-        payload: { memoryId: 'mem-2' },
-      });
-
-      // Wait for async drain
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(subscriber.messages.length).toBe(2);
-      expect(subscriber.messages[0]!.seq).toBe(1);
-      expect(subscriber.messages[1]!.seq).toBe(2);
-      expect(subscriber.messages[0]!.type).toBe('memory.appended');
-      expect(subscriber.messages[1]!.type).toBe('memory.appended');
-      expect(subscriber.messages[0]!.coalesceKey).toBe('memory.appended');
-      expect(subscriber.messages[1]!.coalesceKey).toBe('memory.appended');
+      const state = flow.getSnapshot();
+      // `replayMissed` uses this as the upper bound of a reconnect replay: assigning
+      // instead of raising would answer "already current" to a client an event behind
+      // and lose that event for good.
+      expect(state.version).toBe(newest.seq);
+      // XVI.2's rule for the channel, applied to the field this class owns: never a
+      // stale value after a newer one.
+      expect(state.lastMutation.eventId).toBe(newest.id);
+      expect(state.lastMutation.type).toBe('task.completed');
     });
 
-    it('includes timestamp in broadcast messages', async () => {
-      flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
+    it('still hands the late event to the client, because the frames are a log', async () => {
+      const client = recorder('late-frames');
+      flow.subscribe(client);
 
-      const beforePublish = Date.now();
-      await eventBus.publish({
-        type: 'config.changed',
-        payload: { key: 'test' },
-      });
-      const afterPublish = Date.now();
+      const first = await eventBus.publish({ type: 'task.scheduled', payload: { n: 1 } });
+      const newest = await eventBus.publish({ type: 'task.completed', payload: { n: 2 } });
+      await eventBus.deliver(first);
+      await settle();
 
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(subscriber.messages.length).toBe(1);
-      expect(subscriber.messages[0]!.timestamp).toBeGreaterThanOrEqual(beforePublish);
-      expect(subscriber.messages[0]!.timestamp).toBeLessThanOrEqual(afterPublish);
-    });
-  });
-
-  describe('Coalescing Backpressure', () => {
-    it('coalesces consecutive events with same coalesceKey', async () => {
-      flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
-
-      // Concurrent publishes exercise coalescing — sequential awaits would drain between inserts.
-      await Promise.all([
-        eventBus.publish({ type: 'task.scheduled', payload: { id: 1 } }),
-        eventBus.publish({ type: 'task.scheduled', payload: { id: 2 } }),
-        eventBus.publish({ type: 'task.scheduled', payload: { id: 3 } }),
+      // Suppressing an out-of-order frame would trade a duplicate for an omission, and
+      // the state frame `presence.ts` sends after every event is read at send time, so
+      // nothing stale can follow this one.
+      expect(client.seen.map((message) => message.seq)).toEqual([
+        first.seq,
+        newest.seq,
+        first.seq,
       ]);
-
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(subscriber.messages.length).toBe(1);
-      expect(subscriber.messages[0]!.seq).toBe(3);
-      expect(subscriber.messages[0]!.payload).toEqual({ id: 3 });
+      expect(flow.getSnapshot().version).toBe(newest.seq);
     });
 
-    it('does not coalesce events of different types', async () => {
-      flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
-
-      await eventBus.publish({ type: 'task.scheduled', payload: { id: 1 } });
-      await eventBus.publish({ type: 'task.completed', payload: { id: 1 } });
-      await eventBus.publish({ type: 'task.failed', payload: { id: 1 } });
-
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(subscriber.messages.length).toBe(3);
-      expect(subscriber.messages[0]!.type).toBe('task.scheduled');
-      expect(subscriber.messages[1]!.type).toBe('task.completed');
-      expect(subscriber.messages[2]!.type).toBe('task.failed');
-    });
-
-    it('uses explicit coalesceKey when provided in broadcast', async () => {
-      flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
-
-      // Synchronous burst — all three queued before the first drain tick.
-      flow.broadcast({
-        seq: 1,
-        type: 'custom.event',
-        payload: { data: 'first' },
-        timestamp: Date.now(),
-        coalesceKey: 'custom-coalesce',
+    it('runs the projection hook against a state already stamped with the event', async () => {
+      const stampedVersions: number[] = [];
+      const projected = new RealtimeFlow(eventBus, emptyState(), {
+        coalesceWindowMs: 0,
+        project: (previous) => {
+          stampedVersions.push(previous.version);
+          return {
+            ...previous,
+            memory: { ...previous.memory, episodicCount: previous.memory.episodicCount + 1 },
+          };
+        },
       });
-      flow.broadcast({
-        seq: 2,
-        type: 'custom.event',
-        payload: { data: 'second' },
-        timestamp: Date.now(),
-        coalesceKey: 'custom-coalesce',
-      });
-      flow.broadcast({
-        seq: 3,
-        type: 'custom.event',
-        payload: { data: 'third' },
-        timestamp: Date.now(),
-        coalesceKey: 'custom-coalesce',
-      });
+      projected.start();
 
-      await new Promise(resolve => setTimeout(resolve, 10));
+      const event = await eventBus.publish({ type: 'memory.appended', payload: {} });
+      projected.stop();
 
-      expect(subscriber.messages.length).toBe(1);
-      expect(subscriber.messages[0]!.seq).toBe(3);
-      expect(subscriber.messages[0]!.payload).toEqual({ data: 'third' });
+      // The hook cannot be the thing that forgets to advance the version: it is handed
+      // a state whose version and lastMutation are already this event's.
+      expect(stampedVersions).toEqual([event.seq]);
+      expect(projected.getSnapshot().version).toBe(event.seq);
+      // And without it nothing but those two fields would ever move — which is the
+      // whole reason the option exists.
+      expect(projected.getSnapshot().memory.episodicCount).toBe(1);
+      expect(flow.getSnapshot().memory.episodicCount).toBe(0);
     });
   });
 
-  describe('Non-blocking Slow Subscriber Behavior', () => {
-    it('does not block producer when subscriber is slow', async () => {
-      flow.start();
-      const slowSubscriber = createMockSubscriber('slow-sub');
+  describe('XVI.2 — coalescing is the backpressure', () => {
+    it('collapses the queue of a client that has stopped draining, instead of growing it', async () => {
+      const slow = recorder('slow');
+      slow.hold();
+      flow.subscribe(slow);
 
-      // Make subscriber slow by adding delay to send
-      let resolveSlow: () => void;
-      const slowPromise = new Promise<void>(resolve => { resolveSlow = resolve; });
-      slowSubscriber.send = vi.fn(async (msg: BroadcastMessage) => {
-        slowSubscriber.messages.push(msg);
-        await slowPromise; // Wait for release
-      });
-      flow.subscribe(slowSubscriber);
+      await eventBus.publish({ type: 'task.scheduled', payload: { n: 1 } });
+      await settle();
+      // The first frame is in flight and the socket is not accepting it.
+      expect(slow.seen).toHaveLength(1);
 
-      const fastSubscriber = createMockSubscriber('fast-sub');
-      flow.subscribe(fastSubscriber);
+      for (const n of [2, 3, 4, 5]) {
+        await eventBus.publish({ type: 'task.scheduled', payload: { n } });
+      }
+      await settle();
+      // Nothing was written past the one that is stuck, and nothing queued behind it
+      // beyond a single slot — the publishes above never waited on this subscriber,
+      // because a frame is written from the drain and not from the handler.
+      expect(slow.seen).toHaveLength(1);
+      expect(flow.getSnapshot().version).toBe(5);
 
-      // Publish several events concurrently to trigger coalescing for fast subscriber
-      await Promise.all([
-        eventBus.publish({ type: 'task.scheduled', payload: { id: 1 } }),
-        eventBus.publish({ type: 'task.scheduled', payload: { id: 2 } }),
-        eventBus.publish({ type: 'task.scheduled', payload: { id: 3 } }),
+      slow.release();
+      await settle();
+
+      // Four events, one frame: the newest replaced the three behind it under the same
+      // key. That is the drop the design asks for, and the state above kept all five.
+      expect(slow.seen).toHaveLength(2);
+      expect(slow.seen[1]!.payload).toEqual({ n: 5 });
+      // Picked up by the drain that was already running, not by a second one.
+      expect(slow.overlaps()).toBe(0);
+    });
+
+    it('holds one slot per key, and writes them oldest-key-first', async () => {
+      const slow = recorder('ordered');
+      slow.hold();
+      flow.subscribe(slow);
+
+      const inFlight = await eventBus.publish({ type: 'memory.appended', payload: { n: 1 } });
+      await settle();
+
+      await eventBus.publish({ type: 'task.scheduled', payload: { n: 2 } });
+      await eventBus.publish({ type: 'loop.opened', payload: { n: 3 } });
+      // Same key as `n: 2`, so it takes that slot — and keeps its position rather than
+      // moving to the back. Order is by when that part of the state first went stale,
+      // not by when the newest word about it arrived.
+      await eventBus.publish({ type: 'task.scheduled', payload: { n: 4 } });
+
+      slow.release();
+      await settle();
+
+      expect(slow.seen.map((message) => message.payload)).toEqual([{ n: 1 }, { n: 4 }, { n: 3 }]);
+      expect(slow.seen[0]!.seq).toBe(inFlight.seq);
+      expect(slow.overlaps()).toBe(0);
+    });
+
+    it('gives every client its own queue, so a stalled one cannot hold up a healthy one', async () => {
+      const stalled = recorder('stalled');
+      stalled.hold();
+      const healthy = recorder('healthy');
+      flow.subscribe(stalled);
+      flow.subscribe(healthy);
+
+      await eventBus.publish({ type: 'task.scheduled', payload: { n: 1 } });
+      await eventBus.publish({ type: 'task.completed', payload: { n: 2 } });
+      await settle();
+
+      expect(healthy.seen.map((message) => message.type)).toEqual([
+        'task.scheduled',
+        'task.completed',
       ]);
+      expect(stalled.seen).toHaveLength(1);
 
-      // Fast subscriber should receive immediately (coalesced to latest)
-      await new Promise(resolve => setTimeout(resolve, 10));
-      expect(fastSubscriber.messages.length).toBe(1);
-      expect(fastSubscriber.messages[0]!.seq).toBe(3);
-
-      // Slow subscriber hasn't finished yet but producer didn't block
-      // Release slow subscriber
-      resolveSlow!();
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(slowSubscriber.messages.length).toBe(1);
-      expect(slowSubscriber.messages[0]!.seq).toBe(3);
+      stalled.release();
+      await settle();
+      expect(stalled.seen).toHaveLength(2);
     });
 
-    it('handles multiple slow subscribers without blocking', async () => {
-      flow.start();
+    it('coalesces an unkeyed frame with nothing', async () => {
+      const client = recorder('unkeyed');
+      flow.subscribe(client);
 
-      let resolveSlow1: () => void;
-      let resolveSlow2: () => void;
+      // Same type, no `coalesceKey`: a producer that did not say "this supersedes the
+      // last one like it" must not have it assumed. `handleEvent` always says so; the
+      // voice and presence layers, which may put a frame on this channel without a row
+      // in `domain_event` behind it, do not have to.
+      flow.broadcast({ seq: 7, type: 'voice.transcript', payload: { text: 'first' }, timestamp: 1 });
+      flow.broadcast({ seq: 8, type: 'voice.transcript', payload: { text: 'second' }, timestamp: 2 });
+      await settle();
 
-      const slowPromise1 = new Promise<void>(resolve => { resolveSlow1 = resolve; });
-      const slowPromise2 = new Promise<void>(resolve => { resolveSlow2 = resolve; });
-
-      const slowSubscriber1 = createMockSubscriber('slow-1');
-      slowSubscriber1.send = vi.fn(async (msg: BroadcastMessage) => {
-        slowSubscriber1.messages.push(msg);
-        await slowPromise1;
-      });
-      flow.subscribe(slowSubscriber1);
-
-      const slowSubscriber2 = createMockSubscriber('slow-2');
-      slowSubscriber2.send = vi.fn(async (msg: BroadcastMessage) => {
-        slowSubscriber2.messages.push(msg);
-        await slowPromise2;
-      });
-      flow.subscribe(slowSubscriber2);
-
-      // Producer should not block
-      const start = Date.now();
-      await eventBus.publish({ type: 'loop.evaluated', payload: { loopId: 'loop-1' } });
-      const publishTime = Date.now() - start;
-
-      // Publish should complete quickly (non-blocking)
-      expect(publishTime).toBeLessThan(50); // Should be near-instant
-
-      resolveSlow1!();
-      resolveSlow2!();
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(slowSubscriber1.messages.length).toBe(1);
-      expect(slowSubscriber2.messages.length).toBe(1);
-    });
-  });
-
-  describe('Sequential Queue Draining', () => {
-    it('drains queue in order messages were received', async () => {
-      flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
-
-      // Publish different types (no coalescing)
-      await eventBus.publish({ type: 'task.scheduled', payload: { id: 1 } });
-      await eventBus.publish({ type: 'task.claimed', payload: { id: 1 } });
-      await eventBus.publish({ type: 'task.completed', payload: { id: 1 } });
-      await eventBus.publish({ type: 'task.failed', payload: { id: 2 } });
-
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(subscriber.messages.length).toBe(4);
-      expect(subscriber.messages[0]!.type).toBe('task.scheduled');
-      expect(subscriber.messages[1]!.type).toBe('task.claimed');
-      expect(subscriber.messages[2]!.type).toBe('task.completed');
-      expect(subscriber.messages[3]!.type).toBe('task.failed');
-      expect(subscriber.messages[0]!.seq).toBe(1);
-      expect(subscriber.messages[1]!.seq).toBe(2);
-      expect(subscriber.messages[2]!.seq).toBe(3);
-      expect(subscriber.messages[3]!.seq).toBe(4);
-    });
-
-    it('processes messages that arrive during drain', async () => {
-      flow.start();
-      let drainCount = 0;
-
-      const subscriber = createMockSubscriber('sub-1');
-      subscriber.send = vi.fn(async (msg: BroadcastMessage) => {
-        subscriber.messages.push(msg);
-        drainCount++;
-        // Inject a fresh broadcast with a different coalesce key mid-drain.
-        if (drainCount === 1) {
-          flow.broadcast({
-            seq: 5,
-            type: 'custom.midflight',
-            payload: { id: 5 },
-            timestamp: Date.now(),
-            coalesceKey: 'midflight-key',
-          });
-        }
-      });
-      flow.subscribe(subscriber);
-
-      // Concurrent burst to coalesce into a single first message.
-      await Promise.all([
-        eventBus.publish({ type: 'task.scheduled', payload: { id: 1 } }),
-        eventBus.publish({ type: 'task.scheduled', payload: { id: 2 } }),
-        eventBus.publish({ type: 'task.scheduled', payload: { id: 3 } }),
+      expect(client.seen.map((message) => message.payload)).toEqual([
+        { text: 'first' },
+        { text: 'second' },
       ]);
-
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      // Coalesced (seq 3) + the new midflight broadcast (seq 5) which has its own coalesce key.
-      expect(subscriber.messages.length).toBe(2);
-      expect(subscriber.messages[0]!.seq).toBe(3);
-      expect(subscriber.messages[1]!.seq).toBe(5);
     });
   });
 
-  describe('Disconnect/Reconnect Replay via fromSequence', () => {
-    it('replays events from sequence number on reconnect', async () => {
+  describe('Subscribers, and what happens when one breaks', () => {
+    it('registers one fan-out per id, and follows the log once', async () => {
+      const client = recorder('twice');
+      flow.subscribe(client);
+      flow.subscribe(client);
+      // A second `start` subscribing to the bus again would double-apply every event
+      // as well as duplicating every frame.
       flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
 
-      // Three distinct event types so the live subscriber receives all three.
-      await eventBus.publish({ type: 'memory.appended', payload: { id: 1 } });
-      await eventBus.publish({ type: 'task.completed', payload: { id: 2 } });
-      await eventBus.publish({ type: 'memory.appended', payload: { id: 3 } });
+      const event = await eventBus.publish({ type: 'boot.completed', payload: {} });
+      await settle();
 
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(subscriber.messages.length).toBe(3);
-      expect(subscriber.messages[2]!.seq).toBe(3);
-
-      // Reconnect replay from seq 2 should yield only the event at seq 3.
-      const replaySubscriber = createMockSubscriber('replay-sub');
-      await eventBus.replayTo(ev => { void replaySubscriber.send(ev as unknown as BroadcastMessage); }, 2);
-
-      expect(replaySubscriber.messages.length).toBe(1);
-      expect(replaySubscriber.messages[0]!.seq).toBe(3);
+      expect(client.seen).toHaveLength(1);
+      expect(flow.getSnapshot().version).toBe(event.seq);
     });
 
-    it('replays all events from sequence 0', async () => {
-      flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
+    it('sends nothing to a subscriber that unsubscribed while a drain was armed', async () => {
+      const leaving = recorder('leaving');
+      flow.subscribe(leaving);
 
-      await eventBus.publish({ type: 'task.scheduled', payload: { id: 1 } });
-      await eventBus.publish({ type: 'task.completed', payload: { id: 1 } });
+      // Queue a frame and take the subscriber away in the same tick. The armed
+      // microtask cannot be cancelled, so the drain has to check the registry itself.
+      flow.broadcast({ seq: 1, type: 'session.disconnected', payload: {}, timestamp: 1 });
+      flow.unsubscribe('leaving');
+      await settle();
 
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      // New subscriber replays from start
-      const replaySubscriber = createMockSubscriber('replay-sub');
-      await eventBus.replayTo(ev => { void replaySubscriber.send(ev as unknown as BroadcastMessage); }, 0);
-
-      expect(replaySubscriber.messages.length).toBe(2);
-      expect(replaySubscriber.messages[0]!.seq).toBe(1);
-      expect(replaySubscriber.messages[1]!.seq).toBe(2);
+      expect(leaving.seen).toEqual([]);
     });
 
-    it('replay does not include events at or before fromSequence', async () => {
-      flow.start();
-      await eventBus.publish({ type: 'task.scheduled', payload: { id: 1 } });
-      await eventBus.publish({ type: 'task.scheduled', payload: { id: 2 } });
-      await eventBus.publish({ type: 'task.scheduled', payload: { id: 3 } });
-
-      const replaySubscriber = createMockSubscriber('replay-sub');
-      await eventBus.replayTo(ev => { void replaySubscriber.send(ev as unknown as BroadcastMessage); }, 2);
-
-      // Only seq > 2, so only seq 3
-      expect(replaySubscriber.messages.length).toBe(1);
-      expect(replaySubscriber.messages[0]!.seq).toBe(3);
-    });
-  });
-
-  describe('Subscriber Management', () => {
-    it('allows subscribing and unsubscribing', async () => {
-      flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
-
-      await eventBus.publish({ type: 'config.changed', payload: { key: 'test' } });
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(subscriber.messages.length).toBe(1);
-
-      flow.unsubscribe('sub-1');
-
-      await eventBus.publish({ type: 'config.changed', payload: { key: 'test2' } });
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      // Should not receive after unsubscribe
-      expect(subscriber.messages.length).toBe(1);
-    });
-
-    it('does not duplicate subscriber on double subscribe', async () => {
-      flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
-      flow.subscribe(subscriber); // Second subscribe should be ignored
-
-      await eventBus.publish({ type: 'config.changed', payload: { key: 'test' } });
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(subscriber.messages.length).toBe(1);
-    });
-  });
-
-  describe('Stop and Cleanup', () => {
-    it('stops receiving events after stop()', async () => {
-      flow.start();
-      const subscriber = createMockSubscriber('sub-1');
-      flow.subscribe(subscriber);
-
-      await eventBus.publish({ type: 'task.scheduled', payload: { id: 1 } });
-      await new Promise(resolve => setTimeout(resolve, 10));
-      expect(subscriber.messages.length).toBe(1);
-
+    it('stops following the log on stop, and leaves the subscriber registered', async () => {
+      const client = recorder('after-stop');
+      flow.subscribe(client);
       flow.stop();
 
-      await eventBus.publish({ type: 'task.scheduled', payload: { id: 2 } });
-      await new Promise(resolve => setTimeout(resolve, 10));
+      const event = await eventBus.publish({ type: 'task.failed', payload: {} });
+      await settle();
+      expect(client.seen).toEqual([]);
+      expect(flow.getSnapshot().version).toBe(0);
 
-      // Should not receive after stop
-      expect(subscriber.messages.length).toBe(1);
+      // The socket is the owner's to close — `presence.ts` unsubscribes on `close` —
+      // so the channel still works after `stop`, which is what lets the HTTP layer put
+      // a last frame through it during shutdown.
+      flow.broadcast({ seq: event.seq, type: 'session.disconnected', payload: {}, timestamp: 1 });
+      await settle();
+      expect(client.seen).toHaveLength(1);
+    });
+
+    it('reports a client whose send rejects, once, and keeps serving it', async () => {
+      const reported: string[] = [];
+      const own = new RealtimeFlow(eventBus, emptyState(), {
+        coalesceWindowMs: 0,
+        report: (what, error) => {
+          reported.push(`${what}: ${(error as Error).message}`);
+        },
+      });
+      own.start();
+
+      const broken = recorder('broken');
+      own.subscribe(broken);
+      broken.rejectNext(new Error('socket gone'));
+
+      await eventBus.publish({ type: 'task.scheduled', payload: { n: 1 } });
+      await settle();
+
+      // Through the injected hook and not through `publishError`: that one publishes
+      // `error.raised` into the bus this flow subscribes to, so a failed write would be
+      // broadcast back to the client that failed, fail again, and publish again.
+      expect(reported).toEqual(['realtime fan-out to broken: socket gone']);
+
+      // The frame that was in flight is not retried — it left the queue before the
+      // write — and the next event arms the next attempt.
+      await eventBus.publish({ type: 'task.completed', payload: { n: 2 } });
+      await settle();
+      own.stop();
+
+      expect(broken.seen.map((message) => message.payload)).toEqual([{ n: 1 }, { n: 2 }]);
+      expect(reported).toHaveLength(1);
     });
   });
 });

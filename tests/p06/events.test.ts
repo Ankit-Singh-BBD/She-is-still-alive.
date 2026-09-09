@@ -73,10 +73,14 @@ describe('Phase P06: Event System', () => {
     await bus.publish({ type: 'memory.appended', payload: { a: 1 } });
     await bus.publish({ type: 'memory.appended', payload: { a: 2 } });
 
+    // `replay()` and a loop, which is what the one production catch-up path does —
+    // `server/http/routes/presence.ts` reads `Last-Event-ID` and iterates. `replayTo`
+    // used to live on the bus for this and had no production caller at all, and it was
+    // the one path that let a handler's rejection escape.
     const seen: number[] = [];
-    await bus.replayTo((e) => {
-      seen.push((e.payload as { a: number }).a);
-    });
+    for (const event of bus.replay(0)) {
+      seen.push((event.payload as { a: number }).a);
+    }
 
     expect(seen).toEqual([1, 2]);
   });

@@ -13,7 +13,7 @@
  * - Identity lookup via the optional IdentityRepository
  */
 
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 import type { Database } from '@server/persistence/db.js';
 import type { EventBus } from '@server/events/event-bus.js';
 import type { IdentityRepository } from '@server/identity/repository.js';

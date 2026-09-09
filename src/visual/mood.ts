@@ -17,6 +17,8 @@
 
 import type { CognitiveStageName, RuntimeState } from '@server/realtime/types.js';
 
+import { derivePalette } from '@server/environment/palette.js';
+
 import { hexToRgb, type Rgb } from '../lib/palette.js';
 import type { StreamStatus } from '../lib/stream.js';
 
@@ -101,18 +103,31 @@ export interface MoodInput {
 /**
  * The palette she falls back to before the first read.
  *
- * Deliberately the night palette from `server/environment/palette.ts` rather than
- * a fourth invented one: the first frame should be a plausible hour, and if the
- * read never arrives, night is the honest guess for a room nobody has described.
+ * Derived rather than written down. `derivePalette` is the server's own table, and it
+ * is a pure function over two enums with no imports of its own — so calling it here
+ * costs a few lines of bundled arithmetic and buys the guarantee that the frame before
+ * the first read and the frame after it are the same colours. Three hand-copied hexes
+ * were what stood here before, and all three had drifted a byte or two per channel.
+ *
+ * `'unknown'` and not `'clear'`, deliberately: `'unknown'` is the one condition that
+ * applies no weather modifier at all. Before the first read she does not know the sky
+ * any more than she knows the hour, so she renders night and says nothing about the
+ * weather — a clear-sky boost would be a claim.
+ *
+ * Exported so the renderer can start its easing here instead of keeping a fourth copy,
+ * and so a test can hold it against the stylesheet's `@property` initial values.
  */
-const AWAITING: Mood = {
-  primary: hexToRgb('#0c0c17'),
-  secondary: hexToRgb('#1a1a2c'),
-  accent: hexToRgb('#8f6ee0'),
-  dayness: 0,
-  turbulence: 0.14,
+const AWAITING_PALETTE = derivePalette('night', 'unknown');
+
+export const AWAITING: Mood = {
+  primary: hexToRgb(AWAITING_PALETTE.primary),
+  secondary: hexToRgb(AWAITING_PALETTE.secondary),
+  accent: hexToRgb(AWAITING_PALETTE.accent),
+  dayness: DAYNESS.night,
+  turbulence: TURBULENCE.unknown,
   energy: 0,
-  presence: 0.34,
+  /** Always overridden by `PRESENCE[status]` below; this is only the type's default. */
+  presence: PRESENCE.unavailable,
 };
 
 export function moodFrom({ state, status, thinking }: MoodInput): Mood {

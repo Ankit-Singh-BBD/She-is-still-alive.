@@ -1,24 +1,52 @@
 /**
- * ActionPipeline (P11) — 7-stage pipeline for tool execution.
+ * ActionPipeline — the six stages between an authorized decision and a durable
+ * record of what came of it.
  *
  * The LLM proposes a tool call in stage 6 (DECIDE). The application runs it
  * through this pipeline:
  *
- *   1. UNDERSTAND — parse the toolId and input, resolve references
- *   2. PLAN — determine execution order, dependencies, side effects
- *   3. AUTHORIZE — verify caller permissions against tool clearance
- *   4. EXECUTE — run the tool with timeout, retry, deadline
- *   5. VERIFY — re-read authoritative state, assert postconditions
- *   6. PERSIST — write action_result row, emit domain_event
- *   7. RESPOND — build the response fragment for the cognitive cycle
+ *   1. UNDERSTAND — resolve the tool, validate the input against its schema
+ *   2. PLAN       — determine execution order, dependencies, side effects
+ *   3. AUTHORIZE  — verify caller permissions against the tool's clearance
+ *   4. EXECUTE    — run the tool under retry, timeout and deadline
+ *   5. VERIFY     — re-read authoritative state, assert postconditions
+ *   6. PERSIST    — write the `action_result` row, publish the domain event
  *
- * Each stage is a pure function. The pipeline is invoked by Stage 7 (ACT)
- * through the ToolExecutor interface.
+ * The pipeline is invoked by cognitive stage 7 (ACT) through the `ToolExecutor`
+ * seam, and by `TaskExecutor` for scheduled work.
+ *
+ * ## Where the seventh stage went
+ *
+ * Part XI.1 declares a seventh, RESPOND, and its own table says what that stage
+ * has to be: *"LLM drafts the response; application applies Knowledge Disclosure
+ * Policy and authorizes output."* This file used to hold a `stageRespond` that was
+ * none of those things — a hardcoded English template ending in
+ * `JSON.stringify(output)` — whose return value was assigned to
+ * `const _responseFragment` and read by nothing. The dead assignment was the
+ * smaller half of the problem. The larger half is that a pipeline has no caller,
+ * no computed register, no disclosure policy and no completion-claim gate, so
+ * language authored down here could not have been spoken even if something had
+ * wanted it: it would have been a second opinion about the outcome, in English, in
+ * front of an owner who is answered in Hinglish.
+ *
+ * The stage is real and it runs — in `server/cognition/stages/9.ts`, over the
+ * `ActionResult` that this pipeline's outcome becomes. That is where the register
+ * is computed, where `attempted`/`success`/`verified` are turned into a sentence
+ * she is *allowed* to say, and where a claim she cannot support is caught. RESPOND
+ * is not missing from the design; it is one layer up, in the only place that could
+ * honour the book's description of it.
+ *
+ * ## Three outcomes, not two
+ *
+ * `PipelineResult` reports `attempted` as well as `success` and `verified`, because
+ * a call that was refused before dispatch and a call that was dispatched and threw
+ * are different facts about the world and she has to say different things about
+ * them. See the field's own note.
  */
 
 import type { ToolRegistry } from './registry.js';
 import type { Database } from '@server/persistence/db.js';
-import { ulid } from 'ulid';
+import { ulid } from '@server/persistence/ids.js';
 import type { Identity } from "@server/identity/types.js";
 import type { EventBus } from '@server/events/event-bus.js';
 
@@ -32,6 +60,26 @@ export interface PipelineContext {
 }
 
 export interface PipelineResult {
+  /**
+   * Whether stage 4 was reached — whether the tool was handed the call at all.
+   *
+   * This field is the difference between *"the world may be half-changed, go and
+   * look"* and *"nothing was touched"*, and without it the seam above could not
+   * carry that distinction: a revoked identity, a missing `mayAccessTools` entry
+   * and an input that failed its schema all returned `{success: false}`, which the
+   * executor turned into a thrown error, which stage 7 recorded as `attempted:
+   * true`, which made her say *"I started on that, but I could not confirm it
+   * actually went through"* about a call that was never made. That is the more
+   * alarming of the two sentences and it was the false one.
+   *
+   * `false` means one of stages 1–3 refused. `true` means `registry.execute` was
+   * called; it may still have thrown, and `success` says which.
+   *
+   * Required rather than optional so that every construction site has to answer it
+   * — the same reason `ActionResult.attempted` is required in
+   * `server/cognition/types.ts`.
+   */
+  attempted: boolean;
   success: boolean;
   output?: unknown | undefined;
   error?: string | undefined;
@@ -96,13 +144,21 @@ export class ActionPipeline {
   }
 
   /**
-   * Main entry point — runs the 7-stage pipeline for a single tool call.
+   * Runs the pipeline for a single tool call.
+   *
+   * The three gates run in order and the first one to refuse ends it. They used to
+   * all run and each assign the same `error` variable, so the recorded reason was
+   * whichever gate failed *last* rather than the one that actually stopped the
+   * call: an unknown tool that also failed authorization was persisted as an
+   * authorization failure, and the row named a gate the call never reached. Worse,
+   * AUTHORIZE ran on input that UNDERSTAND had already rejected.
    */
   async execute(context: PipelineContext): Promise<PipelineResult> {
     const actionResultId = ulid();
     let currentInput = context.input;
     let currentOutput: unknown;
     let error: string | undefined;
+    let attempted = false;
     let success = false;
     let verified = false;
 
@@ -112,30 +168,32 @@ export class ActionPipeline {
       error = understandResult.error;
     } else {
       currentInput = understandResult.resolvedInput;
-    }
 
-    // Stage 2: PLAN
-    const planResult = await this.stagePlan(context, currentInput);
-    if (!planResult.ok) {
-      error = planResult.error;
-    } else {
-      currentInput = planResult.executionPlan.input;
-    }
-
-    // Stage 3: AUTHORIZE
-    const authorizeResult = await this.stageAuthorize(context);
-    if (!authorizeResult.ok) {
-      error = authorizeResult.error;
-    }
-
-    // Stage 4: EXECUTE
-    if (!error) {
-      const executeResult = await this.stageExecute(context, currentInput);
-      if (!executeResult.ok) {
-        error = executeResult.error;
+      // Stage 2: PLAN
+      const planResult = await this.stagePlan(context, currentInput);
+      if (!planResult.ok) {
+        error = planResult.error;
       } else {
-        currentOutput = executeResult.output;
-        success = true;
+        currentInput = planResult.executionPlan.input;
+
+        // Stage 3: AUTHORIZE
+        const authorizeResult = await this.stageAuthorize(context);
+        if (!authorizeResult.ok) {
+          error = authorizeResult.error;
+        } else {
+          // Stage 4: EXECUTE. Past this line the tool has been handed the call, so
+          // `attempted` is set before the await rather than after it: a throw from
+          // in there is a tool that ran and failed, and the record has to say so
+          // even though this frame never sees a return value.
+          attempted = true;
+          const executeResult = await this.stageExecute(context, currentInput);
+          if (!executeResult.ok) {
+            error = executeResult.error;
+          } else {
+            currentOutput = executeResult.output;
+            success = true;
+          }
+        }
       }
     }
 
@@ -149,13 +207,17 @@ export class ActionPipeline {
 
     // Stage 6: PERSIST
     if (this.db) {
-      await this.stagePersist(context, actionResultId, currentInput, currentOutput, success, verified, error, discrepancies);
+      await this.stagePersist(context, actionResultId, currentInput, currentOutput, {
+        attempted,
+        success,
+        verified,
+        error,
+        discrepancies,
+      });
     }
 
-    // Stage 7: RESPOND
-    const _responseFragment = this.stageRespond(success, verified, currentOutput, error, discrepancies);
-
     const result: PipelineResult = {
+      attempted,
       success,
       verified,
       actionResultId,
@@ -242,22 +304,37 @@ export class ActionPipeline {
   }
 
   // ── Stage 6: PERSIST ──
+  /**
+   * The one durable record of the call, and the payload that announces it.
+   *
+   * Both used to be narrower than what this method already knew. The row held
+   * `verified` and `error` but not `attempted`, so a reader could not tell a refusal
+   * from a failure — the same distinction the honesty contract turns on, present in
+   * memory and dropped on the way to disk. And `discrepancies` was computed in stage
+   * 5, passed in here, and used only in the event: the reason a verification failed
+   * survived exactly as long as a subscriber was listening, and the row that outlives
+   * every subscriber said only `verified = 0`.
+   */
   private async stagePersist(
     context: PipelineContext,
     actionResultId: string,
     input: unknown,
     output: unknown | undefined,
-    success: boolean,
-    verified: boolean,
-    error: string | undefined,
-    discrepancies: string[],
+    outcome: {
+      attempted: boolean;
+      success: boolean;
+      verified: boolean;
+      error: string | undefined;
+      discrepancies: string[];
+    },
   ): Promise<void> {
     if (!this.db) return;
 
     const insert = this.db.raw.prepare(
       `INSERT INTO action_result
-         (id, cycle_id, tool_id, input_json, output_json, verified, error, persisted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, cycle_id, tool_id, input_json, output_json, attempted, verified, error,
+          discrepancies_json, persisted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     insert.run(
@@ -266,8 +343,10 @@ export class ActionPipeline {
       context.toolId,
       JSON.stringify(input),
       output ? JSON.stringify(output) : null,
-      verified ? 1 : 0,
-      error ?? null,
+      outcome.attempted ? 1 : 0,
+      outcome.verified ? 1 : 0,
+      outcome.error ?? null,
+      outcome.discrepancies.length > 0 ? JSON.stringify(outcome.discrepancies) : null,
       new Date().toISOString(),
     );
 
@@ -280,16 +359,18 @@ export class ActionPipeline {
     // executions was handed the failures too. A tool that ran but whose
     // postconditions were not met also did not do its job, so it belongs on the
     // failure side — the payload keeps the distinction between "threw" and
-    // "returned something we could not verify".
+    // "returned something we could not verify", and `attempted` keeps the third one:
+    // "was never dispatched".
     if (this.eventBus) {
       await this.eventBus.publish({
-        type: success && verified ? 'action.executed' : 'action.failed',
+        type: outcome.success && outcome.verified ? 'action.executed' : 'action.failed',
         payload: {
           toolId: context.toolId,
-          success,
-          verified,
-          error,
-          discrepancies,
+          attempted: outcome.attempted,
+          success: outcome.success,
+          verified: outcome.verified,
+          error: outcome.error,
+          discrepancies: outcome.discrepancies,
         },
         identityId: context.identityId,
         cycleId: context.cycleId,
@@ -299,26 +380,6 @@ export class ActionPipeline {
         version: 1,
       });
     }
-  }
-
-  // ── Stage 7: RESPOND ──
-  private stageRespond(
-    success: boolean,
-    verified: boolean,
-    output: unknown | undefined,
-    error: string | undefined,
-    discrepancies: string[],
-  ): string {
-    if (!success) {
-      return `Action failed: ${error ?? 'unknown error'}`;
-    }
-    if (!verified && discrepancies.length > 0) {
-      return `Action completed but verification found discrepancies: ${discrepancies.join('; ')}`;
-    }
-    if (!verified) {
-      return 'Action completed (unverified — no postcondition verifier)';
-    }
-    return `Action completed and verified${output ? `: ${JSON.stringify(output)}` : ''}`;
   }
 
   /**

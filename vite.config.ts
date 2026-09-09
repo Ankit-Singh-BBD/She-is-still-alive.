@@ -17,12 +17,20 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      // `ws: true` is what lets `/api/voice` upgrade through here. Without it the
+      // dev server answers the handshake itself with a 404 and the microphone
+      // works in a production build only — the kind of gap that is found late.
+      //
+      // The `/ws` entry that used to sit below this one proxied a path nothing
+      // ever served: the voice socket lives under `/api`, so one entry covers
+      // both the JSON routes and the upgrade.
+      //
+      // `changeOrigin` rewrites `Host`, which defeats the `Origin`-versus-`Host`
+      // fallback in `assertNotCrossSite`. That is why `devOrigins()` allowlists
+      // this port explicitly — see the comment there.
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-      },
-      '/ws': {
-        target: 'ws://localhost:3000',
         ws: true,
       },
     },

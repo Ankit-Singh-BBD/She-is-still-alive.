@@ -137,7 +137,7 @@ describe('TaskExecutor (P14)', () => {
       description: 'Always fails',
       inputSchema: z.object({}),
       clearanceRequired: 'safe',
-      retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 50, retryableErrors: [] },
+      retryPolicy: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 50, retryableErrors: [], retryOnDeadline: false },
       timeoutMs: 1000,
       execute: async () => {
         throw new Error('permanent error');
@@ -157,6 +157,44 @@ describe('TaskExecutor (P14)', () => {
     const task = executor.getTask(taskId);
     expect(task?.status).toBe('failed');
     expect(task?.lastError).toContain('permanent error');
+  });
+
+  /**
+   * A publish that rejects must be reported, not thrown at the process.
+   *
+   * `server/main.ts` installs `process.on('unhandledRejection', … shutdown())`,
+   * and every announcement here used to be `void this.publish(...)` over a
+   * promise nothing caught — so a `SQLITE_BUSY` on the `domain_event` insert
+   * during a sweep would take the server down *after* `scheduleTask` had
+   * committed the row and handed the caller its id. The row is the durable
+   * fact; the announcement is best-effort, and this asserts the difference.
+   */
+  it('reports a failed event publish instead of taking the process down', async () => {
+    const failures: { what: string; error: unknown }[] = [];
+    const brokenBus = new EventBus(db);
+    brokenBus.publish = async () => {
+      throw new Error('domain_event is locked');
+    };
+    const isolated = new TaskExecutor(db, brokenBus, {
+      report: (what, error) => failures.push({ what, error }),
+    });
+
+    const taskId = isolated.scheduleTask({
+      identityId: owner.id,
+      kind: 'reminder',
+      payload: { kind: 'reminder', message: 'Still scheduled' },
+      dueAt: Date.now() + 10_000,
+    });
+
+    // The row landed regardless — the event is an announcement, not the write.
+    expect(isolated.getTask(taskId)?.status).toBe('pending');
+
+    // The rejection is asynchronous; let the microtask queue drain.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(failures.map((f) => f.what)).toEqual(['publishing task.scheduled']);
+    expect((failures[0]?.error as Error).message).toBe('domain_event is locked');
   });
 
   it('cancels pending and running tasks', async () => {

@@ -14,13 +14,17 @@
  *  - Nothing leaves this stage marked `verified`. Only stage 8, having re-read
  *    authoritative state, may set that flag (Part XI.3 — a textual "done" is
  *    never proof).
+ *  - A refusal is never recorded as an attempt. Every `ActionResult` leaving here
+ *    carries `attempted`, and it is `false` for all five refusals below and for a
+ *    `NotAttemptedError` raised by the executor. Stage 9 speaks from that field, so
+ *    getting it wrong is her claiming to have started something she never touched.
  *
  * P09 rollback contract: with no executor wired, the action is disabled and a
  * refusal result is recorded; the cycle continues to a text-only response.
  */
 
 import { check } from '@server/authz/index.js';
-import type { Identity } from '@server/identity/types.js';
+import type { AuthzCaller } from '@server/authz/types.js';
 import type { ActionResult, AuthorizedDecision } from '../types.js';
 
 export interface ToolExecutionContext {
@@ -42,9 +46,37 @@ export interface ToolExecutor {
   }): Promise<unknown>;
 }
 
+/**
+ * The seam's one way to say *nothing was dispatched*.
+ *
+ * `ToolExecutor.execute` returns `Promise<unknown>`, so a failure can only arrive
+ * here as a rejection — and a rejection is otherwise indistinguishable from a tool
+ * that ran and threw. That gap is what made her say "I started on that, but I could
+ * not confirm it actually went through" about calls that were refused before
+ * anything was dispatched: a revoked identity, a caller with no `mayAccessTools`
+ * entry, an input its schema rejected. All three were recorded `attempted: true`,
+ * which is the more alarming of the two sentences and the false one.
+ *
+ * An implementation raises this when it knows the tool was never handed the call.
+ * Anything else it throws means the call went out, which is the conservative
+ * default: an executor that forgets to use this over-reports "go and look" rather
+ * than under-reporting it, and the honest failure is the one that sends someone to
+ * check.
+ */
+export class NotAttemptedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NotAttemptedError';
+  }
+}
+
 export interface ActOptions {
   executor?: ToolExecutor | undefined;
-  identity?: Identity | undefined;
+  /**
+   * Who is asking, as of this cycle. The three fields `check()` reads, composed by
+   * `effectiveCaller` — see its note. `.id` is also what the refusal record names.
+   */
+  identity?: AuthzCaller | undefined;
   cycleId?: string | undefined;
   timeoutMs?: number | undefined;
   /**
@@ -71,8 +103,8 @@ export async function act(
 ): Promise<ActionResult[]> {
   const { proposal } = decision;
 
-  // Only a tool decision acts. respond/clarify/noop/learn/schedule_task are
-  // carried out by later stages, so stage 7 is a no-op for them.
+  // Only a tool decision acts. respond/clarify/noop/learn are carried out by later
+  // stages, so stage 7 is a no-op for them.
   if (proposal.action !== 'execute_tool') return [];
 
   const toolId = proposal.toolId;
@@ -118,14 +150,27 @@ export async function act(
     );
     // success == "the call returned", not "the world changed". Stage 8 decides
     // the latter.
-    return [{ toolId, success: true, output, verified: false }];
+    return [{ toolId, attempted: true, success: true, output, verified: false }];
   } catch (e) {
-    return [{ toolId, success: false, error: errorMessage(e), verified: false }];
+    // Two different failures arrive here, and only one of them touched the world.
+    //
+    // `NotAttemptedError` is the executor saying it refused before dispatch — see
+    // its note; it is the only way a `Promise<unknown>` seam can carry that. It
+    // belongs with the refusals above, and for the same reason: nothing was called,
+    // so nothing can have changed.
+    if (e instanceof NotAttemptedError) return [refusal(toolId, e.message)];
+    // Anything else is a call that went out. `attempted` is true here and that is
+    // the point of the field: the executor was called and threw, or ran past its
+    // deadline, so the tool may well have done half of what it was asked before
+    // failing. Stage 9 has to be able to say that rather than the flat "nothing
+    // happened" it says for a refusal.
+    return [{ toolId, attempted: true, success: false, error: errorMessage(e), verified: false }];
   }
 }
 
+/** Refused before dispatch: nothing was called, so nothing can have changed. */
 function refusal(toolId: string, reason: string): ActionResult {
-  return { toolId, success: false, error: reason, verified: false };
+  return { toolId, attempted: false, success: false, error: reason, verified: false };
 }
 
 async function withDeadline<T>(work: Promise<T>, timeoutMs: number, toolId: string): Promise<T> {

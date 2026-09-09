@@ -413,10 +413,13 @@ export function createLearningExtractor(options: {
 /**
  * The stored decision as one short phrase.
  *
- * `CycleRecord.authorizedDecision` is `unknown` because it comes out of a JSON
- * column, so every access here is guarded. A row written by an older version of
- * the application, or by hand in a test, yields `undefined` rather than throwing
- * — the prompt then simply does not mention what she decided.
+ * `authorizedDecision` on the `CycleRecord` in `server/learning/types.ts` — the narrow
+ * one the consolidation sweep rebuilds from a row — is `unknown` because it comes out of
+ * a JSON column, so every access here is guarded. (The live record in
+ * `server/cognition/types.ts` types the same field properly; it never left the process.)
+ * A row written by an older version of the application, or by hand in a test, yields
+ * `undefined` rather than throwing — the prompt then simply does not mention what she
+ * decided.
  */
 function describeDecision(decision: unknown): string | undefined {
   if (typeof decision === 'string') return decision.slice(0, 200) || undefined;

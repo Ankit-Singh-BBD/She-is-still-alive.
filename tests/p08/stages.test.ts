@@ -415,13 +415,43 @@ describe('Phase P08: Stages 1-6 (PERCEIVE..DECIDE)', () => {
       const d = await decide(respondTrace, identifiedOf(), { identity: guest });
       expect(d.proposal.action).toBe('respond');
       expect(d.authorized).toBe(true);
-      expect(d.clearanceChecked).toBe(true);
+      // `not_required`, not "checked". Nothing was checked: `mapToAuthz` returns
+      // null for `respond`, so `check()` is never called on this path — and this
+      // is the path every cycle that produces language takes. The field it
+      // replaces claimed `clearanceChecked: true` right here.
+      expect(d.clearance).toEqual({ kind: 'not_required' });
+      expect(d.refusedProposal).toBeUndefined();
     });
 
     it('authorizes a response even with no identity, since none is needed', async () => {
       const d = await decide(respondTrace, identifiedOf());
       expect(d.authorized).toBe(true);
       expect(d.proposal.action).toBe('respond');
+    });
+
+    it('says why it cannot run a tool with no faculty, instead of blaming a model', async () => {
+      // The heuristic path used to propose `execute_tool` with no `toolId`, which
+      // `validateProposal` rewrote to clarify with the rationale "Tool execution
+      // proposed without a toolId". That string is durable — it lands in
+      // `CycleRecord` — and it describes a model returning a malformed proposal
+      // when there is no model in the cycle at all. Choosing a tool means choosing
+      // its arguments, and nothing deterministic here can read those out of a
+      // sentence, so the honest answer is clarify for that stated reason.
+      const executeTrace: ReasoningTraceProposal = {
+        steps: [{ description: 'reminder asked for', conclusion: 'execute', confidence: 0.6 }],
+        optionsConsidered: ['execute'],
+        recommendedApproach: 'execute',
+      };
+      const d = await decide(executeTrace, identifiedOf({ identityKind: 'owner' }), {
+        identity: owner,
+      });
+      expect(d.proposal.action).toBe('clarify');
+      expect(d.proposal.toolId).toBeUndefined();
+      expect(d.proposal.rationale).toContain('language faculty');
+      expect(d.proposal.rationale).not.toContain('without a toolId');
+      // Not a refusal: nothing was proposed for authorization to turn down.
+      expect(d.refusedProposal).toBeUndefined();
+      expect(d.authorized).toBe(true);
     });
 
     it('refuses a guest tool execution and forces a clarify fallback', async () => {
@@ -439,8 +469,40 @@ describe('Phase P08: Stages 1-6 (PERCEIVE..DECIDE)', () => {
       expect(d.authorized).toBe(false);
       expect(d.proposal.action).toBe('clarify');
       expect(d.proposal.toolId).toBeUndefined();
-      expect(d.clearanceChecked).toBe(true);
+      expect(d.clearance.kind).toBe('denied');
       expect(d.reason).toMatch(/disabled|not in allowed/i);
+
+      // The refusal has to leave a trace of what was refused. `proposal` holds the
+      // fallback, so without this the one record of what she wanted to do — and
+      // for an unprompted cycle, the only evidence the gate did anything at all —
+      // is discarded by the stage that refused it.
+      expect(d.refusedProposal).toEqual({
+        action: 'execute_tool',
+        toolId: 'shell',
+        toolInput: { cmd: 'rm -rf /' },
+        rationale: 'user asked',
+      });
+      // And the clearance names what was actually checked, which a boolean could not.
+      expect(d.clearance).toMatchObject({ kind: 'denied', action: 'tool:execute' });
+    });
+
+    it('reports `unavailable` rather than `denied` when there is no identity to check', async () => {
+      // The distinction is load-bearing: `denied` asserts a policy decided
+      // something about this caller, and here no policy ran at all. The old
+      // boolean said `clearanceChecked: true` on this path, where there was
+      // nothing to check against.
+      const d = await decide(respondTrace, identifiedOf(), {
+        llm: {
+          proposeDecision: async () => ({
+            action: 'execute_tool',
+            toolId: 'weather.get',
+            rationale: 'user asked',
+          }),
+        },
+      });
+      expect(d.authorized).toBe(false);
+      expect(d.clearance).toMatchObject({ kind: 'unavailable', action: 'tool:execute' });
+      expect(d.refusedProposal?.toolId).toBe('weather.get');
     });
 
     it('authorizes the same tool execution for the owner', async () => {
@@ -489,20 +551,35 @@ describe('Phase P08: Stages 1-6 (PERCEIVE..DECIDE)', () => {
       expect(d.proposal.toolInput).toBeUndefined();
     });
 
-    it('refuses guest learning (knowledge:enroll) and falls back to clarify', async () => {
+    it('refuses learning to a caller the owner revoked it from, and falls back to clarify', async () => {
+      // The refusal used to come from `DEFAULT_PERMISSIONS.guest.mayEnrollNewKnowledge`
+      // being `false`, which contradicted Build Book XIII.4 ("Madhurita does **not**
+      // implement a blanket 'guests teach nothing' rule") and was enforced nowhere a
+      // memory is written. The default is `true` now and the field is honoured in stage
+      // 10, so revoking it is a real instruction rather than a decoration — which is
+      // what this asks for explicitly.
       const d = await decide(respondTrace, identifiedOf(), {
-        identity: guest,
+        identity: {
+          ...guest,
+          permissions: { ...DEFAULT_PERMISSIONS.guest, mayEnrollNewKnowledge: false },
+        },
         llm: {
-          proposeDecision: async () => ({
-            action: 'learn',
-            learningItems: [{ key: 'owner_secret', value: 'leaked' }],
-            rationale: 'noticed a fact',
-          }),
+          proposeDecision: async () =>
+            ({
+              action: 'learn',
+              // Not a field of `DecisionProposal` — a `learningItems` was removed
+              // from it because nothing read it. Sent here anyway: a model may
+              // still volunteer a field, and the fallback must not carry it.
+              learningItems: [{ key: 'owner_secret', value: 'leaked' }],
+              rationale: 'noticed a fact',
+            }) as unknown as DecisionProposal,
         },
       });
       expect(d.authorized).toBe(false);
       expect(d.proposal.action).toBe('clarify');
-      expect(d.proposal.learningItems).toBeUndefined();
+      // The refusal fallback is built from scratch rather than edited, so it carries
+      // no payload of any kind — including one this type does not declare.
+      expect(Object.keys(d.proposal).sort()).toEqual(['action', 'rationale']);
     });
 
     it('coerces an unrecognized action to respond', async () => {
@@ -526,7 +603,12 @@ describe('Phase P08: Stages 1-6 (PERCEIVE..DECIDE)', () => {
         { action: 'respond' },
         { action: 'execute_tool' },
         { action: 'learn', learningItems: 'nope' },
-        { action: 'schedule_task' },
+        // `schedule_task` was an action once, and stage 9 answered it with "I have
+        // put that on the list to take care of" while stage 7 did nothing with it.
+        // It is in this list rather than deleted from the file: a model trained on
+        // the old prompt may still propose it, and the assertion below is that it
+        // now degrades to `respond` instead of promising anything.
+        { action: 'schedule_task', taskSpec: { at: 'tomorrow 08:00' } },
         'a string',
         [],
       ];
@@ -537,22 +619,24 @@ describe('Phase P08: Stages 1-6 (PERCEIVE..DECIDE)', () => {
           llm: { proposeDecision: async () => g as DecisionProposal },
         });
         expect(typeof d.proposal.action).toBe('string');
-        expect([
-          'respond',
-          'execute_tool',
-          'schedule_task',
-          'learn',
-          'noop',
-          'clarify',
-        ]).toContain(d.proposal.action);
+        expect(['respond', 'execute_tool', 'learn', 'noop', 'clarify']).toContain(
+          d.proposal.action,
+        );
         expect(typeof d.proposal.rationale).toBe('string');
         expect(d.proposal.rationale.length).toBeGreaterThan(0);
         expect(typeof d.authorized).toBe('boolean');
-        expect(d.clearanceChecked).toBe(true);
+        // Whatever the garbage was, the clearance and the flag agree — the pair is
+        // built by one constructor in stage 6 precisely so they cannot disagree.
+        expect(['not_required', 'granted', 'denied', 'unavailable']).toContain(d.clearance.kind);
+        expect(d.authorized).toBe(
+          d.clearance.kind === 'not_required' || d.clearance.kind === 'granted',
+        );
         // An unauthorized decision never carries an executable payload.
         if (!d.authorized) {
           expect(d.proposal.toolId).toBeUndefined();
-          expect(d.proposal.learningItems).toBeUndefined();
+          expect(d.proposal.toolInput).toBeUndefined();
+          // …and the refused payload is kept where it cannot be executed from.
+          expect(d.refusedProposal).toBeDefined();
         }
       }
     });
@@ -581,9 +665,9 @@ describe('Phase P08: Stages 1-6 (PERCEIVE..DECIDE)', () => {
       }
 
       // And it landed on the default decision.
-      const decision = cycle.authorizedDecision as { authorized: boolean; proposal: DecisionProposal };
-      expect(decision.authorized).toBe(true);
-      expect(decision.proposal.action).toBe('respond');
+      const decision = cycle.authorizedDecision;
+      expect(decision?.authorized).toBe(true);
+      expect(decision?.proposal.action).toBe('respond');
       expect(cycle.status).toBe('completed');
     });
 
@@ -665,8 +749,7 @@ describe('Phase P08: Stages 1-6 (PERCEIVE..DECIDE)', () => {
       expect(cycle.status).toBe('degraded');
       expect(cycle.error).toContain('UNDERSTAND: faculty offline');
       // Rollback contract: stages 4-6 degrade to a default decision.
-      const decision = cycle.authorizedDecision as { proposal: DecisionProposal };
-      expect(decision.proposal.action).toBe('respond');
+      expect(cycle.authorizedDecision?.proposal.action).toBe('respond');
     });
   });
 });

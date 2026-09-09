@@ -27,12 +27,28 @@
  * would report "the tool failed" for a tool that in fact ran and whose effect
  * merely could not be proven. Stage 8 draws that distinction; this adapter
  * leaves it room to.
+ *
+ * **A failure that never reached the tool is raised as `NotAttemptedError`.** This
+ * is the third translation and it was missing, which made the adapter the one place
+ * in the chain that could not tell the truth. `execute` returns `Promise<unknown>`,
+ * so every failure has to arrive at stage 7 as a rejection; a plain `Error` there is
+ * read as *the call went out and threw*, and stage 9 says "I started on that, but I
+ * could not confirm it actually went through". That sentence was reaching callers
+ * whose tool was refused at the gate — a revoked identity, no `mayAccessTools`
+ * entry, an input its schema rejected — none of which touched anything. The
+ * pipeline knows which of the two happened and now says so in
+ * `PipelineResult.attempted`; this method carries it across the seam in the only
+ * channel a rejection has, which is its type.
  */
 
 import type { ActionPipeline, PipelineContext } from '@server/actions/pipeline.js';
 import type { IdentityRepository } from '@server/identity/repository.js';
 import type { Identity } from '@server/identity/types.js';
-import type { ToolExecutor, ToolExecutionContext } from '@server/cognition/stages/7.js';
+import {
+  NotAttemptedError,
+  type ToolExecutor,
+  type ToolExecutionContext,
+} from '@server/cognition/stages/7.js';
 
 export interface PipelineToolExecutorOptions {
   pipeline: ActionPipeline;
@@ -71,7 +87,10 @@ export class PipelineToolExecutor implements ToolExecutor {
 
     const result = await this.pipeline.execute(context);
     if (!result.success) {
-      throw new Error(result.error ?? `Tool '${call.toolId}' failed without recording a reason`);
+      const reason = result.error ?? `Tool '${call.toolId}' failed without recording a reason`;
+      // The whole reason `PipelineResult.attempted` exists. `false` means one of the
+      // pipeline's first three gates refused and the tool was never handed the call.
+      throw result.attempted ? new Error(reason) : new NotAttemptedError(reason);
     }
     return result.output;
   }
@@ -86,16 +105,20 @@ export class PipelineToolExecutor implements ToolExecutor {
    * would therefore still carry owner permissions into the pipeline. Re-reading
    * closes that, and refusing a non-active identity here is the check `check()`
    * does not make.
+   *
+   * Both refusals are `NotAttemptedError`, because they happen before the pipeline
+   * is even entered. They were the plainest instance of the defect that field fixes:
+   * a caller whose enrolment had been revoked was told she had started on something.
    */
   private resolveCaller(identityId: string): Identity {
     const identity = this.identityRepo.getIdentity(identityId);
     if (!identity) {
-      throw new Error(
+      throw new NotAttemptedError(
         `No enrolled identity '${identityId}'; a tool cannot execute for an unknown caller`,
       );
     }
     if (identity.status !== 'active') {
-      throw new Error(
+      throw new NotAttemptedError(
         `Identity '${identityId}' is ${identity.status}; a tool cannot execute for a caller ` +
           `whose enrolment is not active`,
       );
