@@ -13,9 +13,11 @@ Layer 1 — FACULTIES (dimag)
   server/llm/gemini.ts     one provider behind the interface (replaceable)
   Modes: local-only | hybrid | quality  (see 04-VOICE-MODELS)
 
-Layer 2 — COORDINATOR + WORK TABLES (durable body)
+Layer 2 — COORDINATOR + WORK TABLES + WORLD MODEL (durable body + duniya ki samajh)
   server/work/contracts.ts, repository.ts
   server/work/coordinator.ts        leases, fences, heartbeats
+  server/world/model.ts, world/people.ts, world/calendar.ts  ← NEW in v3
+  WorldModel: time + weather + location + people + calendar + devices
   SQLite = single source of truth — every body part writes here
 
 Layer 3 — TOOLS + HEALTH + VOICE (haath/aankh/awaj)
@@ -26,6 +28,23 @@ Layer 3 — TOOLS + HEALTH + VOICE (haath/aankh/awaj)
 ```
 
 Layers speak through interfaces. The UI never imports server services; repositories never import React. Replace the LLM by replacing the provider — not the architecture.
+
+### WorldModel — weather is one signal among many
+
+`server/environment/` today is weather-centric (Open-Meteo is the only polled external feed, weather owns the only sweep timer and the only palette modifier). v3 corrects this:
+
+```
+WorldModel { time, weather, location, people, calendar, devices }
+```
+
+- Weather is **one field**, a palette **modifier** (~15 min TTL), not the center. `unknown` weather applies no modifier — see `server/environment/palette.ts`.
+- People is a **People Graph** — who matters, relation, recent permitted context. Built from explicit owner-told relationships + permitted history, not scraped contacts.
+- Every field may be `unknown`/`null` independently. Missing weather/calendar/location **must not block** greeting, work, memory or conversation. Each field has its own TTL/probe.
+- WorldModel is read into `ResponseFrame` so the Faculty sees people + world alongside facts. See 01-VISION.
+
+### Madhurita as an independent entity
+
+She is not a mirror of the owner. She lives in the owner's world and knows **people** (Pepper, bacchi, team) and **environment** with her own stance — e.g. "Sir, aapne Pepper se kal mana kiya tha, phir wahi kar rahe ho?" — but every such line cites a verified world fact, never a hallucinated person or event. Privacy: unknown people are not invented; each feed needs explicit consent.
 
 ## The complete route
 

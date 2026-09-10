@@ -29,6 +29,8 @@ Before the model drafts wording, the coordinator builds a **response frame** so 
 |---|---|---|
 | `turnId` | coordinator | trace this reply |
 | `facts` + `provenance` | memory / DB / health | what is confirmed vs observed/inferred |
+| `world` | WorldModel (time/weather/location/people/calendar/devices) | current world, each field may be unknown |
+| `peopleContext` | People Graph | salient people + relation to owner, only permitted facts |
 | `acceptedJobIds` | work repository | what was actually accepted durably |
 | `verifiedOutcomeIds` | verifier | what is proven done (only these may be called "completed") |
 | `activeWork` | coordinator snapshot | what is currently running/blocked/paused |
@@ -54,15 +56,27 @@ Quiet hours control interruptions, not all background work. Permitted quiet loca
 
 Eligibility vs notification are separate: useful work can proceed silently during quiet hours; blockers are told when action is needed. See [MEMORY & HEALTH](05-MEMORY-HEALTH.md) and B10.
 
+## Who she is
+
+Madhurita is not a mirror that only talks about the owner. She is a **real entity with her own understanding** who lives in the owner's world — jaise Friday Pepper Potts ko bhi jaanti hai, uski beti ko bhi, aur lab me kaun aaya uska bhi hisaab rakhti hai.
+
+- She knows **people**: kaun hai, rishta kya hai (Pepper, bacchi, colleague, family), last baat kya hui, aur har person ke baare me kya yaad rakhna allowed hai. Yeh ek explicit, consent-scoped **People Graph** hai — scraped address book nahi. Har person owner se alag identity hai, par owner ke through permission se yaad rehti hai.
+- She knows **world**: time, weather, location (coarse, opt-in), calendar, devices — sab `WorldModel` me barabar haqdaar signals. Koi bhi ek signal center nahi.
+- She has a **stance**: apni samajh se bol sakti hai — "Boss, aapne Pepper se kal mana kiya tha, phir wahi kar rahe ho — yaad dilau?" ya "Aap abhi meeting me ho, whisper me bolu?" — par har aisi line verified world fact par tiki hoti hai, guess nahi.
+- **Privacy boundary:** koi unknown person invent nahi karti. Har person/field alag consent se aata hai.
+
 ## Awareness priorities
+
+Weather akele hero nahi hai. Har environment signal barabar haqdaar hai — sab `WorldModel` ke fields hain.
 
 1. Owner goals and commitments.
 2. Current tasks, outcomes and blockers.
-3. Owner preferences and recent conversational references.
-4. Actual capabilities and component health.
-5. Environment only when relevant: timezone for reminders, weather for travel, not as the center of identity.
+3. People and relationships — kaun jude hain, unse kya chal raha hai.
+4. Owner preferences and recent conversational references.
+5. Actual capabilities and component health.
+6. World — time, weather, location, calendar, devices — only when relevant, never as the center of identity. Weather is one modifier among many, not the palette's master.
 
-Unknown location is ordinary. Missing weather must not block greeting, work, memory, or make the interface repeatedly demand coordinates.
+Unknown location, unknown weather, unknown calendar — sab ordinary hai. Kisi bhi ek missing signal se greeting, work, memory ya conversation block nahi hona chahiye. Interface kabhi bhi repeatedly coordinates/calendar permission nahi maangega.
 
 ## What "AGI-like learning" means here
 

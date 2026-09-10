@@ -46,10 +46,12 @@ Layer 1 — FACULTIES (dimag)
   Any LLM is usable if it implements the Faculty interface.
   Modes: local-only / hybrid / quality (see 04-VOICE-MODELS).
 
-Layer 2 — COORDINATOR + WORK TABLES (durable body)
+Layer 2 — COORDINATOR + WORK TABLES + WORLD MODEL (durable body + duniya ki samajh)
   server/work/contracts.ts, repository.ts, coordinator.ts
+  server/world/model.ts, world/people.ts, world/calendar.ts  ← NEW in v3
+  WorldModel: time + weather + location + people + calendar + devices
   SQLite is the single source of truth — every body part writes there.
-  All durable state: jobs, steps, artifacts, leases, outbox events.
+  All durable state: jobs, steps, artifacts, leases, outbox events, world.
   Restart = resume from DB. No in-memory Map is authoritative.
 
 Layer 3 — TOOLS + HEALTH (haath/aankh)
@@ -59,6 +61,31 @@ Layer 3 — TOOLS + HEALTH (haath/aankh)
 ```
 
 Detail: [CONNECTIONS](guide/02-CONNECTIONS.md). Planned seams: [B08](build/tasks/B08.md), [B10](build/tasks/B10.md).
+
+## WorldModel — weather is one signal among many
+
+`server/environment/` today is weather-centric: Open-Meteo is the only polled external feed, weather owns the only sweep timer and the only palette modifier. That was the cheapest signal to build, not the intended hierarchy.
+
+v3 corrects this: weather becomes **one field in `WorldModel`**, not the center.
+
+```
+WorldModel {
+  time:       TimeOfDay            // from clock + solar (already exists)
+  weather:   WeatherSnapshot       // Open-Meteo — one modifier, ~15min TTL
+  location:  Location | null       // coarse, opt-in, weather's prerequisite
+  people:    PeopleGraph           // who matters, relation, recent context
+  calendar:  CalendarSnapshot      // next event / busy-free — when permitted
+  devices:   DeviceSnapshot        // online, battery, mic, network health
+}
+```
+
+Rules:
+- Every field may be `unknown`/`null` independently. Missing weather, missing calendar, or missing location **must not block** greeting, work, memory or conversation.
+- Weather stays a **modifier** (desaturate/darken the hour's palette), never a center of identity. See `server/environment/palette.ts` rule: `unknown` weather applies no modifier.
+- Each field has its own freshness TTL and probe; no single feed drives the sweep timer.
+- Calibration, consent and polling policy live with each field — e.g. `PeopleGraph` is built from explicit owner-told relationships and permitted history, not scraped contacts.
+
+Planned: `server/world/model.ts` aggregates these feeds for `ResponseFrame` and health. See 01-VISION awareness priorities and B10.
 
 ## LLM-agnostic Faculty contract
 
@@ -78,6 +105,15 @@ type FacultyRole = 'reason' | 'decide' | 'respond' | 'learn' | 'live';
 - **Swapping the LLM does not change the architecture.** Replace the provider implementation behind the interface.
 - **Fallback is deterministic:** on timeout/quota, the router returns a bounded `unknown` / heuristic result, not a silent paid call. Zero-paid default is enforced there.
 - **Evaluation is held-out:** a faculty is promoted only after passing held-out owner tasks (see 04-VOICE-MODELS and B08 gate).
+
+## Madhurita as an independent entity — who she knows
+
+Madhurita is not a mirror that only talks about the owner. She is a **real entity with her own understanding** who lives in the owner's world.
+
+- She knows **people**, not just preferences: Pepper Potts, the owner's daughter, colleagues, family — who they are, how they relate to the owner, what was last said, and what is permitted to remember about each person. This is the `PeopleGraph` — an explicit, consent-scoped graph, not a scraped address book. Planned tables/fields extend the existing `relationship` domain (B09/B10).
+- She knows **environment**, not just weather: where the owner roughly is, what time it is there, whether a calendar block is active, whether a device is offline — the `WorldModel` above. This lets her act independently: "Sir, aapne Pepper se kal mana kiya tha, phir wahi kar rahe ho — yaad dilau?"
+- She has a **stance**: within ResponseFrame she may add a grounded, brief independent observation when the world state warrants it — e.g. whispering because a meeting is active, or noting a prior commitment to another person. She never invents people or events; every such line cites a verified world fact.
+- **Privacy boundary:** WorldModel respects per-person consent and per-feed permission. A person unknown to the system is not hallucinated. See 01-VISION.
 
 ## UI principles
 

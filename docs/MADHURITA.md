@@ -28,7 +28,7 @@ The substantive code paths surveyed remain those listed below. This is not a cla
 | `src/ui/Presence.tsx`, `Ledger.tsx` | Conversation surface and on-demand internal counts/status |
 | `public/sw.js` | Shell caching; not an autonomous background worker or offline assistant |
 
-Planned additions (not yet code): `server/llm/provider.ts` + `router.ts` (Faculty seam, B08), `server/work/` (B03–B04), `server/health/` (B10), `server/conversation/coordinator.ts` + `ResponseFrame` (B06), `server/http/routes/work.ts` + `src/ui/WorkView.tsx` + `src/state/useWork.ts` + per-job SSE (B07).
+Planned additions (not yet code): `server/llm/provider.ts` + `router.ts` (Faculty seam, B08), `server/work/` (B03–B04), `server/world/` (`model.ts` + `people.ts` + `calendar.ts` + WorldModel — weather as one modifier, `people` is consent-scoped People Graph), `server/health/` (B10), `server/conversation/coordinator.ts` + `ResponseFrame` with `world` + `peopleContext` (B06), `server/http/routes/work.ts` + `src/ui/WorkView.tsx` + `src/state/useWork.ts` + per-job SSE (B07).
 
 Fourteen numbered SQL migration files exist at this revision. New migration numbers must be allocated from the actual tree at implementation time, not from this sentence.
 

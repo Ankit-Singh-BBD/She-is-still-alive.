@@ -20,6 +20,16 @@ Every candidate needs source IDs, subject, observation time, confidence, sensiti
 
 Example: "Mujhe boss mat bolo, Ankit bolo." Update this owner's address preference, not every identity and not the global prompt. This is a general preference mechanism, not a hardcoded example branch.
 
+## People Graph — she knows who matters, with consent
+
+The **People Graph** is the `people` field of `WorldModel` (`server/world/people.ts`, planned). It extends the existing `relationship` domain into a live, consent-scoped graph — not a scraped address book.
+
+- **Source:** only explicit owner-told relationships ("Pepper meri colleague hai") and permitted history where the owner allowed remembering a person. No contact scraping, no inference of a new person from a single mention without confirmation.
+- **Record:** `personId`, `displayName`, `relation` (family/colleague/friend/other), `allowedFields` (what may be remembered about this person), `provenance` (ownerTold | observedWithConsent + source turn/job id), `lastSeenAt`, `sensitivity`. Each field needs its own consent; a missing consent means `unknown`, never guessed.
+- **Behavior:** unknown people are not invented. Corrections revoke or narrow consent ("Pepper ke baare me ab kuch mat yaad rakhna" → supersede + invalidate). Deletion is durable and auditable.
+- **Use:** the coordinator injects a bounded `peopleContext` (salient top-N people + relation + last permitted context) into `ResponseFrame` alongside `world`. The model sees only that, never the full graph. Every stance line about a person ("Aapne Pepper se kal mana kiya tha") must cite a verified world/person fact.
+- **Privacy:** per-person consent, per-field policy, no cross-owner sharing. See 01-VISION and 02-CONNECTIONS.
+
 ## Retrieval algorithm
 
 Filter identity, lifecycle and permitted sensitivity in the database first. Retrieve bounded lexical candidates; optionally add embedding candidates from a qualified model. Rank by relevance, recency and importance. Preserve source IDs and correction links. Build a token-budgeted context with mandatory current instruction and relevant preferences first; do not silently slice off the user request.
