@@ -1,22 +1,42 @@
 {
   "schemaVersion": 1,
-  "state": "uninitialized",
+  "state": "in_progress",
   "workspace": {
-    "revision": null,
-    "sourceFingerprint": null,
+    "revision": "9651afd",
+    "sourceFingerprint": "B08.s1:envelope-before-WorldModel",
     "dirtyFiles": []
   },
-  "taskId": "B00",
+  "taskId": "B08",
   "sliceId": "s1",
-  "phase": "read",
-  "completedSlices": [],
-  "changedFiles": [],
-  "lastCommand": null,
-  "lastExitCode": null,
-  "evidence": [],
-  "nextAction": "v3 docs rewrite applied (B07 fixed, B08-B11 created, Faculty seam defined). Inspect the actual checkout on docs-rewrite (rev 9651afd) and run B00 baseline checks: typecheck, lint, tests, build, and disposable-DB boot. No v3 implementation slices have been executed.",
+  "phase": "verify",
+  "completedSlices": ["B08.s1"],
+  "changedFiles": [
+    ".env.example",
+    "e2e/smoke.spec.ts",
+    "playwright.config.ts",
+    "server/app.ts",
+    "server/config/env.ts",
+    "server/llm/index.ts",
+    "server/llm/local.ts",
+    "server/llm/provider.ts",
+    "server/llm/router.ts",
+    "server/world/model.ts",
+    "tests/boot/config.test.ts",
+    "tests/llm/faculty-router.test.ts"
+  ],
+  "lastCommand": "npx tsc --noEmit && npm test && rm -f /tmp/madhurita-e2e.db* && npx playwright test e2e/smoke.spec.ts",
+  "lastExitCode": 0,
+  "evidence": [
+    "npx tsc --noEmit -> 0",
+    "npm test -> 66 files, 1084 tests passed (tests/boot/config.test.ts pinned to gemma-4-31b-it)",
+    "npx playwright test e2e/smoke.spec.ts -> 2 passed (3.9s) on FACULTY_MODE=local-only disposable DB",
+    "npm run build -> 398.66k, 63 modules",
+    "Hosted reasoning switched to gemma-4-31b-it via same Google GenAI transport — no architecture change, local-only still zero-network `createLanguageFaculties -> undefined` honest absence (FACULTY_MODE=local-only banner), hybrid/quality pass apiKey through createGeminiTransport(model: reasoningModel) so env override without code change",
+    "Faculty seam: server/llm/provider.ts (Faculty/FacultyProvider/FacultyError/LanguageModelFaculty) + server/llm/router.ts (FacultyRouter local-only/hosted guard, no silent fallback) + server/llm/local.ts (deterministic stub)"
+  ],
+  "nextAction": "B08/s2: grounded ResponseFrame + WorldModel injection (weather as 15-min modifier, People Graph consent-scoped) per B08 slice s2; see docs/build/tasks/B08.md",
   "blocker": null,
   "repairAttempts": 0,
   "workerLease": null,
-  "updatedAt": null
+  "updatedAt": "2026-09-10T19:24:00.000Z"
 }

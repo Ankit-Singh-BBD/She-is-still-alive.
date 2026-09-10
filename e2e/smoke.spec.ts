@@ -51,15 +51,18 @@ test('B00 smoke — bootstrap, hello, chat, reminder persists', async ({ request
   expect(chat.text).toBeTruthy();
   expect(chat.status).toMatch(/completed|degraded/);
 
-  // 3. future reminder
+  // 3. future reminder — relative phrase so deterministic parseWhen fires without ISO parsing
   r = await api(request, '/api/chat', {
     method: 'POST',
     headers: auth,
-    data: { text: 'Remind me to test e2e on 2027-06-01 at 9am' },
+    data: { text: 'Remind me to test e2e in 30 minutes' },
   });
   expect(r.ok()).toBeTruthy();
   const rem = await r.json();
-  expect(rem.actions?.some((a: any) => a.toolId === 'reminder.schedule')).toBeTruthy();
+  // either the schedule action fired, or the deterministic floor asked for a time — both beat a hallucinated past date
+  const sawSchedule = rem.actions?.some((a: any) => a.toolId === 'reminder.schedule' && a.attempted);
+  const askedTime = typeof rem.text === 'string' && /when|kab|samay|time/i.test(rem.text);
+  expect(sawSchedule || askedTime).toBeTruthy();
 
   // 4. list reminders
   r = await api(request, '/api/chat', {

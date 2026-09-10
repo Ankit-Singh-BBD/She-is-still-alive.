@@ -79,6 +79,13 @@ export function createLanguageFaculties(
 }
 
 function realModel(config: Config): LanguageModel | undefined {
+  // local-only is deterministically offline even with a key present — the
+  // honest "no faculty wired" path, never a silent hosted fallback. Without
+  // this, `FACULTY_MODE=local-only npx tsx server/main.ts` still constructed
+  // a Gemini client and every cycle paid the network, which is exactly the
+  // 67s hang the smoke run saw (request context disposed while waiting for
+  // Gemini). `hybrid`/`quality` behave as before.
+  if (config.llm.facultyMode === 'local-only') return undefined;
   if (!config.llm.enabled || config.llm.apiKey === undefined) return undefined;
   return new GeminiLanguageModel({
     transport: createGeminiTransport(config.llm.apiKey),

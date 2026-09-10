@@ -68,10 +68,12 @@ describe('Configuration (server/config/env.ts)', () => {
       // changing a default is a deliberate act with a test to update — the reason
       // this assertion earns its keep is that `gemini-2.5-flash-lite` stopped
       // answering (404, "no longer available to new users") while it was still
-      // the default, and every thinking stage threw.
-      expect(config.llm.reasoningModel).toBe('gemini-3.5-flash-lite');
+      // the default, and every thinking stage threw. Switch to gemma-4-31b-it:
+      // higher free-tier tokens via the same Google GenAI transport, zero Mac RAM
+      // (hosted, not local).
+      expect(config.llm.reasoningModel).toBe('gemma-4-31b-it');
       expect(config.llm.liveModel).toBe('gemini-3.1-flash-live-preview');
-      expect(DEFAULT_REASONING_MODEL).toBe('gemini-3.5-flash-lite');
+      expect(DEFAULT_REASONING_MODEL).toBe('gemma-4-31b-it');
       expect(DEFAULT_LIVE_MODEL).toBe('gemini-3.1-flash-live-preview');
     });
   });
@@ -234,7 +236,7 @@ describe('Configuration (server/config/env.ts)', () => {
       const summary = describeConfig(loadConfig({ PORT: '4100', DATABASE_PATH: './x/y.db' }));
       expect(summary).toContain('4100');
       expect(summary).toContain('./x/y.db');
-      expect(summary).toContain('gemini-3.5-flash-lite');
+      expect(summary).toContain('gemma-4-31b-it');
       expect(summary).toContain('gemini-3.1-flash-live-preview');
     });
 

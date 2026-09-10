@@ -73,6 +73,12 @@ import { createLearningExtractor, knownMemoryLookupFrom } from '@server/learning
 import { createIntentRecognizer } from '@server/cognition/intent/index.js';
 import { createLanguageFaculties } from '@server/llm/index.js';
 import type { LanguageFaculties, LanguageModel } from '@server/llm/index.js';
+import { WorldModel } from '@server/world/model.js';
+import { FacultyRouter } from '@server/llm/router.js';
+import { LocalFacultyProvider } from '@server/llm/local.js';
+import { LanguageModelFaculty } from '@server/llm/provider.js';
+import { GeminiLanguageModel, createGeminiTransport } from '@server/llm/gemini.js';
+import { TokenBudgetManager } from '@server/cognition/budgets.js';
 import {
   createGeminiLiveTransportFactory,
   RENDERER_INSTRUCTION,
@@ -277,6 +283,8 @@ export interface MadhuritaApp {
    * configuration this is.
    */
   readonly faculties: LanguageFaculties | undefined;
+  readonly facultyRouter: FacultyRouter | undefined;
+  readonly worldModel: WorldModel;
 
   /**
    * The live model as an ear and a mouth, or `undefined` when she is text-only.
@@ -574,6 +582,13 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
   // `undefined` here is the no-key configuration, not a failure. Nothing else in
   // the process constructs a Gemini client, and the key never leaves the closure
   // inside `createGeminiTransport`.
+  //
+  // `Faculties` as a router: the seam `server/llm/provider.ts` allows a provider
+  // swap without touching call sites. For now `LanguageFaculties` remains the hosted
+  // implementation wired behind the router when FACULTY_MODE permits it — stages still
+  // consume it directly until they adopt `FacultyRouter.complete`. The router itself
+  // is constructed here so `describe()` and provenance already go through one place,
+  // and `mode: local-only` deterministically yields `undefined` (no silent fallback).
   const faculties = createLanguageFaculties({
     config,
     // Descriptions and argument shapes, not ids: `registry.list().map(t => t.id)` told
@@ -586,6 +601,46 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     tone: (identityId) => personality.instructionFor(identityId),
     ...(options.languageModel ? { model: options.languageModel } : {}),
   });
+
+  // FacultyRouter — the one seam the task asks for. Not yet consumed by stages,
+  // but constructed once so the mode math is testable and provenance is single.
+  const facultyRouter: FacultyRouter | undefined = (() => {
+    const mode = config.llm.facultyMode;
+    if (options.languageModel) {
+      const hosted = {
+        id: 'google' as const,
+        modelId: options.languageModel.modelId,
+        createFaculty: (role: import('@server/llm/provider.js').FacultyRole) =>
+          new LanguageModelFaculty({ id: `google:${role}`, role, model: options.languageModel! }),
+      };
+      return new FacultyRouter({ providers: { reason: hosted, decide: hosted, respond: hosted, learn: hosted, live: hosted }, mode });
+    }
+    if (mode === 'local-only') {
+      const local = new LocalFacultyProvider();
+      return new FacultyRouter({ providers: { reason: local, decide: local, respond: local, learn: local, live: local }, mode });
+    }
+    if (faculties) {
+      const hosted = {
+        id: 'google' as const,
+        modelId: faculties.modelId,
+        createFaculty: (role: import('@server/llm/provider.js').FacultyRole) => {
+          const m = new GeminiLanguageModel({
+            transport: createGeminiTransport(config.llm.apiKey!),
+            model: config.llm.reasoningModel,
+            temperature: config.llm.temperature,
+            timeoutMs: config.llm.timeoutMs,
+            budgets: new TokenBudgetManager(),
+          });
+          return new LanguageModelFaculty({ id: `google:${role}`, role, model: m });
+        },
+      };
+      return new FacultyRouter({ providers: { reason: hosted, decide: hosted, respond: hosted, learn: hosted, live: hosted }, mode });
+    }
+    // No key, hybrid/quality without faculties — honestly no router-derived faculty.
+    return undefined;
+  })();
+
+  const worldModel = new WorldModel({ environment });
 
   // ── Her ear and her mouth ────────────────────────────────────────────────
   //
@@ -1155,6 +1210,11 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     // was asked for; this says what was actually built and handed to the stages.
     if (faculties) {
       started.push(`language faculty (${faculties.modelId}) — stages 4-6, 9 and 10`);
+    } else if (config.llm.facultyMode === 'local-only') {
+      absent.push(
+        'language faculty — FACULTY_MODE=local-only; stages 4-6, 9 and 10 use deterministic fallbacks, ' +
+          'no hosted call is attempted and no token is spent',
+      );
     } else if (!config.llm.enabled) {
       absent.push(
         'language faculty — no GOOGLE_API_KEY; stages 4-6, 9 and 10 use their deterministic ' +
@@ -1317,6 +1377,8 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     consolidation,
     consolidationReport: () => consolidation.report(),
     faculties,
+    facultyRouter,
+    worldModel,
     voiceEar,
     projector,
     realtime,

@@ -374,7 +374,7 @@ function round7(value: number): number {
  * anything in the configuration changing, and a floating model is exactly the
  * kind of quiet drift the rest of this file exists to prevent.
  */
-export const DEFAULT_REASONING_MODEL = 'gemini-3.5-flash-lite';
+export const DEFAULT_REASONING_MODEL = 'gemma-4-31b-it';
 export const DEFAULT_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 
 const EnvObject = z
@@ -392,6 +392,7 @@ const EnvObject = z
     // `package.json`. Accepting 'anthropic' here and failing at the first
     // request would be a configuration knob that lies about what it does.
     LLM_PROVIDER: envEnum(['google'], 'google'),
+    FACULTY_MODE: envEnum(['local-only', 'hybrid', 'quality'], 'hybrid'),
     GOOGLE_API_KEY: envOptional(),
     LLM_REASONING_MODEL: envString(DEFAULT_REASONING_MODEL),
     LLM_LIVE_MODEL: envString(DEFAULT_LIVE_MODEL),
@@ -566,6 +567,7 @@ export interface Config {
   readonly database: { readonly path: string };
   readonly llm: {
     readonly provider: 'google';
+    readonly facultyMode: 'local-only' | 'hybrid' | 'quality';
     /**
      * Whether a real language faculty is available.
      *
@@ -702,6 +704,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     database: { path: values.DATABASE_PATH },
     llm: {
       provider: values.LLM_PROVIDER,
+      facultyMode: values.FACULTY_MODE,
       enabled: values.GOOGLE_API_KEY !== undefined,
       apiKey: values.GOOGLE_API_KEY,
       reasoningModel: values.LLM_REASONING_MODEL,
