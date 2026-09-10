@@ -4,6 +4,29 @@
 
 **Existing** means found in the baseline. **Planned** means implement in the named task. A directory in this chapter is not proof that it already exists.
 
+## The three-layer house
+
+```
+Layer 1 — FACULTIES (dimag)
+  server/llm/provider.ts   Faculty + FacultyProvider interface
+  server/llm/router.ts     picks faculty by role/budget/mode
+  server/llm/gemini.ts     one provider behind the interface (replaceable)
+  Modes: local-only | hybrid | quality  (see 04-VOICE-MODELS)
+
+Layer 2 — COORDINATOR + WORK TABLES (durable body)
+  server/work/contracts.ts, repository.ts
+  server/work/coordinator.ts        leases, fences, heartbeats
+  SQLite = single source of truth — every body part writes here
+
+Layer 3 — TOOLS + HEALTH + VOICE (haath/aankh/awaj)
+  server/tools/*, server/actions/registry.ts
+  server/health/*                   probes, observations, bounded recovery
+  server/voice/live/, src/lib/voice.ts
+  server/conversation/coordinator.ts  ResponseFrame
+```
+
+Layers speak through interfaces. The UI never imports server services; repositories never import React. Replace the LLM by replacing the provider — not the architecture.
+
 ## The complete route
 
 ```text
@@ -11,9 +34,9 @@ owner text / microphone
        |
 conversation coordinator ---- read user preferences + recent references
        |                           |
-       |                  model proposes intent or a plan
+       |                  Faculty proposes intent or a plan
        |
-       +-- conversation --> response frame --> approved words --> text / speech
+       +-- conversation --> ResponseFrame --> approved words --> text / speech
        |
        +-- show/hide ------> local view intent (no task mutation)
        |
@@ -45,19 +68,23 @@ The browser is a window. Closing the window must not close the workshop. A serve
 | Part | Existing seam | Planned addition | Owner of changes |
 |---|---|---|---|
 | Composition | `server/app.ts` | instantiate WorkRepository, WorkCoordinator, health and learning workers once | app root only |
-| Conversation | `server/http/routes/conversation.ts`, `server/cognition/` | `server/conversation/coordinator.ts` and response frame | B06 |
+| Conversation | `server/http/routes/conversation.ts`, `server/cognition/` | `server/conversation/coordinator.ts` and ResponseFrame | B06 |
 | Work state | `server/persistence/` | `server/work/contracts.ts`, `repository.ts` | B03 |
 | Work execution | `server/actions/`, `server/tasks/` | `server/work/coordinator.ts` | B04 |
 | Tools | `server/tools/`, `server/actions/registry.ts` | work-tool adapter and artifact/source tools | B05 |
 | Read API | `server/http/` | `server/http/routes/work.ts` | B07 |
 | Realtime | `server/events/`, `server/realtime/` | per-job versioned projection | B07 |
 | UI | `src/ui/App.tsx`, `Presence.tsx` | `src/ui/WorkView.tsx`, `src/state/useWork.ts` | B07 |
-| Models | `server/llm/types.ts`, `gemini.ts` | role router and optional local adapter | B08 |
+| Models | `server/llm/types.ts`, `gemini.ts` | `server/llm/provider.ts`, `router.ts` | B08 |
 | Voice | `server/voice/live/`, `src/lib/audio/` | response-ID-aware streaming path | B08 |
 | Learning | `server/learning/`, `server/memory/` | correction and skill-evaluation records | B09 |
 | Diagnosis | `server/autonomic/`, events | `server/health/` | B10 |
 
 `server/conversations/` remains the existing history repository. The planned singular `server/conversation/` owns coordination, not a second history store. If renaming for clarity, do it as a separate recorded refactor, not while implementing behavior.
+
+## Faculty contract
+
+`server/llm/provider.ts` defines `Faculty` and `FacultyProvider`. Every model — hosted or local — implements the same interface. `server/llm/router.ts` selects a faculty by `FacultyRole` (reason/decide/respond/learn/live), budget and mode. On timeout/quota it returns a bounded `unknown` or heuristic result; it never silently switches to a paid route. Swapping the provider does not change `server/app.ts` call sites.
 
 ## Interfaces to implement and test
 

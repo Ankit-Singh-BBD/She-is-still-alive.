@@ -2,9 +2,11 @@
 
 ## Review boundary
 
-Static repository review dated 2026-09-09. Baseline revision: `52b40fb1193781974e5c4c8105400ca97e296261`. The v2 documentation change does not modify application code. No build, test run, browser session, real-provider call or hardware benchmark was executed as part of this documentation update. Historical test counts and claims in old prose are not fresh evidence.
+Static repository review dated 2026-09-10. Branch: `docs-rewrite` from `9651afd675a10a9f73d6294e5d4b330f541fbcde` (main). This v3 documentation rewrite modifies Markdown and JSON only — no application source, tests, migrations or config were changed. No build, test run, browser session, real-provider call or hardware benchmark was executed as part of this change. Historical test counts and claims in old prose are not fresh evidence.
 
-The complete previous two documents and the main application paths were read. This is not a claim that every source or test file received a line-by-line audit. Start [B00](build/tasks/B00.md) to measure the checked-out tree.
+B07 truncation (97 bytes) has been fixed; B08–B11 task cards have been created; the Build Book now defines the three-layer house, the Faculty seam (LLM-agnostic, swappable without architecture change), UI projection-only principles, the Mac roadmap, and the precise skill lifecycle. PLAN has been bumped to `specVersion: "3"` and CHECKPOINT's `nextAction` points to B00/s1 baseline checks. The instructions below start that measurement.
+
+The substantive code paths surveyed remain those listed below. This is not a claim that every source or test file received a line-by-line audit. Start [B00](build/tasks/B00.md) to measure the checked-out tree.
 
 ## Existing structure
 
@@ -26,6 +28,8 @@ The complete previous two documents and the main application paths were read. Th
 | `src/ui/Presence.tsx`, `Ledger.tsx` | Conversation surface and on-demand internal counts/status |
 | `public/sw.js` | Shell caching; not an autonomous background worker or offline assistant |
 
+Planned additions (not yet code): `server/llm/provider.ts` + `router.ts` (Faculty seam, B08), `server/work/` (B03–B04), `server/health/` (B10), `server/conversation/coordinator.ts` + `ResponseFrame` (B06), `server/http/routes/work.ts` + `src/ui/WorkView.tsx` + `src/state/useWork.ts` + per-job SSE (B07).
+
 Fourteen numbered SQL migration files exist at this revision. New migration numbers must be allocated from the actual tree at implementation time, not from this sentence.
 
 ## Important gaps to reproduce, not just repeat
@@ -44,7 +48,7 @@ Fourteen numbered SQL migration files exist at this revision. New migration numb
 
 ## Current models: names found, suitability not established
 
-`server/config/env.ts` declares reasoning default `gemini-3.5-flash-lite` and live default `gemini-3.1-flash-live-preview`. These strings are repository facts, NOT independently verified availability, pricing or quality recommendations. The actual deployment may override them. Read [model selection](guide/04-VOICE-MODELS.md) before choosing replacements.
+`server/config/env.ts` declares reasoning default `gemini-3.5-flash-lite` and live default `gemini-3.1-flash-live-preview`. These strings are repository facts, NOT independently verified availability, pricing or quality recommendations. The actual deployment may override them. v3 adds the Faculty interface so any provider can be swapped without architecture changes — see [model selection](guide/04-VOICE-MODELS.md) and B08. Read model selection before choosing replacements.
 
 ## Run the existing application
 
@@ -61,8 +65,12 @@ npm start
 
 Inspect `.env.example`; copy it only if no local `.env` already exists. Never overwrite someone's settings. Without a configured model the existing deterministic path is limited, not equivalent to a fluent general assistant. The actual listen address comes from the running server. These are existing commands, not commands verified by this documentation update.
 
+Mac integration (planned, stages 1–4) lives in `scripts/launchd/` and a future Tauri wrapper — not in this release. See the Build Book's Mac roadmap.
+
 ## What remains pending
 
-The entire v2 acceptance process. [PLAN](build/PLAN.json) intentionally starts all tasks at `pending`. [CHECKPOINT](build/CHECKPOINT.json) starts uninitialized. Do not turn these into a second unverified status story: B01 adds evidence validation; until then follow START manually.
+The entire v3 acceptance process. [PLAN](build/PLAN.json) intentionally starts all tasks at `pending`. [CHECKPOINT](build/CHECKPOINT.json) starts uninitialized at B00/s1 with `nextAction` updated for v3. Do not turn these into a second unverified status story: B01 adds evidence validation; until then follow START manually.
 
 Old contradictions are retired: a current renderer and Ledger exist even though v1 prose said otherwise. Origin-story statements, comments and inventory prose must never substitute for live capability health. Keep an evidence-backed inventory update at each milestone; retain the review date and tested tree fingerprint.
+
+**Safety:** Never run `git reset --hard` / `git clean -fd` / `git checkout -- .` in this repository — six frontend files and three images once existed only in the git index.

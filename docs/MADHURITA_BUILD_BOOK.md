@@ -1,10 +1,12 @@
-# Madhurita Build Book v2 — a companion that actually does the work
+# Madhurita Build Book v3 — a companion that actually does the work
 
-This is the new product specification and tutorial index. It replaces v1, including its fixed twelve-stage requirement, blanket ban on diagnostic views, and claim that a prose inventory cannot become stale. Old versions remain in Git history. Existing source comments referring to Parts I–XXVIII are historical references, not instructions to restore the old design.
+This is the new product specification and tutorial index. It replaces v2, including its prose-only model/provider description and truncated B07 task card. Old versions remain in Git history. Existing source comments referring to Parts I–XXVIII are historical references, not instructions to restore the old design.
 
 **Read this like a school project:** first understand the thing, then connect one small part, test it, and write down what happened. You do not need to remember the whole book. A small model does not become a stronger model by reading this book; the build process gives it smaller jobs and checks its work.
 
-**Status:** specification written; v2 application work has NOT been performed by this documentation change. Every task starts pending. The build supervisor described here is also a deliverable, not an already-installed tool.
+**Status:** specification written; v3 application work has NOT been performed by this documentation change. Every task starts pending. The build supervisor described here is also a deliverable, not an already-installed tool.
+
+**Safety note:** Six frontend files and three UI reference images existed only in the git index at a past revision (see `.claude-omniroute` memory). Never run `git reset --hard`, `git clean -fd`, or `git checkout -- .` in this repository. Create branches, never destroy the index.
 
 ## The one-sentence goal
 
@@ -32,6 +34,77 @@ She is not a promise of consciousness, general human-level intelligence, or unli
 | [05 MEMORY & HEALTH](guide/05-MEMORY-HEALTH.md) | What does learning mean, and how does she diagnose herself? |
 | [06 EXPERIENCE & TESTS](guide/06-EXPERIENCE-TESTS.md) | What does the owner see, and what proves that it works? |
 
+## The three-layer house
+
+Madhurita's runtime is layered so one layer can be improved without rebuilding the others. Layers speak through interfaces, not direct imports of each other's internals.
+
+```
+Layer 1 — FACULTIES (dimag)
+  server/llm/provider.ts  → Faculty interface + FacultyProvider factory
+  server/llm/router.ts    → role-based routing (reason/decide/respond/learn/live)
+  server/llm/gemini.ts    → one provider implementation (replaceable)
+  Any LLM is usable if it implements the Faculty interface.
+  Modes: local-only / hybrid / quality (see 04-VOICE-MODELS).
+
+Layer 2 — COORDINATOR + WORK TABLES (durable body)
+  server/work/contracts.ts, repository.ts, coordinator.ts
+  SQLite is the single source of truth — every body part writes there.
+  All durable state: jobs, steps, artifacts, leases, outbox events.
+  Restart = resume from DB. No in-memory Map is authoritative.
+
+Layer 3 — TOOLS + HEALTH (haath/aankh)
+  server/tools/*, server/actions/registry.ts, server/health/*
+  Real adapters with independent verifiers.
+  Health probes report what is actually available right now.
+```
+
+Detail: [CONNECTIONS](guide/02-CONNECTIONS.md). Planned seams: [B08](build/tasks/B08.md), [B10](build/tasks/B10.md).
+
+## LLM-agnostic Faculty contract
+
+All language-model access goes through one interface. The rest of the application does not import `@google/genai` (or any other SDK) directly.
+
+```ts
+// Planned: server/llm/provider.ts
+interface Faculty {
+  id: string;                      // e.g. "gemini-flash", "local-qwen"
+  role: FacultyRole;               // reason | decide | respond | learn | live
+  complete(prompt: FacultyPrompt): Promise<FacultyResult>;
+}
+interface FacultyProvider { createFaculty(role: FacultyRole): Faculty; }
+type FacultyRole = 'reason' | 'decide' | 'respond' | 'learn' | 'live';
+```
+
+- **Swapping the LLM does not change the architecture.** Replace the provider implementation behind the interface.
+- **Fallback is deterministic:** on timeout/quota, the router returns a bounded `unknown` / heuristic result, not a silent paid call. Zero-paid default is enforced there.
+- **Evaluation is held-out:** a faculty is promoted only after passing held-out owner tasks (see 04-VOICE-MODELS and B08 gate).
+
+## UI principles
+
+- **Single source of truth → pure projection.** The UI reads snapshots and events from the server. It holds no durable work state. Every user intent becomes an API call → DB write → outbox event → SSE → UI update.
+- **Every interaction is an event the body knows.** Clicking "pause", closing a panel, saying "stop speaking" — each produces a server-observable record. No `onClick` that the brain never sees.
+- **Capability-driven surfaces.** The ribbon shows currently available capabilities (research, document, browser, etc.) with health dots from `HealthObservation`. What is shown depends on what is actually available and what is running.
+- **Cinematic = real progress + verified artifacts + transitions.** No invented percentages, no mock progress, no fake glow. Good typography, spatial continuity, measured phases, artifact `content_hash` badges. Effects must not hide latency or block audio.
+
+Detail: [EXPERIENCE & TESTS](guide/06-EXPERIENCE-TESTS.md). Planned UI: [B07](build/tasks/B07.md).
+
+## What "AGI-like learning" means here
+
+It is an aspiration for transfer: a lesson from one task helps a different task. This book implements a **testable skill lifecycle**, not weight training or open-ended self-modification.
+
+```
+candidate skill (from completed jobs)
+  → sandbox evaluation on HELD-OUT cases
+  → compare vs baseline
+  → gate → PROMOTE (versioned, recorded on new jobs)
+  → rollback on regression
+```
+
+- Skills are versioned recipes (conditions, tool schema versions, steps, evidence requirements). They never execute arbitrary generated code.
+- Model-weight fine-tuning is explicitly NOT in scope for this release. It would require a separate curated dataset, compute budget, evaluation and owner approval.
+
+Detail: [MEMORY & HEALTH](guide/05-MEMORY-HEALTH.md) and [B09](build/tasks/B09.md).
+
 ## Build order
 
 | Task | Result | Depends on |
@@ -50,6 +123,21 @@ She is not a promise of consciousness, general human-level intelligence, or unli
 | [B11](build/tasks/B11.md) | Integrated owner journeys and honest release report | B10 |
 
 These tasks are milestones, NOT single prompts. Each task lists small slices. The runner feeds one slice at a time. Do not ask a 3B model to implement a whole milestone in one answer.
+
+## Model names in this book
+
+Strings like `gemini-3.5-flash-lite` or `gemini-3.1-flash-live-preview` found in `.env.example` or `server/config/env.ts` are **repository examples**, not verified availability/price/quality claims. Before selecting a model, verify against the provider's current listing AND a real minimal request on the owner's authorized account, then pin the version. See [VOICE & MODELS](guide/04-VOICE-MODELS.md).
+
+## Mac integration roadmap (planned, not required for release)
+
+| Stage | What it adds | Files / mechanism |
+|---|---|---|
+| 1. Stay alive | Survive terminal close; restart on crash/reboot | `scripts/launchd/com.madhurita.plist`, `scripts/launchd/install.sh` (`launchctl load`) |
+| 2. Menu bar | Tray icon, show/hide, quit, health dot | Tauri wrapper (separate branch), talks to same `server/` HTTP |
+| 3. Hotkey | Global "talk" shortcut | Hotkey registered in wrapper, e.g. Option+Space |
+| 4. Siri bridge | "Hey Siri, ask Madhurita…" | Apple Shortcuts / AppleScript invoking HTTP |
+
+`server/` does not change for stages 1–4. No work may be started without an approved goal even when launched from Siri. This book does not promise these stages in the same release as B11.
 
 ## Rules that remain true in every chapter
 

@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "specVersion": "3",
+  "baselineRevision": "9651afd675a10a9f73d6294e5d4b330f541fbcde",
+  "statusMeaning": "All pending means v3 acceptance has not been executed, not that all underlying code is absent. v3 fixes B07 truncation, adds B08-B11, and defines the Faculty seam.",
+  "allowedStatuses": [
+    "pending",
+    "in_progress",
+    "needs_revalidation",
+    "blocked",
+    "verified"
+  ],
+  "verificationRule": "A supervisor or reviewer checks evidence against the tested tree; a builder statement cannot grant verified status.",
+  "tasks": [
+    {
+      "id": "B00",
+      "card": "tasks/B00.md",
+      "dependsOn": [],
+      "slices": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B01",
+      "card": "tasks/B01.md",
+      "dependsOn": [
+        "B00"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3",
+        "s4"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B02",
+      "card": "tasks/B02.md",
+      "dependsOn": [
+        "B01"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3",
+        "s4"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B03",
+      "card": "tasks/B03.md",
+      "dependsOn": [
+        "B02"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B04",
+      "card": "tasks/B04.md",
+      "dependsOn": [
+        "B03"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B05",
+      "card": "tasks/B05.md",
+      "dependsOn": [
+        "B04"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B06",
+      "card": "tasks/B06.md",
+      "dependsOn": [
+        "B05"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B07",
+      "card": "tasks/B07.md",
+      "dependsOn": [
+        "B06"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B08",
+      "card": "tasks/B08.md",
+      "dependsOn": [
+        "B07"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B09",
+      "card": "tasks/B09.md",
+      "dependsOn": [
+        "B08"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B10",
+      "card": "tasks/B10.md",
+      "dependsOn": [
+        "B09"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B11",
+      "card": "tasks/B11.md",
+      "dependsOn": [
+        "B10"
+      ],
+      "slices": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "status": "pending",
+      "evidence": []
+    }
+  ]
+}

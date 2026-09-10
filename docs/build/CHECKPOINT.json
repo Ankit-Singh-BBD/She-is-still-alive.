@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "state": "uninitialized",
+  "workspace": {
+    "revision": null,
+    "sourceFingerprint": null,
+    "dirtyFiles": []
+  },
+  "taskId": "B00",
+  "sliceId": "s1",
+  "phase": "read",
+  "completedSlices": [],
+  "changedFiles": [],
+  "lastCommand": null,
+  "lastExitCode": null,
+  "evidence": [],
+  "nextAction": "v3 docs rewrite applied (B07 fixed, B08-B11 created, Faculty seam defined). Inspect the actual checkout on docs-rewrite (rev 9651afd) and run B00 baseline checks: typecheck, lint, tests, build, and disposable-DB boot. No v3 implementation slices have been executed.",
+  "blocker": null,
+  "repairAttempts": 0,
+  "workerLease": null,
+  "updatedAt": null
+}

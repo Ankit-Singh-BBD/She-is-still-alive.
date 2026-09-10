@@ -4,8 +4,9 @@ node_modules/
 
 # Production builds
 dist/
-build/
+/build/
 coverage/
+!docs/build/
 
 # Environment files
 .env
