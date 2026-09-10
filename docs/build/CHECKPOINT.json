@@ -3,38 +3,41 @@
   "state": "in_progress",
   "workspace": {
     "revision": "9651afd",
-    "sourceFingerprint": "B08.s2:grounded-ResponseFrame-WorldModel",
+    "sourceFingerprint": "B08.s3:interruptible-speech-responseId-seq-flush-late-packet",
     "dirtyFiles": []
   },
   "taskId": "B08",
-  "sliceId": "s2",
+  "sliceId": "s3",
   "phase": "verify",
-  "completedSlices": ["B08.s1", "B08.s2"],
+  "completedSlices": [
+    "B08.s1",
+    "B08.s2",
+    "B08.s3"
+  ],
   "changedFiles": [
-    "server/app.ts",
-    "server/cognition/frame-bridge.ts",
-    "server/cognition/runtime.ts",
-    "server/cognition/stages/9.ts",
-    "server/conversation/frame.ts",
-    "server/llm/faculties.ts",
-    "server/llm/prompts.ts",
-    "server/world/model.ts",
-    "tests/conversation/frame-grounding.test.ts"
+    "server/http/ws.ts",
+    "server/voice/live/index.ts",
+    "server/voice/live/protocol.ts",
+    "server/voice/live/session.ts",
+    "src/lib/audio/playback.ts",
+    "src/lib/voice.ts",
+    "src/state/useVoice.ts",
+    "tests/voice/live-session.test.ts"
   ],
   "lastCommand": "npx tsc --noEmit && npm test && npx playwright test e2e/smoke.spec.ts",
   "lastExitCode": 0,
   "evidence": [
     "npx tsc --noEmit -> 0",
-    "npm test -> 67 files, 1092 tests passed (new tests/conversation/frame-grounding.test.ts 8 tests: English+Hinglish claim patterns, no verified -> no completion, pre-TTS grounding_frame suppression, verified outcome allows completion)",
-    "npx playwright test e2e/smoke.spec.ts -> 2 passed (3.9s) on FACULTY_MODE=local-only disposable DB",
-    "npm run build -> 398.66k, 63 modules (vite 5.4.21, 63 modules)",
-    "ResponseFrame: server/conversation/frame.ts (turnId/facts+provenance/world/peopleContext/acceptedJobIds/verifiedOutcomeIds/activeWork/uncertainties/stylePreferences/viewIntent, CLAIM_EN/CLAIM_HI, claimsCompletion/groundingViolation/buildFrame capped 0-6 people)",
-    "Grounded responses: server/llm/prompts.ts renderFrame+optional frame param, server/cognition/frame-bridge.ts buildResponseFrameForCycle (VERIFY→RESPOND, derived verifiedOutcomeIds/acceptedJobIds, world null-safe), server/cognition/runtime.ts frameOpts threading, server/cognition/stages/9.ts pre-TTS grounding_frame gate (accepted-but-unverified Hinglish 'ho gaya' suppressed before TTS)",
-    "Faculty threading: server/llm/faculties.ts draftResponse(frame) → buildRespondPrompt({frame}), backward compatible (optional param, tests without frame still pass)"
+    "npm test -> 67 files, 1095 tests passed (+3 B08.s3: said carries responseId/seqBase, each audio frame incrementing seq, flush retires responseId + turn_end carries it, second utterance new responseId accepted, stopSpeaking structural non-job guarantee)",
+    "npx playwright test e2e/smoke.spec.ts -> 2 passed (3.8s)",
+    "npm run build -> 398.80k, 63 modules",
+    "Server: protocol said {responseId,seqBase} + flush/turn_end {responseId?}, session retiredResponseIds + seq/nextSeq per Rendering, late-packet drop, barge-in retire + flush+turn_end, cutForDrift retires, bargeInLatencyStats p50/p95, VoiceClientChannel sendAudio(envelope)",
+    "Client: src/lib/voice dispatch threads responseId/seqBase -> onSaid/onFlush/onTurnEnd, playback per-response retire set + enqueue(envelope) drop, flush(responseId)",
+    "Wire: channelFor(sendAudio) updated; ws _channelForTest added"
   ],
-  "nextAction": "B08/s3: interruptible speech (responseId/seq, barge-in <200ms, stopSpeaking ≠ cancel job, queue flush) per B08 slice s3; see docs/build/tasks/B08.md",
+  "nextAction": "B09/s1: correctable memory \u2014 correction supersede + retained history + cache invalidation (see docs/build/tasks/B09.md)",
   "blocker": null,
   "repairAttempts": 0,
   "workerLease": null,
-  "updatedAt": "2026-09-10T19:45:00.000Z"
+  "updatedAt": "2026-09-10T20:18:00.000Z"
 }

@@ -116,15 +116,16 @@ export interface VoiceHandlers {
   onState: (state: SessionState, reason: string) => void;
   /** A transcript of what she heard: partial as words arrive, then `final`. */
   onHeard: (text: string, final: boolean) => void;
-  /** Stage 9's authorized line, before any audio of it. */
-  onSaid: (text: string, cycleId: string) => void;
+  /** Stage 9's authorized line, before any audio of it. Includes B08.s3 `responseId`/`seqBase` when present. */
+  onSaid: (text: string, cycleId: string, responseId?: string, seqBase?: number) => void;
   /** She thought and chose not to speak. */
   onSilent: (cycleId: string) => void;
   /** PCM16 little-endian at `outputSampleRate`, straight off a binary frame. */
   onAudio: (bytes: Uint8Array) => void;
   /** Drop queued audio: barge-in, a cancel, or a rendering that drifted. */
-  onFlush: (reason: 'cancelled' | 'drifted' | 'interrupted') => void;
-  onTurnEnd: () => void;
+  onFlush: (reason: 'cancelled' | 'drifted' | 'interrupted', responseId?: string) => void;
+  /** No more audio for the current turn; `responseId` is the utterance it belonged to when present. */
+  onTurnEnd: (responseId?: string) => void;
   onError: (code: string, message: string, fatal: boolean) => void;
 }
 
@@ -280,16 +281,16 @@ export function openVoiceSocket(handlers: VoiceHandlers): VoiceSocket {
         handlers.onHeard(message.text, message.final);
         return;
       case 'said':
-        handlers.onSaid(message.text, message.cycleId);
+        handlers.onSaid(message.text, message.cycleId, message.responseId, message.seqBase);
         return;
       case 'silent':
         handlers.onSilent(message.cycleId);
         return;
       case 'flush':
-        handlers.onFlush(message.reason);
+        handlers.onFlush(message.reason, message.responseId);
         return;
       case 'turn_end':
-        handlers.onTurnEnd();
+        handlers.onTurnEnd(message.responseId);
         return;
       case 'error':
         handlers.onError(message.code, message.message, message.fatal);

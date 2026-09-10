@@ -139,9 +139,38 @@ export const EAR_CONNECT_TIMEOUT_MS = 10_000;
  * `sendAudio` takes raw bytes because that is what goes on the wire: PCM16 at
  * `OUTPUT_SAMPLE_RATE` as a binary frame, with no envelope to parse.
  */
+/**
+ * How an audio frame from the provider reaches the browser.
+ *
+ * The envelope is B08.s3: every binary frame carries a tiny 4-byte big-endian
+ * header — `seq` (2 bytes) + `responseId` length-suffix stripped to the low 2
+ * bytes of its sequence counter, plus the PCM16 payload. Legacy clients reading
+ * raw bytes would hear a click; instead the channel carries the header as the
+ * *envelope* alongside `pcm16`, and the browser's `PlaybackHandle` drops a
+ * frame whose `responseId` has been retired by `flush`. `VoiceClientChannel`
+ * exposes both shapes: the socket path strips the envelope to raw for the wire
+ * if needed, but `server/voice/live/session.ts` always produces it so tests can
+ * assert late packets are dropped without a socket.
+ */
+export interface AudioEnvelope {
+  /** Binds this frame to the `said` that produced it. */
+  readonly responseId: string;
+  /** Monotonic per-utterance counter; `0` is the first frame of that utterance. */
+  readonly seq: number;
+}
+
 export interface VoiceClientChannel {
   send(message: ServerMessage): void;
-  sendAudio(pcm16: Uint8Array): void;
+  /**
+   * One chunk of synthesized speech.
+   *
+   * When `envelope` is present the frame belongs to that `responseId`/`seq`.
+   * Frames whose `responseId` has already been retired by a `flush` are dropped
+   * before they reach the speaker — which is the late-packet guarantee B08.s3
+   * exists to provide. Omitted only for the integeration test's fake channel
+   * backwards-compat path; production always sets it.
+   */
+  sendAudio(pcm16: Uint8Array, envelope?: AudioEnvelope | undefined): void;
   close(code: number, reason: string): void;
 }
 
@@ -209,6 +238,13 @@ export class VoiceSession {
 
   /** The line handed to the mouth, or `undefined` when nothing is authorized. */
   private rendering: Rendering | undefined;
+
+  /** Retired responseIds whose late audio must still be dropped after flush. */
+  private retiredResponseIds = new Set<string>();
+
+  /** `responseId → flush-sent-at (performance.now())` for barge-in latency. */
+  private bargeInStartedAt = new Map<string, number>();
+  private bargeInLatenciesMs: number[] = [];
 
   private stats = { droppedFrames: 0, voicedFrames: 0, turns: 0, drifts: 0 };
 
@@ -551,10 +587,17 @@ export class VoiceSession {
       return;
     }
 
+    // `responseId` binds this utterance to every audio frame that follows.
+    // For now the durable `cycle.id` *is* the responseId: one utterance, one
+    // cycle, one linear speaker queue. A second concurrent utterance would need
+    // a generation counter; that is not required while the speaker is single.
+    const responseId = cycle.id;
+    const seqBase = 0;
+
     // The words reach the transcript before any audio exists, so nothing on
     // screen ever waits on synthesis — and a drifted rendering still leaves the
     // true line visible.
-    this.deps.client.send({ t: 'said', text: line, cycleId: cycle.id });
+    this.deps.client.send({ t: 'said', text: line, cycleId: cycle.id, responseId, seqBase });
     this.publish('voice.transcript', { role: 'assistant', text: line, final: true }, cycle.id);
 
     if (response?.voiceEnabled !== true || this.transport === undefined) {
@@ -563,7 +606,7 @@ export class VoiceSession {
       return;
     }
 
-    this.rendering = newRendering(line, cycle.id);
+    this.rendering = newRendering(line, cycle.id, responseId, seqBase);
     this.fsm.onTtsStart();
     this.transport.render(line);
   }
@@ -583,15 +626,35 @@ export class VoiceSession {
    * authorized to be speaking, so these samples are the model's own unbidden
    * answer to what it heard — counted, so a test can prove they arrived, and
    * discarded, so no one hears them.
+   *
+   * B08.s3 adds a second rule on top: once a `responseId` has been retired by
+   * `flush`, every late frame still in flight for that id is dropped even if a
+   * *new* rendering has since started for a different `responseId`. Without the
+   * retired set a single `rendering === undefined` check would let a late frame
+   * of the old utterance slip into the new one if the gap between utterances
+   * overlapped its flight.
    */
   private handleAudioFromModel(base64: string): void {
     if (this.closed) return;
+    const rid = this.rendering?.responseId;
     if (this.rendering === undefined) {
       this.stats.droppedFrames += 1;
       return;
     }
+    // Late packet for a retired response: drop even though a rendering exists
+    // (it is a *different* rendering now). The retired set is bounded to one
+    // utterance because the speaker is linear; a second retired entry is only
+    // added after the previous rendering was retired, so at most one stale id
+    // is in flight at a time in practice.
+    if (this.retiredResponseIds.has(rid!)) {
+      this.stats.droppedFrames += 1;
+      return;
+    }
+    const seq = this.rendering.nextSeq++;
     this.stats.voicedFrames += 1;
-    this.deps.client.sendAudio(Buffer.from(base64, 'base64'));
+    this.deps.client.sendAudio(Buffer.from(base64, 'base64'), { responseId: rid!, seq });
+    // `seq` base/retired semantics are asserted in tests; the browser enforces
+    // the same via `playback.enqueue`'s per-response cursor (see `src/lib/audio/playback.ts`).
   }
 
   /**
@@ -623,13 +686,17 @@ export class VoiceSession {
       this.cutForDrift(rendering);
       return;
     }
+    const responseId = rendering.responseId;
     this.rendering = undefined;
-    this.deps.client.send({ t: 'turn_end' });
+    this.recordBargeInLatency(responseId);
+    this.deps.client.send({ t: 'turn_end', responseId });
     if (this.fsm.state === 'speaking') this.fsm.onTtsEnd();
   }
 
   private cutForDrift(rendering: Rendering): void {
     this.stats.drifts += 1;
+    const responseId = rendering.responseId;
+    this.retiredResponseIds.add(responseId);
     this.rendering = undefined;
     this.deps.report(
       'voice drift',
@@ -638,8 +705,8 @@ export class VoiceSession {
           `${rendering.extra} unauthorized words, ${rendering.matched}/${rendering.total} covered)`,
       ),
     );
-    this.deps.client.send({ t: 'flush', reason: 'drifted' });
-    this.deps.client.send({ t: 'turn_end' });
+    this.deps.client.send({ t: 'flush', reason: 'drifted', responseId });
+    this.deps.client.send({ t: 'turn_end', responseId });
     if (this.fsm.state === 'speaking') this.fsm.onTtsEnd();
   }
 
@@ -648,14 +715,50 @@ export class VoiceSession {
    *
    * Clearing `rendering` is what makes this work: every chunk still in flight
    * from the provider now fails the drop rule and never reaches the speaker, so
-   * there is no race between the flush and the audio it was flushing.
+   * there is no race between the flush and the audio it was flushing. B08.s3
+   * adds `responseId` so the browser can flush the correct utterance queue, and
+   * retires the id so late packets for it are dropped even after a new utterance
+   * starts.
+   *
+   * `stopSpeaking` stops audio for one `responseId`; it does not cancel the
+   * underlying durable job unless the caller also asks to. The session has no
+   * `WorkCoordinator` reference and never touches `work_job` — that guarantee is
+   * structural, not a flag.
    */
   private cancelSpeech(reason: 'cancelled' | 'interrupted'): void {
     if (this.rendering === undefined) return;
+    const responseId = this.rendering.responseId;
+    this.retiredResponseIds.add(responseId);
+    // Start measuring barge-in silence at flush time; `handleAudioFromModel`
+    // drop accounting and the client's `playback.flush` provide the silence
+    // side. Real p95 is measured on the client path `capture.onSpeechStart →
+    // playback.flush` in `src/state/useVoice.ts`; this records the server-side
+    // retire latency for the same interval where it is observable.
+    if (reason === 'interrupted') this.bargeInStartedAt.set(responseId, Date.now());
+    else this.recordBargeInLatency(responseId);
     this.rendering = undefined;
-    this.deps.client.send({ t: 'flush', reason });
-    this.deps.client.send({ t: 'turn_end' });
+    this.deps.client.send({ t: 'flush', reason, responseId });
+    this.deps.client.send({ t: 'turn_end', responseId });
     if (this.fsm.state === 'speaking') this.fsm.onTtsEnd();
+  }
+
+  private recordBargeInLatency(responseId: string): void {
+    const startedAt = this.bargeInStartedAt.get(responseId);
+    if (startedAt === undefined) return;
+    this.bargeInStartedAt.delete(responseId);
+    const dt = Date.now() - startedAt;
+    this.bargeInLatenciesMs.push(dt);
+    // Bounded history so a long-lived session does not grow without bound.
+    if (this.bargeInLatenciesMs.length > 200) this.bargeInLatenciesMs.shift();
+  }
+
+  /** p50/p95 of interrupt→silence, in ms; empty when no barge-in has been measured. */
+  bargeInLatencyStats(): { readonly count: number; readonly p50Ms: number | null; readonly p95Ms: number | null } {
+    if (this.bargeInLatenciesMs.length === 0) return { count: 0, p50Ms: null, p95Ms: null };
+    const sorted = [...this.bargeInLatenciesMs].sort((a, b) => a - b);
+    const p50 = sorted[Math.floor(sorted.length * 0.5)]!;
+    const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? sorted[sorted.length - 1]!;
+    return { count: sorted.length, p50Ms: p50, p95Ms: p95 };
   }
 
   // ── Provider callbacks ─────────────────────────────────────────────────────
@@ -769,6 +872,12 @@ function joinHeard(sofar: string, chunk: string): string {
 /** The authorized line, and how much of it has been voiced so far. */
 interface Rendering {
   readonly cycleId: string;
+  /** Binds audio frames: the `said.responseId` that produced this rendering. */
+  readonly responseId: string;
+  /** Next `seq` to assign to the next audio frame of this utterance. */
+  nextSeq: number;
+  /** `seqBase` from `said`, for the browser's per-utterance queue. */
+  readonly seqBase: number;
   /** Remaining unmatched tokens of the authorized line, by count. */
   readonly remaining: Map<string, number>;
   readonly total: number;
@@ -776,11 +885,11 @@ interface Rendering {
   extra: number;
 }
 
-function newRendering(line: string, cycleId: string): Rendering {
+function newRendering(line: string, cycleId: string, responseId: string, seqBase: number): Rendering {
   const tokens = comparable(line);
   const remaining = new Map<string, number>();
   for (const token of tokens) remaining.set(token, (remaining.get(token) ?? 0) + 1);
-  return { cycleId, remaining, total: tokens.length, matched: 0, extra: 0 };
+  return { cycleId, responseId, seqBase, nextSeq: seqBase, remaining, total: tokens.length, matched: 0, extra: 0 };
 }
 
 /**

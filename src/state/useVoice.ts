@@ -198,13 +198,15 @@ export function useVoice({ active }: VoiceOptions): VoiceReading {
         // transcript that stage 12 committed.
         setHeard(final ? '' : text);
       },
-      onSaid: (text) => {
+      onSaid: (text, _cycleId, _responseId) => {
         if (!live) return;
         setSaying(text);
         setSpeaking(true);
         // The words are committed — stage 12 ran inside the cycle that produced them
         // — so a turn waiting on this one can read the transcript now, before any
-        // audio of it exists.
+        // audio of it exists. Barge-in queues are per-responseId on the playback
+        // side; `_responseId` becomes the key that `onAudio` and `onFlush` must
+        // thread through when the wire carries it.
         settle();
       },
       onSilent: () => {

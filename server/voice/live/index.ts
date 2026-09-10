@@ -41,6 +41,7 @@ export {
   TRANSCRIPT_GRACE_MS,
   tokenize,
   VoiceSession,
+  type AudioEnvelope,
   type VoiceClientChannel,
   type VoiceEar,
   type VoiceSessionDeps,

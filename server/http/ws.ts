@@ -303,6 +303,11 @@ function channelFor(ws: WebSocket): VoiceClientChannel {
   };
 }
 
+/** Visible for tests: wraps a `VoiceClientChannel` to expose `onFlush` barrier timing. */
+export function _channelForTest(ws: WebSocket): VoiceClientChannel {
+  return channelFor(ws);
+}
+
 /**
  * Sends, or does not.
  *

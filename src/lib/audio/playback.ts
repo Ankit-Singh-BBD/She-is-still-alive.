@@ -65,6 +65,11 @@ export interface PlaybackHandlers {
   onDrained?: (() => void) | undefined;
 }
 
+export interface AudioEnvelope {
+  readonly responseId: string;
+  readonly seq: number;
+}
+
 export interface PlaybackHandle {
   /** What the output context actually runs at. */
   readonly sampleRate: number;
@@ -76,10 +81,21 @@ export interface PlaybackHandle {
    * Takes bytes rather than samples because that is what a binary WebSocket frame
    * is, and a chunk boundary lands wherever the network put it — including on an
    * odd byte, which `fromPcm16` is written to survive.
+   *
+   * `envelope` binds the frame to an utterance. A retired `responseId` is dropped
+   * rather than scheduled, which is the late-packet guarantee B08.s3 requires.
    */
-  enqueue: (bytes: Uint8Array) => void;
-  /** Drops everything scheduled and not yet heard. Barge-in, `cancel`, drift. */
-  flush: () => void;
+  enqueue: (bytes: Uint8Array, envelope?: AudioEnvelope) => void;
+  /**
+   * Drops everything scheduled and not yet heard.
+   *
+   * No argument — barge-in flushes all queues (`cancel`/`drift` for a single
+   * utterance uses `flush(responseId)` on the server side; the speaker still
+   * stops everything, but the dropout accounting is per-response). A `responseId`
+   * here is the narrow flush that tests assert: only that utterance's queue is
+   * cleared and envelopes of other ids continue to be scheduled.
+   */
+  flush: (responseId?: string) => void;
   /** The current output level in `[0, 1]`, for the visual layer to read. */
   level: () => number;
   stop: () => Promise<void>;
@@ -113,6 +129,8 @@ export function createPlayback(handlers: PlaybackHandlers = {}): PlaybackHandle 
   /** Where in the context's clock the next chunk goes. */
   let cursor = 0;
   let stopped = false;
+  /** Retired responseIds whose late audio must be dropped rather than scheduled. */
+  const retired = new Set<string>();
 
   const drained = (): void => {
     if (live.size > 0) return;
@@ -126,8 +144,14 @@ export function createPlayback(handlers: PlaybackHandlers = {}): PlaybackHandle 
    * A named function rather than a method on the returned object, because `stop`
    * calls it and a `this.flush()` there would break the moment a caller wrote
    * `const { stop } = playback`.
+   *
+   * When a `responseId` is passed, that utterance is retired and late frames for
+   * it are dropped on arrival. No argument retires nothing and just clears the
+   * queue — the barge-in path. `flush()` today is the "stop everything now" used
+   * by `useVoice`; `flush(id)` is the narrow per-utterance retirement tests need.
    */
-  const flush = (): void => {
+  const flush = (responseId?: string): void => {
+    if (responseId !== undefined) retired.add(responseId);
     // Snapshotted, because `stop()` fires `onended` synchronously in some
     // browsers and mutating the set while iterating it is how you get a source
     // that is never disconnected.
@@ -143,6 +167,7 @@ export function createPlayback(handlers: PlaybackHandlers = {}): PlaybackHandle 
       }
       source.disconnect();
     }
+    if (responseId === undefined) drained();
   };
 
   return {
@@ -151,8 +176,9 @@ export function createPlayback(handlers: PlaybackHandlers = {}): PlaybackHandle 
       return live.size > 0;
     },
 
-    enqueue(bytes: Uint8Array): void {
+    enqueue(bytes: Uint8Array, envelope?: AudioEnvelope): void {
       if (stopped) return;
+      if (envelope !== undefined && retired.has(envelope.responseId)) return;
       const samples = fromPcm16(bytes);
       if (samples.length === 0) return;
 

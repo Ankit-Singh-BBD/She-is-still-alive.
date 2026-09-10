@@ -119,14 +119,37 @@ export type ServerMessage =
    * or not synthesis then succeeds — so a UI never waits on a voice to show a
    * sentence, and a drifted or interrupted rendering still leaves the true words
    * on screen.
+   *
+   * `responseId` binds this utterance to every audio frame that follows it. A
+   * later `said` replaces it; a `flush`+`turn_end` retires it. Frames arriving
+   * after the id was retired are dropped — which is the late-packet guarantee
+   * B08.s3 requires: a `flush` actually stops speech rather than merely asking
+   * the next chunk to do so.
    */
-  | { readonly t: 'said'; readonly text: string; readonly cycleId: string }
+  | {
+      readonly t: 'said';
+      readonly text: string;
+      readonly cycleId: string;
+      /** Binds subsequent audio frames to this utterance; `cycleId` for now. */
+      readonly responseId: string;
+      /** Monotonic per-utterance sequence base the audio header counts from. */
+      readonly seqBase: number;
+    }
   /** She thought and chose not to speak. A decision, not a failure. */
   | { readonly t: 'silent'; readonly cycleId: string }
   /** Drop every queued audio chunk: barge-in, or a rendering that drifted. */
-  | { readonly t: 'flush'; readonly reason: 'cancelled' | 'drifted' | 'interrupted' }
+  | {
+      readonly t: 'flush';
+      readonly reason: 'cancelled' | 'drifted' | 'interrupted';
+      /** The `responseId` the flush retires; omitted for the pre-s3 implicit single utterance. */
+      readonly responseId?: string | undefined;
+    }
   /** No more audio is coming for the current turn. */
-  | { readonly t: 'turn_end' }
+  | {
+      readonly t: 'turn_end';
+      /** The `responseId` the turn belonged to; omitted for pre-s3 implicit single utterance. */
+      readonly responseId?: string | undefined;
+    }
   /** Something failed. `fatal` means the socket is closing. */
   | {
       readonly t: 'error';
