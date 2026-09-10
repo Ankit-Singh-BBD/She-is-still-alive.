@@ -888,6 +888,11 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
       // read affect at stage 2 of *this* cycle has already landed by the time the
       // register is decided.
       respond: { ...llm, tone: (identityId: string) => personality.profileFor(identityId) },
+      // B08.s2 ResponseFrame: world snapshot + bounded people context. People Graph is
+      // consent-scoped stub (empty until B09); WorldModel snapshot is the one honest
+      // source — weather is a field modifier with TTL, not a centre. Runtime builds
+      // the frame between VERIFY (verifiedOutcomeIds) and RESPOND (grounding).
+      frame: { world: worldModel.snapshot(), peopleContext: worldModel.peopleContext(6) },
       // `memoryRepo` is passed whether or not a model is wired: stage 10's
       // deduplication is application logic, and without the repository it was
       // silently trusting within-candidate dedup alone.

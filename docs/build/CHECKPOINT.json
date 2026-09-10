@@ -3,40 +3,38 @@
   "state": "in_progress",
   "workspace": {
     "revision": "9651afd",
-    "sourceFingerprint": "B08.s1:envelope-before-WorldModel",
+    "sourceFingerprint": "B08.s2:grounded-ResponseFrame-WorldModel",
     "dirtyFiles": []
   },
   "taskId": "B08",
-  "sliceId": "s1",
+  "sliceId": "s2",
   "phase": "verify",
-  "completedSlices": ["B08.s1"],
+  "completedSlices": ["B08.s1", "B08.s2"],
   "changedFiles": [
-    ".env.example",
-    "e2e/smoke.spec.ts",
-    "playwright.config.ts",
     "server/app.ts",
-    "server/config/env.ts",
-    "server/llm/index.ts",
-    "server/llm/local.ts",
-    "server/llm/provider.ts",
-    "server/llm/router.ts",
+    "server/cognition/frame-bridge.ts",
+    "server/cognition/runtime.ts",
+    "server/cognition/stages/9.ts",
+    "server/conversation/frame.ts",
+    "server/llm/faculties.ts",
+    "server/llm/prompts.ts",
     "server/world/model.ts",
-    "tests/boot/config.test.ts",
-    "tests/llm/faculty-router.test.ts"
+    "tests/conversation/frame-grounding.test.ts"
   ],
-  "lastCommand": "npx tsc --noEmit && npm test && rm -f /tmp/madhurita-e2e.db* && npx playwright test e2e/smoke.spec.ts",
+  "lastCommand": "npx tsc --noEmit && npm test && npx playwright test e2e/smoke.spec.ts",
   "lastExitCode": 0,
   "evidence": [
     "npx tsc --noEmit -> 0",
-    "npm test -> 66 files, 1084 tests passed (tests/boot/config.test.ts pinned to gemma-4-31b-it)",
+    "npm test -> 67 files, 1092 tests passed (new tests/conversation/frame-grounding.test.ts 8 tests: English+Hinglish claim patterns, no verified -> no completion, pre-TTS grounding_frame suppression, verified outcome allows completion)",
     "npx playwright test e2e/smoke.spec.ts -> 2 passed (3.9s) on FACULTY_MODE=local-only disposable DB",
-    "npm run build -> 398.66k, 63 modules",
-    "Hosted reasoning switched to gemma-4-31b-it via same Google GenAI transport — no architecture change, local-only still zero-network `createLanguageFaculties -> undefined` honest absence (FACULTY_MODE=local-only banner), hybrid/quality pass apiKey through createGeminiTransport(model: reasoningModel) so env override without code change",
-    "Faculty seam: server/llm/provider.ts (Faculty/FacultyProvider/FacultyError/LanguageModelFaculty) + server/llm/router.ts (FacultyRouter local-only/hosted guard, no silent fallback) + server/llm/local.ts (deterministic stub)"
+    "npm run build -> 398.66k, 63 modules (vite 5.4.21, 63 modules)",
+    "ResponseFrame: server/conversation/frame.ts (turnId/facts+provenance/world/peopleContext/acceptedJobIds/verifiedOutcomeIds/activeWork/uncertainties/stylePreferences/viewIntent, CLAIM_EN/CLAIM_HI, claimsCompletion/groundingViolation/buildFrame capped 0-6 people)",
+    "Grounded responses: server/llm/prompts.ts renderFrame+optional frame param, server/cognition/frame-bridge.ts buildResponseFrameForCycle (VERIFY→RESPOND, derived verifiedOutcomeIds/acceptedJobIds, world null-safe), server/cognition/runtime.ts frameOpts threading, server/cognition/stages/9.ts pre-TTS grounding_frame gate (accepted-but-unverified Hinglish 'ho gaya' suppressed before TTS)",
+    "Faculty threading: server/llm/faculties.ts draftResponse(frame) → buildRespondPrompt({frame}), backward compatible (optional param, tests without frame still pass)"
   ],
-  "nextAction": "B08/s2: grounded ResponseFrame + WorldModel injection (weather as 15-min modifier, People Graph consent-scoped) per B08 slice s2; see docs/build/tasks/B08.md",
+  "nextAction": "B08/s3: interruptible speech (responseId/seq, barge-in <200ms, stopSpeaking ≠ cancel job, queue flush) per B08 slice s3; see docs/build/tasks/B08.md",
   "blocker": null,
   "repairAttempts": 0,
   "workerLease": null,
-  "updatedAt": "2026-09-10T19:24:00.000Z"
+  "updatedAt": "2026-09-10T19:45:00.000Z"
 }

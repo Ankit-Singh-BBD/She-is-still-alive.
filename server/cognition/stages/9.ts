@@ -76,6 +76,12 @@ export interface RespondOptions {
   llm?: ResponseFaculty | undefined;
   audit?: AuditCollector | undefined;
   /**
+   * B08.s2 pre-TTS grounding frame. When present, completion language over an
+   * empty `verifiedOutcomeIds` is suppressed to an in-progress acknowledgement
+   * before other disclosure checks — so unverified "ho gaya" never reaches TTS.
+   */
+  frame?: import('@server/conversation/frame.js').ResponseFrame | null | undefined;
+  /**
    * Her register for one caller, resolved at call time.
    *
    * Shapes only the *application-authored* lines below — the ones this file
@@ -204,7 +210,7 @@ export async function respond(
     ? await opts.llm.draftResponse({ recalled, decision, results, verification })
     : deterministicDraft(recalled, decision, results, verification, toneFor(recalled, opts));
 
-  return applyDisclosurePolicy(draft, recalled, results, verification, opts.audit);
+  return applyDisclosurePolicy(draft, recalled, results, verification, opts.audit, opts.frame ?? null);
 }
 
 /**
@@ -257,7 +263,14 @@ export function fallbackResponse(
     toneFor(recalled, opts),
     true,
   );
-  const authorized = applyDisclosurePolicy(draft, recalled, results, verification, opts.audit);
+  const authorized = applyDisclosurePolicy(
+    draft,
+    recalled,
+    results,
+    verification,
+    opts.audit,
+    opts.frame ?? null,
+  );
   return {
     ...authorized,
     disclosuresApplied: [...authorized.disclosuresApplied, RESPOND_FALLBACK],
@@ -290,6 +303,7 @@ function applyDisclosurePolicy(
   results: ActionResult[],
   verification: VerificationReport | undefined,
   audit: AuditCollector | undefined,
+  frame?: import('@server/conversation/frame.js').ResponseFrame | null,
 ): AuthorizedResponse {
   const caller = recalled.stimulus;
   const at = Date.now();
@@ -297,6 +311,36 @@ function applyDisclosurePolicy(
   const original = typeof draft?.text === 'string' ? draft.text : '';
   let text = original;
   let redacted = false;
+
+  // ── 0. B08.s2 pre-TTS grounding: completion over ungrounded frame → in-progress acknowledgement.
+  // Runs before other checks so "ho gaya" over an accepted-but-unverified job never reaches TTS.
+  // Sync check using this file's own CLAIM_PATTERN/CLAIM_PATTERN_HI — the bridge's
+  // groundingViolation is the single logical authority, this repeats the predicate for
+  // the sync pre-TTS gate without making applyDisclosurePolicy async.
+  {
+    const _FRAME = frame as unknown as { verifiedOutcomeIds?: unknown[]; acceptedJobIds?: unknown[]; activeWork?: unknown[] } | null;
+    if (_FRAME !== null && _FRAME !== undefined) {
+      const hasVerified = Array.isArray(_FRAME.verifiedOutcomeIds) && _FRAME.verifiedOutcomeIds.length > 0;
+      if (!hasVerified && claimsAnOutcome(text)) {
+        const hasAccepted =
+          (Array.isArray(_FRAME.acceptedJobIds) && _FRAME.acceptedJobIds.length > 0) ||
+          (Array.isArray(_FRAME.activeWork) && _FRAME.activeWork.length > 0);
+        text = hasAccepted
+          ? 'I have got that and am working on it — I will let you know when it is actually done.'
+          : 'I hear you — I have not completed that yet, and I will tell you when it is.';
+        redacted = true;
+        policies.add('grounding_frame');
+        audit?.record({
+          actorId: caller.identityId,
+          action: 'disclosure:suppress_ungrounded_completion',
+          resource: 'response',
+          decision: 'generalized',
+          reason: 'ResponseFrame has no verifiedOutcomeIds for completion claim',
+          at,
+        });
+      }
+    }
+  }
 
   // ── 2. Unverified-claim suppression ──
   //

@@ -57,6 +57,7 @@ import type {
 
 import { CycleGate } from './gate.js';
 import type { CycleLease, InterruptionCause } from './gate.js';
+import { buildResponseFrameForCycle } from './frame-bridge.js';
 import { perceive } from './stages/1.js';
 import { identify, effectiveCaller } from './stages/2.js';
 import { recall } from './stages/3.js';
@@ -150,6 +151,17 @@ export interface CognitiveRuntimeOptions {
   act?: ActOptions | undefined;
   verify?: VerifyOptions | undefined;
   respond?: RespondOptions | undefined;
+  frame?: {
+    facts?: { text: string; provenance: 'verified' | 'observed' | 'inferred'; source?: string }[] | undefined;
+    world?: import('@server/conversation/frame.js').ResponseFrame['world'] | null | undefined;
+    peopleContext?: string[] | undefined;
+    acceptedJobIds?: string[] | undefined;
+    verifiedOutcomeIds?: string[] | undefined;
+    activeWork?: import('@server/conversation/frame.js').ResponseFrame['activeWork'] | undefined;
+    uncertainties?: string[] | undefined;
+    stylePreferences?: import('@server/conversation/frame.js').ResponseFrame['stylePreferences'] | undefined;
+    viewIntent?: import('@server/conversation/frame.js').ResponseFrame['viewIntent'] | undefined;
+  } | undefined;
   learn?: LearnOptions | undefined;
   update?: UpdateOptions | undefined;
   persist?: PersistOptions | undefined;
@@ -211,6 +223,8 @@ export class CognitiveRuntime {
   private readonly boundIdentity: Identity | undefined;
   private readonly verifyOpts: VerifyOptions;
   private readonly respondOpts: RespondOptions;
+  /** Optional ResponseFrame source (B08.s2): world + people + verified/accepted ids wired from App. */
+  private readonly frameOpts: NonNullable<CognitiveRuntimeOptions['frame']>;
   private readonly learnOpts: LearnOptions;
   private readonly updateOpts: UpdateOptions;
   private readonly persistOpts: PersistOptions;
@@ -265,6 +279,7 @@ export class CognitiveRuntime {
     };
     this.gate = options.gate ?? new CycleGate();
     this.onCycle = options.onCycle;
+    this.frameOpts = (options.frame ?? {}) as NonNullable<CognitiveRuntimeOptions['frame']>;
     this.advanced = options.advanced;
   }
 
@@ -531,6 +546,31 @@ export class CognitiveRuntime {
 
     const verifiedResults = verification?.results ?? actionResults;
 
+    // ── B08.s2 ResponseFrame: built between VERIFY and RESPOND, so stage 9
+    // writes from verified facts + world snapshot rather than guesses. When
+    // `frameOpts` is absent (tests without env, early slices) the frame is null
+    // and prompts render without the block — no wording changes.
+    const verifiedOutcomeIds = verifiedResults
+      .filter((r) => r.verified)
+      .map((r) => r.toolId)
+      // stable dedup: coordinator-style work may later emit `work.create:uuid`
+      // ids; toolId carries the outcome provenance for grounding. Kept minimal
+      // per B08.s2 — no synthetic job ids invented here.
+      .filter((v, i, a) => a.indexOf(v) === i);
+    const acceptedJobIds = actionResults
+      .filter((r) => r.attempted && !r.verified)
+      .map((r) => r.toolId)
+      .filter((v, i, a) => a.indexOf(v) === i);
+    const frame = buildResponseFrameForCycle({
+      cycleId,
+      recalled,
+      verification,
+      verifiedOutcomeIds,
+      acceptedJobIds,
+      activeWork: verifiedOutcomeIds.length === 0 ? acceptedJobIds.map((id) => ({ id, status: 'accepted' })) : [],
+      frameOpts: this.frameOpts,
+    });
+
     // Stage 9 records its disclosure decisions into the cycle's audit buffer.
     // Stage 12 (P10) flushes them to `audit_log` together with the rest of the
     // cycle artifacts in one transaction.
@@ -543,6 +583,7 @@ export class CognitiveRuntime {
         respond(recalled, authorizedDecision, verifiedResults, verification, {
           ...this.respondOpts,
           audit,
+          ...(frame !== null ? { frame } : {}),
         }),
       undefined,
     );

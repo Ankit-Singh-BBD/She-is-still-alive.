@@ -217,9 +217,13 @@ export class LanguageFaculties implements DecideFaculty, ResponseFaculty, Learni
     decision: AuthorizedDecision;
     results: ActionResult[];
     verification: VerificationReport | undefined;
+    frame?: import('@server/conversation/frame.js').ResponseFrame | null | undefined;
   }): Promise<{ text: string; voicePreferred?: boolean | undefined }> {
     const tone = this.tone?.(input.recalled.stimulus.identityId) ?? '';
-    const wire = await this.ask('RESPOND', responseSchema, buildRespondPrompt(input), tone);
+    const prompt = input.frame
+      ? buildRespondPrompt({ recalled: input.recalled, decision: input.decision, results: input.results, verification: input.verification, frame: input.frame ?? undefined })
+      : buildRespondPrompt({ recalled: input.recalled, decision: input.decision, results: input.results, verification: input.verification });
+    const wire = await this.ask('RESPOND', responseSchema, prompt, tone);
     return { text: wire.text, voicePreferred: wire.voicePreferred };
   }
 

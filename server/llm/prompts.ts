@@ -36,6 +36,7 @@ import type {
   UnderstandingProposal,
   VerificationReport,
 } from '@server/cognition/types.js';
+import type { ResponseFrame } from '@server/conversation/frame.js';
 
 /**
  * Who she is. Prepended to every stage instruction.
@@ -381,11 +382,43 @@ function renderTools(tools: readonly ToolSpec[]): string {
   ].join('\n');
 }
 
+function renderFrame(frame: ResponseFrame | undefined): string {
+  if (!frame) return '';
+  const lines: string[] = ['World + people (frame — each field may be unknown):'];
+  if (frame.world) {
+    const w = frame.world;
+    const loc =
+      w.location !== null && typeof w.location === 'object' && 'label' in w.location && typeof (w.location as { label?: unknown }).label === 'string'
+        ? String((w.location as { label: unknown }).label)
+        : w.location !== null && w.location !== undefined
+          ? JSON.stringify(w.location)
+          : 'unknown';
+    lines.push(`- time: ${w.time.timeOfDay} (${w.time.basis}, freshness ${w.freshness.time})`);
+    lines.push(`- location: ${loc} [${w.freshness.location}]`);
+    lines.push(`- weather: ${JSON.stringify(w.weather)} [${w.freshness.weather}]`);
+  } else {
+    lines.push('- world: unknown (no snapshot wired)');
+  }
+  if (frame.peopleContext.length > 0) lines.push(`- people: ${frame.peopleContext.join(' | ')}`);
+  else lines.push('- people: none in frame');
+  if (frame.facts.length > 0) {
+    lines.push(`- facts: ${frame.facts.map((f) => `[${f.provenance}] ${f.text}`).join(' | ')}`);
+  }
+  if (frame.verifiedOutcomeIds.length > 0) lines.push(`- verified outcomes: ${frame.verifiedOutcomeIds.join(', ')}`);
+  else lines.push('- verified outcomes: none — do not claim completion');
+  if (frame.acceptedJobIds.length > 0) lines.push(`- accepted jobs: ${frame.acceptedJobIds.join(', ')} (in-progress, not completed)`);
+  if (frame.activeWork.length > 0) lines.push(`- active work: ${frame.activeWork.map((w) => `${w.id}:${w.status}`).join(', ')}`);
+  if (frame.uncertainties.length > 0) lines.push(`- uncertainties: ${frame.uncertainties.join('; ')}`);
+  if (frame.stylePreferences.addressWord) lines.push(`- address: ${frame.stylePreferences.addressWord}`);
+  return lines.join('\n');
+}
+
 export function buildRespondPrompt(input: {
   recalled: RecalledContext;
   decision: AuthorizedDecision;
   results: ActionResult[];
   verification: VerificationReport | undefined;
+  frame?: ResponseFrame | undefined;
 }): string {
   const lines = [
     renderStimulus(input.recalled.stimulus),
@@ -395,6 +428,8 @@ export function buildRespondPrompt(input: {
     renderMemory(input.recalled, true),
     '',
   ];
+  const frameBlock = renderFrame(input.frame);
+  if (frameBlock) lines.push(frameBlock, '');
 
   // On a refusal `decision.proposal` is the fallback, not what she chose. Reading
   // it here told her "what you decided: clarify" and then "that was refused" —
