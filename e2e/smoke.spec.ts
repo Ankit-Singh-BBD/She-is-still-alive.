@@ -1,12 +1,18 @@
 import { test, expect } from '@playwright/test';
+import type { APIRequestContext, APIResponse } from '@playwright/test';
 
 test.setTimeout(60_000);
 
 const BASE = 'http://127.0.0.1:3099';
 
-async function api(request: any, path: string, opts: any = {}) {
-  const r = await request.fetch(`${BASE}${path}`, opts);
-  return r;
+type ApiOptions = Parameters<APIRequestContext['fetch']>[1];
+
+async function api(
+  request: APIRequestContext,
+  path: string,
+  opts: ApiOptions = {},
+): Promise<APIResponse> {
+  return request.fetch(`${BASE}${path}`, opts);
 }
 
 test('B00 smoke — bootstrap, hello, chat, reminder persists', async ({ request }) => {
@@ -60,7 +66,9 @@ test('B00 smoke — bootstrap, hello, chat, reminder persists', async ({ request
   expect(r.ok()).toBeTruthy();
   const rem = await r.json();
   // either the schedule action fired, or the deterministic floor asked for a time — both beat a hallucinated past date
-  const sawSchedule = rem.actions?.some((a: any) => a.toolId === 'reminder.schedule' && a.attempted);
+  const sawSchedule = rem.actions?.some(
+    (a: { toolId?: string; attempted?: boolean }) => a.toolId === 'reminder.schedule' && a.attempted,
+  );
   const askedTime = typeof rem.text === 'string' && /when|kab|samay|time/i.test(rem.text);
   expect(sawSchedule || askedTime).toBeTruthy();
 

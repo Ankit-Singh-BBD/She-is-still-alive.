@@ -70,6 +70,7 @@ import { fallbackResponse, respond, type RespondOptions } from './stages/9.js';
 import { learn, type LearnOptions } from './stages/10.js';
 import { update, type UpdateOptions } from './stages/11.js';
 import { persist, type PersistOptions, type PersistInput } from './stages/12.js';
+import type { ResponseFrame } from '@server/conversation/frame.js';
 
 export interface CognitiveRuntimeOptions {
   db?: Database | undefined;
@@ -153,14 +154,14 @@ export interface CognitiveRuntimeOptions {
   respond?: RespondOptions | undefined;
   frame?: {
     facts?: { text: string; provenance: 'verified' | 'observed' | 'inferred'; source?: string }[] | undefined;
-    world?: import('@server/conversation/frame.js').ResponseFrame['world'] | null | undefined;
+    world?: ResponseFrame['world'] | null | undefined;
     peopleContext?: string[] | undefined;
     acceptedJobIds?: string[] | undefined;
     verifiedOutcomeIds?: string[] | undefined;
-    activeWork?: import('@server/conversation/frame.js').ResponseFrame['activeWork'] | undefined;
+    activeWork?: ResponseFrame['activeWork'] | undefined;
     uncertainties?: string[] | undefined;
-    stylePreferences?: import('@server/conversation/frame.js').ResponseFrame['stylePreferences'] | undefined;
-    viewIntent?: import('@server/conversation/frame.js').ResponseFrame['viewIntent'] | undefined;
+    stylePreferences?: ResponseFrame['stylePreferences'] | undefined;
+    viewIntent?: ResponseFrame['viewIntent'] | undefined;
   } | undefined;
   learn?: LearnOptions | undefined;
   update?: UpdateOptions | undefined;

@@ -43,6 +43,18 @@ export class MemoryRepository {
     this.db = db ?? getDatabase();
   }
 
+  /**
+   * The database these rows live in.
+   *
+   * Read-only, and it exists for one caller: `MemoryRetrieval` fingerprints the
+   * six tables to know whether a cached answer is still true. Exposing the handle
+   * is narrower than exposing a write hook, because a reader that can look at the
+   * tables cannot be fooled by a write that bypassed this class.
+   */
+  get database(): Database {
+    return this.db;
+  }
+
   // ==========================================
   // 1. EPISODIC MEMORY
   // ==========================================
@@ -168,8 +180,13 @@ export class MemoryRepository {
       // recall indistinguishable from something she knows, which is precisely the
       // outcome the quarantine exists to prevent. `listSemantic(id, true)` still
       // reaches them; that is the view a confirmation surface reads.
+      //
+      // 'superseded' (B09.s1) joins them for the correction contract: a preference marked
+      // superseded means a correction record points away from it to a newer assertion.
+      // Retrieving the superseded one as an active fact would surface the pre-correction
+      // belief, defeating the correction. History is retained via `includeDeleted=true`.
       conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'consolidated', 'archived') AND deleted_at IS NULL",
+        "lifecycle_status NOT IN ('soft_deleted', 'consolidated', 'archived', 'superseded') AND deleted_at IS NULL",
       );
     }
 
@@ -397,8 +414,9 @@ export class MemoryRepository {
     if (!includeDeleted) {
       // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
       // retrieval layer ignores is worse than no status at all.
+      // 'superseded' (B09.s1) excluded: correction record points away from it to newer assertion.
       conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'archived') AND deleted_at IS NULL",
+        "lifecycle_status NOT IN ('soft_deleted', 'archived', 'superseded') AND deleted_at IS NULL",
       );
     }
 
@@ -497,11 +515,20 @@ export class MemoryRepository {
     const sourceKind = params.sourceKind ?? 'conversation';
     const lifecycleStatus: LifecycleStatus = 'active';
 
-    // Check if preference already exists for identity + key
+    // Check if preference already exists for identity + key.
+    //
+    // Superseded rows are excluded (B09.s1): a correction leaves the old belief behind
+    // on purpose, and an upsert that found it first would overwrite the record of what
+    // she used to be told — turning a correction back into the overwrite it replaced.
+    // A soft-deleted row is still eligible, because writing the same preference again
+    // is how a person un-deletes one, and that behaviour predates corrections.
     const existing = this.db.raw
       .prepare(
         `
-      SELECT id FROM preference WHERE identity_id = ? AND key = ?
+      SELECT id FROM preference
+      WHERE identity_id = ? AND key = ? AND lifecycle_status != 'superseded'
+      ORDER BY stated_at DESC
+      LIMIT 1
     `
       )
       .get(params.identityId, params.key) as { id: string } | undefined;
@@ -577,6 +604,16 @@ export class MemoryRepository {
     };
   }
 
+  /**
+   * The preference currently in force for `key`, or null.
+   *
+   * A correction (B09.s1) leaves two rows behind for one `(identity_id, key)`: the
+   * superseded belief and the one that replaced it. Without the ordering below this
+   * returned whichever SQLite reached first — usually the *older* row, so the caller
+   * that asked "what does she call him now" got the answer she was corrected out of.
+   * Superseded rows sort last rather than being filtered out, so a key whose only rows
+   * are superseded still returns something to a caller inspecting history.
+   */
   getPreference(identityId: string, key: string): Preference | null {
     const row = this.db.raw
       .prepare(
@@ -586,6 +623,8 @@ export class MemoryRepository {
              expires_at, lifecycle_status, deleted_at, deleted_by
       FROM preference
       WHERE identity_id = ? AND key = ?
+      ORDER BY CASE WHEN lifecycle_status = 'superseded' THEN 1 ELSE 0 END, stated_at DESC
+      LIMIT 1
     `
       )
       .get(identityId, key) as Record<string, unknown> | undefined;
@@ -611,8 +650,9 @@ export class MemoryRepository {
     if (!includeDeleted) {
       // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
       // retrieval layer ignores is worse than no status at all.
+      // 'superseded' (B09.s1) excluded: correction record points away from it to newer assertion.
       conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'archived') AND deleted_at IS NULL",
+        "lifecycle_status NOT IN ('soft_deleted', 'archived', 'superseded') AND deleted_at IS NULL",
       );
     }
 
@@ -787,8 +827,9 @@ export class MemoryRepository {
     if (!includeDeleted) {
       // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
       // retrieval layer ignores is worse than no status at all.
+      // 'superseded' (B09.s1) excluded: correction record points away from it to newer assertion.
       conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'archived') AND deleted_at IS NULL",
+        "lifecycle_status NOT IN ('soft_deleted', 'archived', 'superseded') AND deleted_at IS NULL",
       );
     }
 
@@ -963,8 +1004,9 @@ export class MemoryRepository {
     if (!includeDeleted) {
       // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
       // retrieval layer ignores is worse than no status at all.
+      // 'superseded' (B09.s1) excluded: correction record points away from it to newer assertion.
       conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'archived') AND deleted_at IS NULL",
+        "lifecycle_status NOT IN ('soft_deleted', 'archived', 'superseded') AND deleted_at IS NULL",
       );
     }
 
@@ -1147,8 +1189,9 @@ export class MemoryRepository {
     if (!includeDeleted) {
       // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
       // retrieval layer ignores is worse than no status at all.
+      // 'superseded' (B09.s1) excluded: correction record points away from it to newer assertion.
       conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'archived') AND deleted_at IS NULL",
+        "lifecycle_status NOT IN ('soft_deleted', 'archived', 'superseded') AND deleted_at IS NULL",
       );
     }
 

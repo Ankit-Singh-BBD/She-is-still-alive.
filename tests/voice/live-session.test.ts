@@ -56,6 +56,7 @@ import {
   MAX_AUDIO_FRAME_BYTES,
   VoiceSession,
   tokenize,
+  type AudioEnvelope,
   type LiveTransport,
   type LiveTransportCallbacks,
   type ServerMessage,
@@ -69,14 +70,14 @@ const MIGRATIONS = resolve(process.cwd(), 'server/persistence/migrations');
 class Channel implements VoiceClientChannel {
   readonly sent: ServerMessage[] = [];
   readonly audio: Uint8Array[] = [];
-  readonly envelopes: (import('@server/voice/live/index.js').AudioEnvelope | undefined)[] = [];
+  readonly envelopes: (AudioEnvelope | undefined)[] = [];
   closedWith: { code: number; reason: string } | undefined;
 
   send(message: ServerMessage): void {
     this.sent.push(message);
   }
 
-  sendAudio(pcm16: Uint8Array, envelope?: import('@server/voice/live/index.js').AudioEnvelope): void {
+  sendAudio(pcm16: Uint8Array, envelope?: AudioEnvelope): void {
     this.audio.push(pcm16);
     this.envelopes.push(envelope);
   }
@@ -791,7 +792,8 @@ describe('the voice session', () => {
     const session = sessionFor();
     await session.open();
     await speak(session, 'pehla');
-    const firstId = channel.last('said')?.responseId!;
+    const firstId = channel.last('said')?.responseId;
+    expect(firstId).toBeDefined();
     ear.says.onAudio(fromProvider());
     expect(channel.audio).toHaveLength(1);
 
@@ -807,7 +809,8 @@ describe('the voice session', () => {
     await session.handle({ t: 'hush' });
     ear.says.onHeard('', true);
     await settle();
-    const secondId = channel.last('said')?.responseId!;
+    const secondId = channel.last('said')?.responseId;
+    expect(secondId).toBeDefined();
     expect(secondId).not.toBe(firstId);
     ear.says.onAudio(fromProvider());
     expect(channel.audio).toHaveLength(2); // second utterance's frame lands

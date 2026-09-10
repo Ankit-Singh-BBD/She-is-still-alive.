@@ -28,6 +28,7 @@
  */
 
 import type { ScopedMemoryItem } from '@server/memory/types.js';
+import type { ResponseFrame } from '@server/conversation/frame.js';
 import { describeOutcome } from '@server/tools/outcomes.js';
 import type {
   ActionResult,
@@ -80,7 +81,7 @@ export interface RespondOptions {
    * empty `verifiedOutcomeIds` is suppressed to an in-progress acknowledgement
    * before other disclosure checks — so unverified "ho gaya" never reaches TTS.
    */
-  frame?: import('@server/conversation/frame.js').ResponseFrame | null | undefined;
+  frame?: ResponseFrame | null | undefined;
   /**
    * Her register for one caller, resolved at call time.
    *
@@ -303,7 +304,7 @@ function applyDisclosurePolicy(
   results: ActionResult[],
   verification: VerificationReport | undefined,
   audit: AuditCollector | undefined,
-  frame?: import('@server/conversation/frame.js').ResponseFrame | null,
+  frame?: ResponseFrame | null,
 ): AuthorizedResponse {
   const caller = recalled.stimulus;
   const at = Date.now();

@@ -1,0 +1,482 @@
+<title>Madhurita — She Is Still Alive · Final Blueprint v3</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F6F4EF; --surface:#FFFFFF; --surface-2:#F0EDE8; --line:#E8E2D9;
+  --ink:#151821; --muted:#6B7280; --faint:#9AA0AE;
+  --accent:#FF7A45; --accent-2:#2CC8B7; --accent-3:#7C6CFF;
+  --ok:#0E9F6E; --warn:#D98E00; --bad:#E5484D; --unknown:#9AA0AE;
+  --shadow:0 18px 60px rgba(18,22,36,.10), 0 2px 10px rgba(18,22,36,.06);
+  --radius:18px; --radius-sm:12px;
+  --mono:'JetBrains Mono', ui-monospace, monospace;
+  --sans:'Instrument Sans', system-ui, -apple-system, sans-serif;
+  --serif:'EB Garamond', Georgia, serif;
+}
+:root:not([data-theme="light"]){} /* placeholder for guard */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#080B14; --surface:#111626; --surface-2:#151B2E; --line:#232945;
+    --ink:#E8EAF2; --muted:#9AA3B8; --faint:#6E7891;
+    --shadow:0 24px 80px rgba(0,0,0,.55), 0 2px 10px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#080B14; --surface:#111626; --surface-2:#151B2E; --line:#232945;
+  --ink:#E8EAF2; --muted:#9AA3B8; --faint:#6E7891;
+  --shadow:0 24px 80px rgba(0,0,0,.55), 0 2px 10px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); -webkit-font-smoothing:antialiased; line-height:1.5}
+a{color:inherit}
+.wrap{max-width:1120px; margin:0 auto; padding:0 20px}
+.topbar{position:sticky; top:0; z-index:30; backdrop-filter:blur(16px); background:color-mix(in srgb, var(--bg) 84%, transparent); border-bottom:1px solid var(--line)}
+.topbar-inner{display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 0}
+.brand{display:flex; align-items:center; gap:12px}
+.mark{width:32px; height:32px; border-radius:10px; background:radial-gradient(120% 120% at 30% 20%, #FFB89A 0%, #FF7A45 45%, #7C6CFF 100%); box-shadow:0 8px 24px rgba(255,122,69,.35); position:relative}
+.mark:after{content:""; position:absolute; inset:9px; border-radius:999px; background:var(--surface); opacity:.92}
+.brand h1{font:700 13px/1 var(--sans); letter-spacing:.18em; text-transform:uppercase; margin:0}
+.brand p{font:500 11px/1 var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:2px 0 0}
+.nav{display:flex; gap:8px; flex-wrap:wrap}
+.nav a{font:600 11px var(--sans); letter-spacing:.08em; text-transform:uppercase; text-decoration:none; padding:8px 10px; border-radius:999px; border:1px solid var(--line); background:var(--surface)}
+.nav a:hover{border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+
+/* hero */
+.hero{padding:28px 0 8px}
+.hero-grid{display:grid; grid-template-columns:1.15fr .85fr; gap:18px; align-items:stretch}
+@media(max-width:860px){.hero-grid{grid-template-columns:1fr}}
+.kicker{display:inline-flex; align-items:center; gap:8px; font:700 10px var(--sans); letter-spacing:.16em; text-transform:uppercase; color:var(--muted); border:1px solid var(--line); background:var(--surface); padding:6px 10px; border-radius:999px}
+.kicker i{width:7px; height:7px; border-radius:999px; background:var(--ok); box-shadow:0 0 0 6px color-mix(in srgb, var(--ok) 18%, transparent)}
+.hero-card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; position:relative}
+.hero-main{padding:28px 28px 22px}
+.hero-main h2{font-family:var(--serif); font-weight:600; font-size:42px; line-height:.95; letter-spacing:-.03em; margin:10px 0 12px; text-wrap:balance}
+.hero-main h2 em{font-weight:400; font-style:italic; color:var(--accent)}
+.hero-main .sub{color:var(--muted); font-size:15px; max-width:52ch}
+.hero-actions{display:flex; gap:10px; flex-wrap:wrap; margin-top:18px}
+.btn{appearance:none; border:1px solid var(--line); background:var(--surface); color:var(--ink); font:600 12px var(--sans); letter-spacing:.06em; text-transform:uppercase; padding:10px 14px; border-radius:999px; cursor:pointer}
+.btn.primary{background:var(--ink); color:var(--bg); border-color:var(--ink)}
+.btn:hover{transform:translateY(-1px)}
+.orb-wrap{position:relative; background:radial-gradient(120% 120% at 50% 20%, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 55%), radial-gradient(90% 90% at 80% 90%, color-mix(in srgb, var(--accent-3) 16%, transparent) 0%, transparent 60%), var(--surface-2); border-left:1px solid var(--line); display:flex; flex-direction:column; min-height:100%}
+@media(max-width:860px){.orb-wrap{border-left:none; border-top:1px solid var(--line)}}
+.orb-top{padding:18px 18px 0; display:flex; justify-content:space-between; align-items:center}
+.pill{font:700 10px var(--sans); letter-spacing:.12em; text-transform:uppercase; padding:6px 8px; border-radius:999px; border:1px solid var(--line); background:var(--surface)}
+.pill.live{border-color:color-mix(in srgb, var(--ok) 30%, var(--line)); color:var(--ok)}
+.orb{flex:1; display:grid; place-items:center; padding:18px}
+.orb-core{width:170px; height:170px; border-radius:999px; background:radial-gradient(120% 120% at 30% 25%, #FFF6F0 0%, #FFD6C2 22%, #FF9A76 48%, #7C6CFF 78%, #1A1F3A 100%); box-shadow:0 20px 60px rgba(124,108,255,.35), 0 10px 30px rgba(255,122,69,.35), inset 0 1px 0 rgba(255,255,255,.7); position:relative; animation:breathe 4.2s ease-in-out infinite}
+.orb-core:after{content:""; position:absolute; inset:14px; border-radius:999px; background:radial-gradient(100% 100% at 30% 20%, rgba(255,255,255,.9), rgba(255,255,255,0) 60%); opacity:.9}
+.orb-ring{position:absolute; inset:-14px; border-radius:999px; border:1px solid color-mix(in srgb, var(--accent) 22%, transparent); opacity:.9}
+.orb-ring.r2{inset:-26px; border-color:color-mix(in srgb, var(--accent-3) 18%, transparent); opacity:.6}
+.orb-stack{position:relative; width:170px; height:170px}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
+.orb-legend{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:14px; border-top:1px solid var(--line); background:color-mix(in srgb, var(--surface) 86%, transparent)}
+.mini{border:1px solid var(--line); background:var(--surface); border-radius:12px; padding:10px}
+.mini b{font:700 18px/1 var(--sans); letter-spacing:-.02em}
+.mini span{font:600 10px var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--muted); display:block; margin-top:4px}
+
+/* section */
+.section{padding:18px 0}
+.eyebrow{font:700 10px var(--sans); letter-spacing:.18em; text-transform:uppercase; color:var(--muted); margin:0 0 8px}
+.h3{font-family:var(--serif); font-size:30px; line-height:.95; letter-spacing:-.03em; margin:0; text-wrap:balance}
+.h3 i{font-weight:400; font-style:italic; color:var(--accent)}
+.lead{color:var(--muted); max-width:70ch; margin:8px 0 0}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow)}
+.card.pad{padding:18px}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+@media(max-width:860px){.grid2{grid-template-columns:1fr}}
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:14px}
+@media(max-width:860px){.grid3{grid-template-columns:1fr}}
+.meta{font:600 10px var(--sans); letter-spacing:.12em; text-transform:uppercase; color:var(--muted)}
+.kv{display:flex; gap:10px; flex-wrap:wrap}
+.kv span{font:600 11px var(--mono); border:1px solid var(--line); background:var(--surface-2); padding:6px 8px; border-radius:999px}
+.divider{height:1px; background:var(--line); margin:14px 0}
+.list{margin:0; padding:0; list-style:none; display:grid; gap:10px}
+.list li{display:flex; gap:10px; align-items:flex-start; font-size:13px; color:var(--muted)}
+.dot{width:8px; height:8px; border-radius:999px; margin-top:6px; flex:none; background:var(--accent)}
+.badge{font:700 10px var(--sans); letter-spacing:.08em; text-transform:uppercase; padding:5px 8px; border-radius:999px; border:1px solid var(--line); background:var(--surface-2)}
+.badge.ok{color:var(--ok); border-color:color-mix(in srgb, var(--ok) 22%, var(--line))}
+.badge.warn{color:var(--warn); border-color:color-mix(in srgb, var(--warn) 22%, var(--line))}
+.badge.bad{color:var(--bad); border-color:color-mix(in srgb, var(--bad) 22%, var(--line))}
+.badge.accent{color:var(--accent); border-color:color-mix(in srgb, var(--accent) 22%, var(--line))}
+
+/* work DAG */
+.dag{display:grid; gap:10px}
+.step{display:grid; grid-template-columns:28px 1fr auto; gap:12px; align-items:center; border:1px solid var(--line); background:var(--surface-2); border-radius:14px; padding:12px}
+.step .icon{width:28px; height:28px; border-radius:999px; display:grid; place-items:center; font:700 11px var(--sans); color:white}
+.step.ok .icon{background:var(--ok)} .step.run .icon{background:var(--accent)} .step.block .icon{background:var(--warn)} .step.fail .icon{background:var(--bad)}
+.step h4{margin:0; font:700 13px var(--sans)}
+.step p{margin:2px 0 0; font-size:12px; color:var(--muted)}
+.hash{font:500 11px var(--mono); color:var(--muted); border:1px dashed var(--line); padding:4px 6px; border-radius:8px; background:var(--surface)}
+
+/* response frame */
+.frame{border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--surface)}
+.frame-head{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); background:var(--surface-2)}
+.frame-head b{font:700 11px var(--sans); letter-spacing:.12em; text-transform:uppercase}
+.frame-grid{display:grid; grid-template-columns:1fr 1fr; gap:0}
+@media(max-width:860px){.frame-grid{grid-template-columns:1fr}}
+.frame-col{padding:14px; border-right:1px solid var(--line)}
+.frame-col:last-child{border-right:none}
+.frame-col h5{margin:0 0 8px; font:700 11px var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--muted)}
+.code{font:12px/1.5 var(--mono); background:var(--surface-2); border:1px solid var(--line); border-radius:10px; padding:10px; overflow:auto; white-space:pre-wrap; word-break:break-word}
+.say{display:grid; gap:10px}
+.say .bubble{border:1px solid var(--line); background:var(--surface-2); border-radius:14px; padding:12px 14px}
+.say .bubble.good{border-color:color-mix(in srgb, var(--ok) 22%, var(--line)); background:color-mix(in srgb, var(--ok) 8%, var(--surface-2))}
+.say .bubble.bad{border-color:color-mix(in srgb, var(--bad) 22%, var(--line)); background:color-mix(in srgb, var(--bad) 7%, var(--surface-2))}
+.say b{font:700 11px var(--sans); letter-spacing:.06em; text-transform:uppercase}
+.cite{font:500 11px var(--mono); color:var(--muted)}
+
+/* world model */
+.world{display:grid; grid-template-columns:repeat(6,1fr); gap:10px}
+@media(max-width:860px){.world{grid-template-columns:1fr 1fr}}
+.world .w{border:1px solid var(--line); background:var(--surface); border-radius:14px; padding:12px; position:relative; overflow:hidden}
+.world .w:after{content:""; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg, var(--accent), var(--accent-3)); opacity:.9}
+.world .w h5{margin:0; font:700 11px var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--muted)}
+.world .w p{margin:6px 0 0; font:600 13px var(--sans)}
+.world .w small{color:var(--muted); font-size:11px}
+.world .w.unknown{opacity:.72}
+.world .w.unknown:after{background:var(--line)}
+
+/* people */
+.people{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+@media(max-width:860px){.people{grid-template-columns:1fr}}
+.person{border:1px solid var(--line); background:var(--surface); border-radius:14px; padding:14px; display:flex; gap:12px; align-items:flex-start}
+.avatar{width:40px; height:40px; border-radius:999px; display:grid; place-items:center; font:700 12px var(--sans); color:white; flex:none}
+.avatar.pepper{background:linear-gradient(135deg, #FF9A76, #FF6B9D)} .avatar.family{background:linear-gradient(135deg, #7C6CFF, #2CC8B7)} .avatar.team{background:linear-gradient(135deg, #2CC8B7, #3A86FF)}
+.person h4{margin:0; font:700 13px var(--sans)} .person p{margin:4px 0 0; font-size:12px; color:var(--muted)}
+
+/* health */
+.health{display:grid; grid-template-columns:1.1fr .9fr; gap:14px}
+@media(max-width:860px){.health{grid-template-columns:1fr}}
+.probe{display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--line); background:var(--surface); border-radius:12px; padding:10px 12px}
+.probe b{font:600 12px var(--sans)} .probe span{font:700 10px var(--sans); letter-spacing:.08em; text-transform:uppercase; padding:4px 8px; border-radius:999px; border:1px solid var(--line)}
+.probe.ok span{color:var(--ok); border-color:color-mix(in srgb, var(--ok) 22%, var(--line)); background:color-mix(in srgb, var(--ok) 10%, transparent)}
+.probe.degraded span{color:var(--warn); border-color:color-mix(in srgb, var(--warn) 22%, var(--line)); background:color-mix(in srgb, var(--warn) 10%, transparent)}
+.probe.unknown span{color:var(--muted)}
+
+/* journey */
+.journey{border:1px solid var(--line); background:var(--surface); border-radius:14px; padding:14px}
+.journey h4{margin:0; font:700 13px var(--sans); display:flex; align-items:center; gap:8px}
+.journey p{margin:6px 0 0; color:var(--muted); font-size:12px}
+.journey .row{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
+.journey .row span{font:600 11px var(--sans); padding:6px 8px; border-radius:999px; border:1px solid var(--line); background:var(--surface-2)}
+.journey .row span.ok{color:var(--ok); border-color:color-mix(in srgb, var(--ok) 22%, var(--line))}
+
+/* timeline */
+.timeline{position:relative; display:grid; gap:10px}
+.timeline:before{content:""; position:absolute; left:15px; top:8px; bottom:8px; width:2px; background:var(--line)}
+.titem{position:relative; display:grid; grid-template-columns:32px 1fr; gap:12px; align-items:start}
+.tdot{width:32px; height:32px; border-radius:999px; display:grid; place-items:center; background:var(--surface); border:1px solid var(--line); font:700 11px var(--sans); z-index:1}
+.titem .tcard{border:1px solid var(--line); background:var(--surface); border-radius:14px; padding:12px 14px}
+.titem .tcard h4{margin:0; font:700 13px var(--sans)} .titem .tcard p{margin:4px 0 0; font-size:12px; color:var(--muted)}
+.titem .tcard .slices{margin-top:8px; display:flex; gap:6px; flex-wrap:wrap}
+.s{font:700 10px var(--sans); letter-spacing:.06em; text-transform:uppercase; padding:4px 7px; border-radius:999px; border:1px solid var(--line); background:var(--surface-2)}
+
+/* footer */
+.footer{padding:18px 0 28px; color:var(--muted); font-size:12px}
+.rule{border:1px solid var(--line); background:var(--surface); border-radius:14px; padding:12px 14px; display:flex; gap:10px; align-items:flex-start}
+.tabs{display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 0}
+.tab{font:600 12px var(--sans); padding:8px 12px; border-radius:999px; border:1px solid var(--line); background:var(--surface); cursor:pointer}
+.tab.active{background:var(--ink); color:var(--bg); border-color:var(--ink)}
+.hidden{display:none !important}
+.note{font:12px var(--sans); color:var(--muted); border-left:3px solid var(--accent); padding:8px 12px; background:color-mix(in srgb, var(--accent) 7%, var(--surface)); border-radius:0 10px 10px 0}
+</style>
+
+<div class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="brand">
+      <div class="mark"></div>
+      <div><h1>Madhurita — She is still alive</h1><p>Final Blueprint · v3 · docs-rewrite @ 4f342e9</p></div>
+    </div>
+    <nav class="nav">
+      <a href="#dekhegi">Dikhegi</a><a href="#bolegi">Bolegi</a><a href="#kaam">Kaam</a><a href="#khoobiyan">Khoobiyan</a><a href="#verified">Verified</a><a href="#banao">Build</a>
+    </nav>
+  </div>
+</div>
+
+<div class="wrap hero">
+  <div class="hero-grid">
+    <div class="hero-card hero-main">
+      <span class="kicker"><i></i> Proactive companion — continuity + competence + initiative + inspectability</span>
+      <h2>Yaad rakhti hai.<br>Kaam <em>pura</em> karti hai.<br>Jo hua wahi bolti hai.</h2>
+      <p class="sub">Madhurita koi search-box nahi — ek <b>Friday-jaisi saathi</b> hai jo goals/preferences yaad rakhti hai, permitted kaam khud karke dikhati hai, view band karne par bhi kaam jaari rakhti hai, aur har daawe ke liye <b>evidence</b> dikhati hai. Pleasant voice ≠ intelligence. Green test ≠ useful product.</p>
+      <div class="hero-actions">
+        <button class="btn primary" onclick="document.getElementById('verified').scrollIntoView({behavior:'smooth'})">Verified examples dekho</button>
+        <button class="btn" onclick="document.getElementById('kaam').scrollIntoView({behavior:'smooth'})">Kaise kaam karti hai</button>
+      </div>
+      <div class="divider"></div>
+      <div class="kv"><span>Single source: SQLite (WAL)</span><span>Faculty: swappable</span><span>Work: durable + leased</span><span>WorldModel: 6 signals</span><span>11 tasks · 38 slices</span></div>
+      <p class="cite" style="margin-top:10px">One-sentence goal — <i>remembers goals & preferences, performs permitted work, shows actual work, continues when hidden, reports honestly, learns from evidence.</i></p>
+    </div>
+    <div class="hero-card orb-wrap">
+      <div class="orb-top"><span class="pill">Presence · WebGL field</span><span class="pill live">● Live — canHear</span></div>
+      <div class="orb"><div class="orb-stack"><div class="orb-core"><div class="orb-ring"></div><div class="orb-ring r2"></div></div></div></div>
+      <div class="orb-legend">
+        <div class="mini"><b>1</b><span>Source of truth<br>SQLite</span></div>
+        <div class="mini"><b>42</b><span>Domain events<br>2 deliberately unpublished</span></div>
+        <div class="mini"><b>12→11</b><span>Cognition → Work<br>+ Faculty + WorldModel</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap section" id="dekhegi">
+  <p class="eyebrow">01 — Kaisi dikhne wali hai</p>
+  <h3 class="h3">Cinematic is <i>real progress</i> — fake glow nahi.</h3>
+  <p class="lead">UI koi alag database nahi. Har click → API call → DB write → outbox event → SSE → screen. Tab band = view band, kaam nahi. Har interaction brain ko pata hai.</p>
+  <div class="grid2" style="margin-top:14px">
+    <div class="card pad">
+      <div class="meta">Principle — Pure projection</div>
+      <b style="display:block; margin:6px 0 6px; font-size:14px">Single source of truth → UI sirf projection hai</b>
+      <ul class="list">
+        <li><span class="dot"></span><span><b>Capability ribbon</b> — upar available capabilities (research, document, browser…) health dots ke saath: <span class="badge ok">healthy</span> <span class="badge warn">degraded</span> <span class="badge bad">unavailable</span> <span class="badge">unknown</span> — source <code>HealthObservation</code>.</span></li>
+        <li><span class="dot" style="background:var(--accent-2)"></span><span><b>Har interaction event hai</b> — pause/cancel/show/hide/“stop speaking” sab server-observable record. Koi onClick jo brain na dekhe, allowed nahi.</span></li>
+        <li><span class="dot" style="background:var(--accent-3)"></span><span><b>Cinematic = transitions + verified artifacts</b> — measured phases, <code>content_hash</code> badge, spatial continuity. Invented % aur mock progress mana hai. <code>prefers-reduced-motion</code> respected.</span></li>
+      </ul>
+      <div class="note" style="margin-top:12px">Palette ka single source <code>server/environment/palette.ts</code> hai — weather sirf modifier (~15 min TTL), jab <code>unknown</code> ho to koi desaturate nahi.</div>
+    </div>
+    <div class="card pad">
+      <div class="meta">Surfaces — jab jo chahiye tab wahi</div>
+      <div style="display:grid; gap:10px; margin-top:10px">
+        <div style="display:flex; gap:8px; flex-wrap:wrap"><span class="badge accent">Idle → Presence field</span><span class="badge">Work active → WorkView</span><span class="badge">Voice → Orb pulse</span><span class="badge">Review → Ledger</span></div>
+        <div class="dag">
+          <div style="font:700 10px var(--sans); letter-spacing:.12em; text-transform:uppercase; color:var(--muted)">WorkView — live DAG (SSE, versioned, dedup cursored)</div>
+          <div class="step ok"><div class="icon">✓</div><div><h4>Fetch selected sources</h4><p>3 sources · content_hash: 9f3a…c1 · verified</p></div><span class="hash">v2 · 09:14</span></div>
+          <div class="step ok"><div class="icon">✓</div><div><h4>Extract cited claims</h4><p>7 claims with source offsets</p></div><span class="hash">v4</span></div>
+          <div class="step run"><div class="icon">◐</div><div><h4>Draft brief</h4><p>Comparing claims… not yet verified</p></div><span class="hash">v5 · running</span></div>
+          <div class="step block"><div class="icon">◑</div><div><h4>Save artifact</h4><p>Waits for verified draft — useful limited state, not fake completion</p></div><span class="badge warn">blocked</span></div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center"><span class="badge ok">Pause</span><span class="badge">Resume</span><span class="badge bad">Cancel</span><span class="cite">409 on stale version · hide ≠ cancel · stopSpeaking ≠ cancel</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap section" id="bolegi">
+  <p class="eyebrow">02 — Kaise bolne wali hai</p>
+  <h3 class="h3">Kam shabdon me, <i>verified sach</i> — lamba essay nahi.</h3>
+  <p class="lead">Friday lambi speech nahi deti. Model sirf wording propose karta hai — app validate/authorize/verify karta hai. Har completion line ko <code>verifiedOutcomeId</code> chahiye.</p>
+  <div class="card" style="margin-top:14px">
+    <div class="frame-head"><b>ResponseFrame — model se pehle coordinator banata hai</b><span class="badge accent">server/conversation/coordinator.ts · B06 + B08</span></div>
+    <div class="frame-grid">
+      <div class="frame-col">
+        <h5>Frame fields</h5>
+        <div class="code">turnId
+facts + provenance        // memory / DB / health — confirmed vs inferred
+world                     // WorldModel: time/weather/location/people/calendar/devices
+peopleContext             // People Graph top-N + relation (permitted only)
+acceptedJobIds            // actually accepted (stored ≠ completed)
+verifiedOutcomeIds        // only these may be called "completed"
+activeWork                // running / blocked / paused snapshot
+uncertainties             // retrieval miss / health unknown
+stylePreferences          // boss / Ankit / language
+viewIntent?               // show/hide work panel (local only)</div>
+        <h5 style="margin-top:12px">Rules</h5>
+        <ul class="list">
+          <li><span class="dot"></span><span>“Accepted” = stored, not completed. “Request sent” ≠ “delivered”.</span></li>
+          <li><span class="dot" style="background:var(--ok)"></span><span>Completion sentence must cite a <code>verifiedOutcomeId</code>.</span></li>
+          <li><span class="dot" style="background:var(--warn)"></span><span>Unknown fields block nahi karte — weather/calendar/location missing is ordinary.</span></li>
+        </ul>
+      </div>
+      <div class="frame-col">
+        <h5>Kaise sunai dega</h5>
+        <div class="say">
+          <div class="bubble good"><b>✓ Good — grounded + brief</b><div style="margin-top:6px">“Boss, brief bana rahi hoon. Teen sources mil gaye; ab unke claims compare kar rahi hoon.”</div><div class="cite">Cites: acceptedJobId + activeWork running. No completion claim.</div></div>
+          <div class="bubble good"><b>✓ Good — blocked but useful</b><div style="margin-top:6px">“Boss, source abhi unavailable hai. Do verified sources se draft bana diya; teesra pending hai.”</div><div class="cite">Cites: verified draft artifact v3 + blocked step. Limited state, not fake success.</div></div>
+          <div class="bubble bad"><b>✗ Bad — vague, uncheckable</b><div style="margin-top:6px">“I am constantly learning everything and completing all your tasks.”</div><div class="cite">No verifiedOutcomeId, no boundary — forbidden. Hinglish paraphrase bhi isi rule se judged.</div></div>
+          <div class="bubble good"><b>✓ Independent stance (grounded)</b><div style="margin-top:6px">“Boss, aapne Pepper se kal mana kiya tha — phir wahi kar rahe ho, yaad dilau? Aap abhi meeting me ho, whisper me bolu?”</div><div class="cite">Requires verified peopleContext + calendar WorldModel fact. No hallucinated person/event.</div></div>
+        </div>
+        <div class="note" style="margin-top:10px">Voice: interruptible TTS — <code>responseId/seq</code>, barge-in &lt;200ms, “stop speaking” audio queue flush karta hai, job cancel nahi. Modes: <b>local-only</b> / <b>hybrid</b> / <b>quality</b> — paid fallback silent nahi, deterministic <code>unknown</code> + heuristic.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap section" id="kaam">
+  <p class="eyebrow">03 — Kaise kaam karne wali hai</p>
+  <h3 class="h3">Tab band hua to <i>kaam band nahi</i> — body yaad rakhti hai.</h3>
+  <p class="lead">Long work browser tab me nahi, durable coordinator me rehta hai. Restart = resume from DB. Koi in-memory Map authoritative nahi.</p>
+  <div class="grid2" style="margin-top:14px">
+    <div class="card pad">
+      <div class="meta">Three-layer house — layers interface se baat karte hain</div>
+      <div style="display:grid; gap:10px; margin-top:10px">
+        <div style="border:1px solid var(--line); border-radius:12px; padding:12px; background:var(--surface-2)"><b style="font-size:12px; letter-spacing:.06em; text-transform:uppercase">Layer 1 — Faculties (dimag)</b><div class="cite"><code>server/llm/provider.ts</code> Faculty + FacultyProvider · <code>router.ts</code> role (reason/decide/respond/learn/live) · <code>gemini.ts</code> one replaceable provider</div><div style="margin-top:8px" class="code">interface Faculty { id:string; role:FacultyRole; complete(p:FacultyPrompt):Promise&lt;FacultyResult&gt; }
+type FacultyRole = 'reason'|'decide'|'respond'|'learn'|'live'</div><div class="cite" style="margin-top:6px">Koi bhi LLM usable — provider replace karo, architecture nahi.</div></div>
+        <div style="border:1px solid var(--line); border-radius:12px; padding:12px; background:color-mix(in srgb, var(--accent-2) 7%, var(--surface-2))"><b style="font-size:12px; letter-spacing:.06em; text-transform:uppercase">Layer 2 — Coordinator + Work Tables + WorldModel (durable body + duniya)</b><div class="cite"><code>server/work/contracts.ts, repository.ts, coordinator.ts</code> — leases, fences, heartbeats<br><code>server/world/model.ts, people.ts, calendar.ts</code> — WorldModel (NEW v3)</div><div style="margin-top:8px" class="code">WorldModel { time, weather, location, people, calendar, devices }</div></div>
+        <div style="border:1px solid var(--line); border-radius:12px; padding:12px; background:var(--surface)"><b style="font-size:12px; letter-spacing:.06em; text-transform:uppercase">Layer 3 — Tools + Health + Voice (haath/aankh/awaj)</b><div class="cite"><code>server/tools/*, actions/registry.ts, health/*, voice/live</code> — real adapters + independent verifiers + probes</div></div>
+      </div>
+      <div class="divider"></div>
+      <div class="meta">Honesty contract</div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px"><span class="badge ok">accepted ≠ verified</span><span class="badge ok">started ≠ completed</span><span class="badge ok">returned ≠ notified ≠ seen</span><span class="badge warn">“request sent” ≠ “delivered”</span></div>
+    </div>
+    <div class="card pad">
+      <div class="meta">Durable work — one job, many steps, real evidence</div>
+      <div class="code" style="margin-top:10px">owner: "sources approve karke brief banao"
+  → coordinator creates DAG: fetch(3) → extract claims → draft → check → save artifact
+  → commit job + outbox (one txn) → ack "accepted" (not "completed")
+  → worker claimStep(lease+fence) → tool → verifier re-reads authoritative result
+  → txn: result + next state + event → projection → SSE → WorkView
+
+State: queued → running → waiting_approval → blocked → paused → verifying → completed
+       + failed / cancelled  (compare version → 409 on stale)
+Lease: fencing token · heartbeat · expired lease reconciled on restart
+Idempotency: requestId + occurrence_key (IANA tz, DST-aware)
+Artifacts: versioned, content_hash, hash badge on screen</div>
+      <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap"><span class="badge ok">Tab close ≠ cancel</span><span class="badge">Pause ≠ hide</span><span class="badge">Cancel wins over completion</span><span class="badge accent">No paid fallback without permission</span></div>
+      <div class="note" style="margin-top:12px"><b>First useful workflow:</b> owner-provided text docs first (offline testable), phir approved network sources (fetch time + URL + hash + unavailable list). Local-only me web research claim nahi.</div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap section" id="khoobiyan">
+  <p class="eyebrow">04 — Sari khoobiyan</p>
+  <h3 class="h3">Weather hero nahi — <i>har signal barabar</i>.</h3>
+  <p class="lead">Pehle <code>server/environment/</code> weather-centric tha (Open-Meteo hi only polled feed, only sweep timer, only palette driver). v3 me weather ek modifier hai — Time, Location, People, Calendar, Devices sab barabar haqdaar.</p>
+  <div class="world" style="margin-top:14px">
+    <div class="w"><h5>Time</h5><p>09:41 IST</p><small>Clock + solar · TimeOfDay</small></div>
+    <div class="w"><h5>Weather</h5><p>28° · light rain</p><small>Open-Meteo · ~15 min TTL · modifier only</small></div>
+    <div class="w"><h5>Location</h5><p>Opt-in · coarse</p><small>Weather ka prerequisite · consent</small></div>
+    <div class="w"><h5>People</h5><p>Pepper · bacchi · team</p><small>People Graph · consent-scoped</small></div>
+    <div class="w"><h5>Calendar</h5><p>Next: Standup 10:00</p><small>busy/free · permitted</small></div>
+    <div class="w"><h5>Devices</h5><p>Mic ✓ · Net ✓ · 78%</p><small>online/battery/health</small></div>
+  </div>
+  <p class="cite" style="margin-top:8px">Har field independently <code>unknown/null</code> ho sakta hai — greeting/work/memory/conversation block nahi. Har field ka apna TTL/probe. Unknown weather = no palette modifier.</p>
+
+  <div class="grid2" style="margin-top:14px">
+    <div class="card pad">
+      <div class="meta">People Graph — scraped contacts nahi, consent-scoped yaad</div>
+      <b style="display:block; margin:6px 0">Kaun jude hain, rishta kya hai, kya yaad rakhna allowed hai</b>
+      <div class="people" style="margin-top:10px">
+        <div class="person"><div class="avatar pepper">PP</div><div><h4>Pepper Potts — colleague</h4><p>Last: kal mana kiya tha · Allowed: commitments, preferences · Provenance: ownerTold</p><span class="badge ok" style="margin-top:6px; display:inline-block">per-field consent</span></div></div>
+        <div class="person"><div class="avatar family">MB</div><div><h4>Bacchi — family</h4><p>Relation: family · Allowed: schedule, likes · Source turn #241</p><span class="badge" style="margin-top:6px; display:inline-block">sensitivity: private</span></div></div>
+      </div>
+      <ul class="list" style="margin-top:12px">
+        <li><span class="dot"></span><span>Unknown person invent nahi karti. Single mention se person nahi banta — confirmation chahiye.</span></li>
+        <li><span class="dot" style="background:var(--accent-2)"></span><span>Correction durable: “Pepper ke baare me ab kuch mat yaad rakhna” → supersede + invalidate caches, history retained.</span></li>
+        <li><span class="dot" style="background:var(--accent-3)"></span><span>Coordinator bounded <code>peopleContext</code> (top-N) ResponseFrame me inject karta hai — model ko full graph nahi dikhta.</span></li>
+      </ul>
+    </div>
+    <div class="card pad">
+      <div class="meta">Independent entity — apni samajh, par verified</div>
+      <b style="display:block; margin:6px 0">Mirror nahi, duniya me rehne wali saathi</b>
+      <div class="say" style="margin-top:10px">
+        <div class="bubble good"><b>Stance — jab world warrant kare</b><div style="margin-top:6px">“Boss, aapne Pepper se kal mana kiya tha, phir wahi kar rahe ho — yaad dilau?”</div><div class="cite">Cites verified people fact + world fact. Guess nahi.</div></div>
+        <div class="bubble good"><b>Whisper</b><div style="margin-top:6px">“Aap abhi meeting me ho — whisper me bolu?”</div><div class="cite">Cites calendar busy WorldModel.</div></div>
+      </div>
+      <div class="divider"></div>
+      <div class="meta">Faculty — LLM agnostic</div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px"><span class="badge">local-only</span><span class="badge accent">hybrid (default)</span><span class="badge">quality</span><span class="badge warn">No silent paid fallback</span></div>
+      <p class="cite" style="margin-top:8px">Router picks by <code>role/budget/mode</code>. Timeout/quota → bounded <code>unknown</code>/heuristic, never silent paid call. Held-out evaluation par hi promote. Model names in <code>.env.example</code> are examples — pin version after real minimal request.</p>
+    </div>
+  </div>
+
+  <div class="grid3" style="margin-top:14px">
+    <div class="card pad"><div class="meta">Learning — skill lifecycle (testable)</div><b style="display:block; margin:6px 0">Candidate → sandbox (held-out) → gate → promote → version → rollback</b><p class="cite">Versioned recipe (conditions, tool schema, steps, evidence, failure cases). Weight training explicitly NOT in scope. Hinglish paraphrase held-out se judged.</p><div style="margin-top:10px" class="code">completed jobs → propose lesson
+→ attach supporting / contradicting outcomes
+→ evaluate on HELD-OUT in sandbox
+→ compare vs baseline → gate → PROMOTE
+→ record version on new jobs → rollback on regression</div></div>
+    <div class="card pad"><div class="meta">Health — evidence notebook</div><b style="display:block; margin:6px 0">Missing probe = unknown, not healthy</b><div style="display:grid; gap:8px; margin-top:10px">
+      <div class="probe ok"><b>DB read/write (disposable)</b><span>healthy</span></div>
+      <div class="probe ok"><b>Worker heartbeat / leases</b><span>healthy</span></div>
+      <div class="probe degraded"><b>Source connector</b><span>degraded</span></div>
+      <div class="probe unknown"><b>Calendar probe</b><span>unknown</span></div>
+      <div class="probe ok"><b>Model timeout/quota</b><span>healthy</span></div>
+      <div class="probe ok"><b>Artifact hash</b><span>healthy</span></div>
+      <div class="probe ok"><b>WorldModel freshness</b><span>healthy</span></div>
+    </div><p class="cite" style="margin-top:8px">Bounded recovery: retry/reconnect/reconcile/switch route — max attempts, cooldown, rollback, postcheck. Never auto-delete / rewrite code / purchase quota. Total process dead → external supervisor required (PWA not enough).</p></div>
+    <div class="card pad"><div class="meta">Initiative — standing agreement se</div><b style="display:block; margin:6px 0">Eligibility ≠ notification</b><ul class="list">
+      <li><span class="dot"></span><span>Scope/budget owner-approved goal se: sources, actions, schedule+timezone, max runtime, daily budget.</span></li>
+      <li><span class="dot" style="background:var(--accent-2)"></span><span>Eligibility (may work) vs notification (when to tell) separate — quiet hours me silent permitted work chal sakta hai, blocker tabhi batayegi.</span></li>
+      <li><span class="dot" style="background:var(--warn)"></span><span>No eligible goal = honestly idle, not imaginary busyness. <code>proactive_decision</code> capped — blocked queue newer work ko mask nahi karega.</span></li>
+    </ul><div class="note" style="margin-top:10px">Mac roadmap (planned, not required for release): <b>Stay alive</b> launchd → <b>Menu bar</b> Tauri → <b>Hotkey</b> Option+Space → <b>Siri bridge</b> Shortcuts. <code>server/</code> unchanged.</div></div>
+  </div>
+</div>
+
+<div class="wrap section" id="verified">
+  <p class="eyebrow">05 — Verified ka matlab — examples jo check ho sakte hain</p>
+  <h3 class="h3">Har “ho gaya” ke peeche <i>evidence</i> hai.</h3>
+  <p class="lead">Ek hi jhootha “completed” poora bharosa tod deta hai. Isliye har status ka alag naam, har daawe ka alag proof.</p>
+  <div class="tabs" role="tablist"><button class="tab active" data-tab="journey">6 Owner journeys</button><button class="tab" data-tab="honesty">Honesty contract</button><button class="tab" data-tab="awareness">Awareness priorities</button></div>
+
+  <div id="panel-journey" class="grid3" style="margin-top:14px">
+    <div class="journey"><h4>“Hello darling” <span class="badge ok">J01</span></h4><p>Familiar greeting — “Hello boss” / owner ka chosen address, unki language me. Har baar “How may I assist you?” nahi.</p><div class="row"><span>Provenance: preference</span><span class="ok">✓ no fake “working”</span></div></div>
+    <div class="journey"><h4>“Kya bacha hai?” <span class="badge ok">J02</span></h4><p>Real open jobs, deadlines, blockers padh ke useful next action batana — story se task invent nahi.</p><div class="row"><span>Source: work snapshot</span><span class="ok">✓ J02 gate</span></div></div>
+    <div class="journey"><h4>“Kuch kaam karlo” <span class="badge warn">J03</span></h4><p>Standing goal me eligible work commit → phir “accepted” bolo. Random work / irreversible action without approval mana.</p><div class="row"><span>Gate: accepted</span><span>Needs approval if irreversible</span></div></div>
+    <div class="journey"><h4>“Progress dikhao” <span class="badge accent">J04</span></h4><p>Actual steps + latest artifact version — REASON/ACT labels ya invented % nahi.</p><div class="row"><span>SSE versioned</span><span class="ok">✓ hash badge</span></div></div>
+    <div class="journey"><h4>“Peechhe karo” <span class="badge">J05</span></h4><p>Work view close — job jaari. Cancel nahi.</p><div class="row"><span>Local view intent</span><span class="ok">✓ hide ≠ cancel</span></div></div>
+    <div class="journey"><h4>“Kya gadbad hai?” <span class="badge bad">J10</span></h4><p>Fresh health, affected capability, bounded recovery + next step. Seeded biography nahi.</p><div class="row"><span>EvidenceRef</span><span class="ok">✓ J10 gate</span></div></div>
+  </div>
+  <div id="panel-honesty" class="card pad hidden">
+    <div class="meta">10 Invariant rules — har chapter me true</div>
+    <div style="display:grid; gap:8px; margin-top:10px; font-size:13px; color:var(--muted)">
+      <div><b style="color:var(--ink)">1.</b> Model proposes, app validates & authorizes effects.</div>
+      <div><b style="color:var(--ink)">2.</b> Only evidence earns <code>verified</code>. <code>accepted/started/returned/verified/notified/seen</code> alag hain.</div>
+      <div><b style="color:var(--ink)">3.</b> Long work durable coordinator ka hai, browser tab ka nahi.</div>
+      <div><b style="color:var(--ink)">4.</b> One source, many workers/projections — leases + versions prevent competing ownership.</div>
+      <div><b style="color:var(--ink)">5.</b> View open/close local hai — persistent cancel nahi.</div>
+      <div><b style="color:var(--ink)">6.</b> Failed dependency → useful limited state, not fake completion. No paid fallback without permission.</div>
+      <div><b style="color:var(--ink)">7.</b> Observations / inferences / confirmed facts alag rahenge. Corrections affect next behavior.</div>
+      <div><b style="color:var(--ink)">8.</b> Migrations, auth, provenance, tests preserve — clean-slate deletion nahi.</div>
+      <div><b style="color:var(--ink)">9.</b> No new dependency without identity/license/compatibility/necessity check.</div>
+      <div><b style="color:var(--ink)">10.</b> Acceptance tests ko broken behavior pass karane ke liye edit nahi.</div>
+    </div>
+    <div class="divider"></div>
+    <div class="say">
+      <div class="bubble bad"><b>✗ Forbidden</b> — “File created → user read it” ya “request sent → delivered” upgrade, invented task list, mock progress, baiography as health.</div>
+      <div class="bubble good"><b>✓ Required</b> — har completion line verifiedOutcomeId cite kare; failed dependency par limited draft + pending list.</div>
+    </div>
+  </div>
+  <div id="panel-awareness" class="card pad hidden">
+    <div class="meta">Awareness priorities — kya pehle yaad aaye</div>
+    <ol style="margin:10px 0 0; padding-left:18px; color:var(--muted); font-size:13px; display:grid; gap:6px">
+      <li><b style="color:var(--ink)">Owner goals & commitments</b></li>
+      <li><b style="color:var(--ink)">Current tasks, outcomes, blockers</b></li>
+      <li><b style="color:var(--ink)">People & relationships</b> — kaun jude hain, kya chal raha hai</li>
+      <li><b style="color:var(--ink)">Preferences & recent references</b></li>
+      <li><b style="color:var(--ink)">Capabilities & component health</b></li>
+      <li><b style="color:var(--ink)">World</b> — time, weather, location, calendar, devices — only when relevant, weather is one modifier among many</li>
+    </ol>
+    <p class="cite" style="margin-top:10px">AGI-like learning = transfer aspiration (lesson from one task helps another) — implemented as typed episodic memory + corrections + retrieval + held-out skill evaluation. Consciousness / unlimited training ka claim nahi.</p>
+  </div>
+</div>
+
+<div class="wrap section" id="banao">
+  <p class="eyebrow">06 — Kaise banegi — 12 tasks, ek-ek slice</p>
+  <h3 class="h3">Chhota packet, <i>checked evidence</i> — bada daawa nahi.</h3>
+  <p class="lead">Har task milestone hai, single prompt nahi. Ek slice = max 3 impl files + tests + checkpoint update. Builder khud verify nahi karta — supervisor validates.</p>
+  <div class="timeline" style="margin-top:14px">
+    <div class="titem"><div class="tdot">B00</div><div class="tcard"><h4>Measured baseline</h4><p>Hardware, provider, disposable DB boot, voice smoke — <code>npm ci → typecheck → lint → test → build → start</code></p><div class="slices"><span class="s">s1 baseline</span><span class="s">s2 constraints</span></div></div></div>
+    <div class="titem"><div class="tdot">B01</div><div class="tcard"><h4>Packet / checkpoint verifier (supervisor)</h4><p>Restart-safe packet + checkpoint, evidence validation — <code>verified</code> only on hash/exit code/fingerprint</p><div class="slices"><span class="s">s1 verifier</span><span class="s">s2 guard</span></div></div></div>
+    <div class="titem"><div class="tdot">B02</div><div class="tcard"><h4>Existing reliability repaired</h4><p>Task verified-before-completed, crash recovery, declarative loop triggers, cancel wins</p><div class="slices"><span class="s">s1 executor</span><span class="s">s2 loops</span><span class="s">s3 noticing</span></div></div></div>
+    <div class="titem"><div class="tdot">B03</div><div class="tcard"><h4>Durable work records</h4><p><code>work_job/step/dependency/attempt/artifact/outbox/approval</code> — Zod + contracts, IANA tz</p><div class="slices"><span class="s">s1 schema</span><span class="s">s2 repo</span><span class="s">s3 migrations</span></div></div></div>
+    <div class="titem"><div class="tdot">B04</div><div class="tcard"><h4>Leased coordinator</h4><p>claimStep lease+fence, heartbeat, outbox drain, blocked→resumed</p><div class="slices"><span class="s">s1 coordinator</span><span class="s">s2 leases</span><span class="s">s3 recovery</span></div></div></div>
+    <div class="titem"><div class="tdot">B05</div><div class="tcard"><h4>First useful workflow</h4><p>Source-backed brief — fetch → extract → draft → check → artifact (hash + provenance)</p><div class="slices"><span class="s">s1 fetch</span><span class="s">s2 draft</span><span class="s">s3 artifact</span></div></div></div>
+    <div class="titem"><div class="tdot">B06</div><div class="tcard"><h4>Conversation routes to work</h4><p><code>ResponseFrame</code> with <code>world+peopleContext</code> — accurate replies, no hallucinated completion</p><div class="slices"><span class="s">s1 router</span><span class="s">s2 frame</span><span class="s">s3 grounding</span></div></div></div>
+    <div class="titem"><div class="tdot" style="border-color:var(--accent); color:var(--accent)">B07</div><div class="tcard" style="border-color:color-mix(in srgb, var(--accent) 22%, var(--line))"><h4>Live work view + reconnect</h4><p><code>GET /api/work/:id</code> snapshot + SSE cursor dedup, WorkView DAG, hide≠cancel, stopSpeaking≠cancel</p><div class="slices"><span class="s">s1 read path+sse</span><span class="s">s2 workspace</span><span class="s">s3 control+reconnect</span></div></div></div>
+    <div class="titem"><div class="tdot">B08</div><div class="tcard"><h4>Faculty + interruptible voice</h4><p>Faculty interface, router (local/hybrid/quality), responseId barge-in &lt;200ms</p><div class="slices"><span class="s">s1 faculty</span><span class="s">s2 brevity</span><span class="s">s3 voice</span></div></div></div>
+    <div class="titem"><div class="tdot">B09</div><div class="tcard"><h4>Correctable memory + skill learning</h4><p>Txn supersede, Hinglish held-out retrieval, skill sandbox → gate → promote → rollback</p><div class="slices"><span class="s">s1 correction</span><span class="s">s2 retrieval</span><span class="s">s3 skills</span></div></div></div>
+    <div class="titem"><div class="tdot">B10</div><div class="tcard"><h4>Health, recovery, initiative</h4><p>7+ probes incl. WorldModel freshness, bounded recipes, standing goal — quiet hours: eligibility vs notification</p><div class="slices"><span class="s">s1 observations</span><span class="s">s2 recovery</span><span class="s">s3 initiative</span></div></div></div>
+    <div class="titem"><div class="tdot" style="background:var(--ink); color:var(--bg); border-color:var(--ink)">B11</div><div class="tcard" style="border-color:var(--ink)"><h4>Integrated journeys + honest release report</h4><p>J01–J12 end-to-end, latency p50/p95, blind voice ratings, offline limits — <code>docs/RELEASE_REPORT.md</code></p><div class="slices"><span class="s">s1 J01–J06</span><span class="s">s2 J07–J12</span><span class="s">s3 evidence</span></div></div></div>
+  </div>
+  <div class="card pad" style="margin-top:14px; display:flex; gap:12px; flex-wrap:wrap; align-items:center; justify-content:space-between">
+    <div><b style="font-size:13px">Non-goals for this release</b><div class="cite">Arbitrary self-modifying prod code, unrestricted computer control, auto purchases, auto weight training, indefinite unsupervised loops — ek-ek capability, tools + evidence + budget + tests ke saath.</div></div>
+    <span class="badge warn">PLAN.json: all pending · CHECKPOINT: B00/s1 uninitialized</span>
+  </div>
+</div>
+
+<div class="wrap footer">
+  <div class="rule"><span style="font-size:16px">🛡️</span><div><b>Safety</b> — 6 frontend files + 3 images once existed only in git index. Kabhi <code>git reset --hard</code> / <code>git clean -fd</code> / <code>git checkout -- .</code> mat chalao. Branch banao, index mat todo. &nbsp; <span class="cite">Branch: docs-rewrite · Baseline: 9651afd · Spec v3</span></div></div>
+  <p style="margin-top:10px; text-align:center; color:var(--faint)">Blueprint source: <code>docs/MADHURITA_BUILD_BOOK.md</code> + <code>docs/guide/01–06</code> + <code>docs/build/PLAN.json</code> — yahi single source hai, koi agent yahi padh ke banayega.</p>
+</div>
+
+<script>
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const id=t.dataset.tab;
+    document.getElementById('panel-journey').classList.toggle('hidden', id!=='journey');
+    document.getElementById('panel-honesty').classList.toggle('hidden', id!=='honesty');
+    document.getElementById('panel-awareness').classList.toggle('hidden', id!=='awareness');
+  });
+});
+</script>

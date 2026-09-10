@@ -47,8 +47,6 @@
  * assets, since nothing here can know which hashes are still current.
  */
 
-/* eslint-disable no-restricted-globals */
-
 const VERSION = 'madhurita-v1';
 const SHELL_CACHE = `${VERSION}-shell`;
 const ASSET_CACHE = `${VERSION}-assets`;

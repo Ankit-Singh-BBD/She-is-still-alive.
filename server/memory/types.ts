@@ -26,7 +26,7 @@ export type Sensitivity = 'public' | 'person_shared' | 'owner_only' | 'system_in
 export type SourceKind = 'conversation' | 'action' | 'observation' | 'system';
 
 /** Lifecycle status of a memory item */
-export type LifecycleStatus = 'active' | 'consolidated' | 'archived' | 'soft_deleted';
+export type LifecycleStatus = 'active' | 'consolidated' | 'archived' | 'soft_deleted' | 'superseded';
 
 /** Provenance chain - mandatory per Build Book X.5 */
 export interface MemoryProvenance {

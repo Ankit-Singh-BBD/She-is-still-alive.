@@ -39,6 +39,7 @@ import type { PersistedDomainEvent } from '@server/events/types.js';
 import { IdentityRepository } from '@server/identity/repository.js';
 import { MemoryRepository } from '@server/memory/repository.js';
 import { MemoryRetrieval } from '@server/memory/retrieval.js';
+import { MemoryCorrections } from '@server/memory/corrections.js';
 import { ConversationRepository } from '@server/conversations/repository.js';
 import { MessageRepository } from '@server/conversations/messages.js';
 import { EnvironmentService, WEATHER_TTL_MS } from '@server/environment/index.js';
@@ -77,6 +78,7 @@ import { WorldModel } from '@server/world/model.js';
 import { FacultyRouter } from '@server/llm/router.js';
 import { LocalFacultyProvider } from '@server/llm/local.js';
 import { LanguageModelFaculty } from '@server/llm/provider.js';
+import type { FacultyRole } from '@server/llm/provider.js';
 import { GeminiLanguageModel, createGeminiTransport } from '@server/llm/gemini.js';
 import { TokenBudgetManager } from '@server/cognition/budgets.js';
 import {
@@ -197,6 +199,12 @@ export interface MadhuritaApp {
   readonly identityRepo: IdentityRepository;
   readonly memoryRepo: MemoryRepository;
   readonly memoryRetrieval: MemoryRetrieval;
+  /**
+   * Corrections (B09.s1). Holds the bus and the retrieval it must invalidate, so
+   * a correction made anywhere in the process is durable, heard, and cannot be
+   * answered around from a cache computed before it.
+   */
+  readonly memoryCorrections: MemoryCorrections;
   readonly conversations: ConversationRepository;
   /**
    * The conversation's turns. Written by stage 12 inside the cycle's own
@@ -391,6 +399,7 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
   // ── Memory ───────────────────────────────────────────────────────────────
   const memoryRepo = new MemoryRepository(db);
   const memoryRetrieval = new MemoryRetrieval(memoryRepo);
+  const memoryCorrections = new MemoryCorrections(db, { events: eventBus, retrieval: memoryRetrieval });
   const conversations = new ConversationRepository(db);
   const messages = new MessageRepository(db);
 
@@ -610,7 +619,7 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
       const hosted = {
         id: 'google' as const,
         modelId: options.languageModel.modelId,
-        createFaculty: (role: import('@server/llm/provider.js').FacultyRole) =>
+        createFaculty: (role: FacultyRole) =>
           new LanguageModelFaculty({ id: `google:${role}`, role, model: options.languageModel! }),
       };
       return new FacultyRouter({ providers: { reason: hosted, decide: hosted, respond: hosted, learn: hosted, live: hosted }, mode });
@@ -623,7 +632,7 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
       const hosted = {
         id: 'google' as const,
         modelId: faculties.modelId,
-        createFaculty: (role: import('@server/llm/provider.js').FacultyRole) => {
+        createFaculty: (role: FacultyRole) => {
           const m = new GeminiLanguageModel({
             transport: createGeminiTransport(config.llm.apiKey!),
             model: config.llm.reasoningModel,
@@ -1364,6 +1373,7 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     identityRepo,
     memoryRepo,
     memoryRetrieval,
+    memoryCorrections,
     conversations,
     messages,
     registry,

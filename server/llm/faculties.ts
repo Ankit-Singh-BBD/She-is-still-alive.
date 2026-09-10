@@ -49,6 +49,7 @@ import type {
 } from '@server/cognition/types.js';
 import type { MemoryDomain, Sensitivity, SubjectKind } from '@server/memory/types.js';
 import type { ToolSpec } from '@server/tools/roster.js';
+import type { ResponseFrame } from '@server/conversation/frame.js';
 
 import {
   buildDecidePrompt,
@@ -217,7 +218,7 @@ export class LanguageFaculties implements DecideFaculty, ResponseFaculty, Learni
     decision: AuthorizedDecision;
     results: ActionResult[];
     verification: VerificationReport | undefined;
-    frame?: import('@server/conversation/frame.js').ResponseFrame | null | undefined;
+    frame?: ResponseFrame | null | undefined;
   }): Promise<{ text: string; voicePreferred?: boolean | undefined }> {
     const tone = this.tone?.(input.recalled.stimulus.identityId) ?? '';
     const prompt = input.frame

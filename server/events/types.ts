@@ -26,6 +26,7 @@
 export const DOMAIN_EVENT_TYPES = [
   'memory.appended',
   'memory.consolidated',
+  'memory.corrected',
   'task.scheduled',
   'task.claimed',
   'task.completed',

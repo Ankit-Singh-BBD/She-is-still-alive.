@@ -122,6 +122,9 @@ const MEMORY_COGNITION: Touches = { memory: true, cognitive: true };
 const EVENT_TOUCHES: Record<DomainEventType, Touches> = {
   'memory.appended': MEMORY,
   'memory.consolidated': MEMORY,
+  // A correction supersedes one row and writes another, so the counts and what
+  // the UI would show for that key both change.
+  'memory.corrected': MEMORY,
   'task.scheduled': TASKS,
   'task.claimed': TASKS,
   'task.completed': TASKS,
