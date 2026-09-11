@@ -29,6 +29,8 @@ import type { BootReport } from '@server/app.js';
 import type { ErrorReporter } from './errors.js';
 import type { RuntimeStateProjector } from './state.js';
 import type { RateLimiter } from './rate-limit.js';
+import type { WorkRepository } from '@server/work/repository.js';
+import type { WorkCoordinator } from '@server/work/coordinator.js';
 
 export interface RouteDeps {
   readonly config: Config;
@@ -78,6 +80,9 @@ export interface RouteDeps {
     /** Guards the cognitive cycle, which is the expensive one. */
     readonly cycle: RateLimiter;
   };
+  /** B04/B07 — durable work wiring (optional until B03/B04 wired). */
+  readonly workRepo?: WorkRepository;
+  readonly workCoordinator?: WorkCoordinator;
   /** Origins allowed to make cookie-authenticated writes beyond same-host. */
   readonly allowedOrigins: readonly string[];
 }

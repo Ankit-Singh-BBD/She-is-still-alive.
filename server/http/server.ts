@@ -53,6 +53,7 @@ import { HttpError, sendError } from './errors.js';
 import { mountConversationRoutes } from './routes/conversation.js';
 import { mountIdentityRoutes } from './routes/identity.js';
 import { mountPresenceRoutes } from './routes/presence.js';
+import { mountWorkRoutes } from './routes/work.js';
 
 /** Where `vite build` puts the client, per `vite.config.ts`'s `outDir`. */
 const CLIENT_DIR = fileURLToPath(new URL('../../dist/client', import.meta.url));
@@ -154,6 +155,7 @@ export function createHttpServer(options: HttpServerOptions): HttpServerHandle {
   mountIdentityRoutes(api, deps);
   mountPresenceRoutes(api, deps);
   mountConversationRoutes(api, deps);
+  mountWorkRoutes(api, deps);
   app.use('/api', api);
 
   // Anything under /api that no route claimed is a 404 in the JSON envelope, not

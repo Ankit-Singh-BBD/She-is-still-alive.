@@ -100,6 +100,11 @@ describe('TaskExecutor (P14)', () => {
         return { success: true };
       },
     });
+    // Honesty contract: only verified (success && verified) earns completed.
+    // A tool whose postconditions are never checked cannot be said to have
+    // done its job, so the pipeline reports verified: false without a verifier.
+    // The test registers a trivial pass-through verifier for the fixture tool.
+    pipeline.registerVerifier('tool:flaky', async () => ({ postconditionsMet: true, discrepancies: [] }));
 
     const now = Date.now();
     const taskId = executor.scheduleTask({

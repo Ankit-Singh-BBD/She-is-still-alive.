@@ -91,13 +91,13 @@ describe('Autonomic layer (server/autonomic/)', () => {
       // watermark. A second sweep with nothing new must find nothing — otherwise
       // she would report the same failure every minute for the life of the
       // process.
-      const first = app.noticing.sweep(owner.id, Date.now());
+      const first = await app.noticing.sweep(owner.id, Date.now());
       expect(first.notices).toHaveLength(1);
       expect(first.notices[0]?.sensor).toBe('task.exhausted');
       expect(first.notices[0]?.seed).toContain('buy milk');
       expect(first.errors).toEqual([]);
 
-      const second = app.noticing.sweep(owner.id, Date.now());
+      const second = await app.noticing.sweep(owner.id, Date.now());
       expect(second.notices).toHaveLength(0);
     });
 
@@ -106,7 +106,7 @@ describe('Autonomic layer (server/autonomic/)', () => {
       const owner = await app.identityRepo.createIdentity({ kind: 'owner', displayName: 'Ankit' });
       const taskId = insertDeadTask(owner, 'call the bank');
 
-      const { notices } = app.noticing.sweep(owner.id, Date.now());
+      const { notices } = await app.noticing.sweep(owner.id, Date.now());
 
       // The id is in the topic so the engine's per-topic rate limit is per task.
       // A bare `task.exhausted` topic would let one failure mask every other.
@@ -122,7 +122,8 @@ describe('Autonomic layer (server/autonomic/)', () => {
       // The tree emits immediately at `urgency >= 0.8`, skipping quiet hours.
       // Nothing a sensor produces may reach that: a failed job is worth saying
       // and is not worth waking him at 3am.
-      for (const notice of app.noticing.sweep(owner.id, Date.now()).notices) {
+      const notices = await app.noticing.sweep(owner.id, Date.now());
+      for (const notice of notices.notices) {
         expect(notice.urgency).toBeLessThan(0.8);
       }
     });

@@ -33,6 +33,7 @@ export const DOMAIN_EVENT_TYPES = [
   'task.failed',
   'task.cancelled',
   'task.retry_scheduled',
+  'task.reconciled',
   'loop.opened',
   'loop.closed',
   'loop.paused',

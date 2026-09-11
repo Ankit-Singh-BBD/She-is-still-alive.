@@ -129,6 +129,25 @@ export type MemoryItem =
   | Relationship
   | LearnedPattern;
 
+/**
+ * Query filter options for repository list methods.
+ *
+ * B09.s2: pushes identity, sensitivity, lifecycle, limit, and offset filtering
+ * into SQL WHERE/LIMIT/OFFSET clauses rather than fetching all rows into memory.
+ */
+export interface MemoryQueryOptions {
+  /** Whose memories. Undefined reads across identities — owner-level views only. */
+  identityId?: string | undefined;
+  /** Sensitivity values this caller may read. Undefined = no sensitivity filter. */
+  allowedSensitivities?: Sensitivity[] | undefined;
+  /** Include rows whose lifecycle has taken them out of the default view. */
+  includeDeleted?: boolean | undefined;
+  /** Hard ceiling on rows returned by SQL. */
+  limit?: number | undefined;
+  /** Rows skipped before the page begins. */
+  offset?: number | undefined;
+}
+
 /** Retrieval request - caller provides context, application enforces policy */
 export interface RetrievalRequest {
   callerId: string;
@@ -136,6 +155,7 @@ export interface RetrievalRequest {
   query: string;
   domains: MemoryDomain[];
   limit: number;
+  offset?: number | undefined;
   recencyWeight: number;
   importanceWeight: number;
   similarityWeight: number;
@@ -170,14 +190,23 @@ export interface ScopedMemoryItem {
   createdAt: number;
   updatedAt: number;
   similarityScore?: number | undefined; // computed during retrieval
+  correctedFromId?: string | undefined; // source memory this one corrected
 }
 
 /** Retrieval result - ranked, filtered by policy */
 export interface RetrievalResult {
   items: ScopedMemoryItem[];
+  /**
+   * Policy-allowed candidates that were scored for this request.
+   *
+   * A floor rather than a census when `truncated` is true: the scan is bounded per
+   * domain, so a store larger than that bound has rows this number does not count.
+   */
   total: number;
   took: number;
   fromCache: boolean;
+  /** True when a domain held more rows than the scan was allowed to score. */
+  truncated: boolean;
 }
 
 /** Default weights for retrieval ranking */

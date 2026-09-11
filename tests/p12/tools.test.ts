@@ -91,7 +91,7 @@ describe('P12 — the tool registry', () => {
   describe('every executable tool is also provable', () => {
     it('holds the same seven ids in the registry and the verifier registry', () => {
       const registered = app.registry.list().map((tool) => tool.id);
-      expect(registered).toHaveLength(7);
+      expect(registered).toHaveLength(12);
       // Sorted, because registration order is boot's concern and set equality is
       // this one's. A mismatch here is what `start()` refuses to boot on.
       expect(app.verifiers.ids()).toEqual([...registered].sort());

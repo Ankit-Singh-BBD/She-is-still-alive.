@@ -162,7 +162,7 @@ export class AutonomicLoop {
           this.deps.proactive.processDeferred(undefined, now),
         )) ?? [];
 
-      const swept = this.safely('autonomic sensor sweep', errors, () =>
+      const swept = await this.safelyAsync('autonomic sensor sweep', errors, () =>
         this.deps.noticing.sweep(owner.id, now),
       );
       if (swept) errors.push(...swept.errors);

@@ -79,7 +79,10 @@ export interface Notice extends ProactiveCandidate {
    * the reminder delivered, stop re-noticing the same silent loop. A notice with
    * no subject is about the world rather than a row.
    */
-  readonly subject?: { readonly kind: 'task' | 'loop'; readonly id: string } | undefined;
+  readonly subject?: {
+    readonly kind: 'task' | 'loop' | 'component' | 'goal';
+    readonly id: string;
+  } | undefined;
 }
 
 /** The sensors, named so a boot report and a trace can say which one spoke. */
@@ -87,7 +90,11 @@ export type SensorId =
   /** A task that used up every attempt and never succeeded. */
   | 'task.exhausted'
   /** An open loop that has had no progress for long enough to be worth raising. */
-  | 'loop.stalled';
+  | 'loop.stalled'
+  /** A system component health issue detected by probes. */
+  | 'component.health'
+  /** A useful next action from an approved standing goal. */
+  | 'goal.initiative';
 
 /**
  * What one tick of the loop did, in full.

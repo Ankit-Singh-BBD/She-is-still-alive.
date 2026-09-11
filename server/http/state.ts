@@ -131,6 +131,7 @@ const EVENT_TOUCHES: Record<DomainEventType, Touches> = {
   'task.failed': TASKS,
   'task.cancelled': TASKS,
   'task.retry_scheduled': TASKS,
+  'task.reconciled': TASKS,
   'loop.opened': LOOPS,
   'loop.closed': LOOPS,
   'loop.paused': LOOPS,

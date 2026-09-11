@@ -147,9 +147,38 @@ export class TaskExecutor {
 
   start(): void {
     if (this.running) return;
+    this.reconcileRunningTasks();
     this.running = true;
     this.stopRequested = false;
     this.schedulePoll();
+  }
+
+  /**
+   * Crash recovery — tasks left `running` when the process died never released
+   * their claim. They must not stay `running` forever, and must not be marked
+   * `completed`. Reconcile them back to `pending` (retryable) or `failed`
+   * (exhausted), mirroring `closeAbandonedCycles` in `server/app.ts`.
+   */
+  private reconcileRunningTasks(): void {
+    const running = this.db.raw
+      .prepare(`SELECT id, attempt, max_attempts FROM task WHERE status = 'running'`)
+      .all() as { id: string; attempt: number; max_attempts: number }[];
+    if (running.length === 0) return;
+    const now = new Date().toISOString();
+    const reconciledError = 'Recovered from crash: task was running at shutdown';
+    for (const row of running) {
+      if ((row.attempt ?? 0) >= (row.max_attempts ?? 3)) {
+        this.db.raw
+          .prepare(`UPDATE task SET status = 'failed', last_error = ?, updated_at = ? WHERE id = ? AND status = 'running'`)
+          .run(reconciledError, now, row.id);
+        this.publish('task.failed', { taskId: row.id, error: reconciledError, recovered: true });
+      } else {
+        this.db.raw
+          .prepare(`UPDATE task SET status = 'pending', last_error = ?, updated_at = ? WHERE id = ? AND status = 'running'`)
+          .run(reconciledError, now, row.id);
+        this.publish('task.reconciled', { taskId: row.id, error: reconciledError });
+      }
+    }
   }
 
   stop(): void {
@@ -330,9 +359,22 @@ export class TaskExecutor {
     this.publish('task.claimed', { taskId: row.id, attempt: row.attempt + 1 });
 
     try {
-      await this.executePayload(row);
-      this.markCompleted(row.id);
-      this.publish('task.completed', { taskId: row.id });
+      const result = await this.executePayload(row);
+      // Honesty contract — only verified earns completed. success && verified is
+      // the same gate stages 8–9 use; a dispatched call that was not verified
+      // is a failure, not a completion. Pipeline tasks report tried/verified
+      // here; reminder dispatch reports true/false.
+      const earned = result?.kind === 'pipeline' ? result.verified : result?.kind === 'reminder';
+      if (earned) {
+        const claimed = this.markCompleted(row.id);
+        if (claimed) this.publish('task.completed', { taskId: row.id });
+        else this.publish('task.cancelled', { taskId: row.id });
+      } else {
+        const reason = result?.kind === 'pipeline'
+          ? (result.error ?? 'Task not verified')
+          : (result?.kind === 'reminder' ? 'Reminder dispatch returned false' : 'Unknown task outcome');
+        this.markFailed(row, reason, now);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.markFailed(row, message, now);
@@ -341,18 +383,17 @@ export class TaskExecutor {
     }
   }
 
-  private async executePayload(row: TaskRow): Promise<void> {
+  private async executePayload(row: TaskRow): Promise<{ kind: 'reminder' } | { kind: 'pipeline'; verified: boolean; error?: string }> {
     const payload = row.payload;
     if (payload.kind === 'reminder') {
       if (!this.handlers.onReminder) {
-        // No dispatcher registered — log and complete (the application will
-        // surface reminders through a registered handler). The reminder
-        // remains completed; missing dispatch is not an error of the executor.
-        return;
+        // Honesty: no dispatcher means nothing was delivered — report as not
+        // verified so the caller retries rather than marks completed.
+        return { kind: 'pipeline', verified: false, error: 'No reminder dispatcher registered' } as const;
       }
       const ok = await this.handlers.onReminder(row.identityId, payload.message, payload.channel ?? 'text');
-      if (!ok) throw new Error('Reminder dispatch returned false');
-      return;
+      if (!ok) return { kind: 'pipeline', verified: false, error: 'Reminder dispatch returned false' } as const;
+      return { kind: 'reminder' };
     }
     // All non-reminder kinds delegate to the action pipeline.
     if (!this.pipeline || !this.registry) {
@@ -384,17 +425,19 @@ export class TaskExecutor {
         causationId: row.id,
         caller: this.callerFor(row.identityId),
       });
-      if (!result.success) {
-        // Which of the two failures this was, in the message. `markFailed` records the
-        // message and nothing else about the outcome survives, so a row that says only
-        // "returned failure" cannot tell someone reading it later whether the tool was
-        // refused at the gate or ran and broke partway.
-        throw new Error(
-          result.attempted
+      // Honesty: success alone does not earn completed — verified does. Return
+      // the pipeline outcome so the caller can gate completion on verified and
+      // record a failure with a distinguishable message otherwise.
+      if (!result.success || !result.verified) {
+        const attempted = result.attempted;
+        const reason = result.success && !result.verified
+          ? `Tool ${payload.toolId} succeeded but was not verified: ${(result.error ?? (Array.isArray((result as { discrepancies?: string[] }).discrepancies) ? ((result as { discrepancies?: string[] }).discrepancies as string[]).join('; ') : '')) || 'no reason recorded'}`
+          : attempted
             ? `Tool ${payload.toolId} was called and failed: ${result.error ?? 'no reason recorded'}`
-            : `Tool ${payload.toolId} was never called: ${result.error ?? 'no reason recorded'}`,
-        );
+            : `Tool ${payload.toolId} was never called: ${result.error ?? 'no reason recorded'}`;
+        return { kind: 'pipeline', verified: false, error: reason } as const;
       }
+      return { kind: 'pipeline', verified: true } as const;
     } else {
       // Exhaustive check
       const _exhaustive: never = payload;
@@ -424,13 +467,16 @@ export class TaskExecutor {
     return identity;
   }
 
-  private markCompleted(taskId: string): void {
+  private markCompleted(taskId: string): boolean {
     const now = new Date().toISOString();
-    this.db.raw
+    // Cancel-wins invariant — a concurrent cancelTask sets status='cancelled';
+    // completing must not resurrect it. Conditional update is the gate.
+    const res = this.db.raw
       .prepare(
-        `UPDATE task SET status = 'completed', completed_at = ?, updated_at = ? WHERE id = ?`,
+        `UPDATE task SET status = 'completed', completed_at = ?, updated_at = ? WHERE id = ? AND status = 'running'`,
       )
       .run(now, now, taskId);
+    return res.changes > 0;
   }
 
   private markFailed(row: TaskRow, error: string, now: number): void {

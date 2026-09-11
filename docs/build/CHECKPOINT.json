@@ -3,54 +3,16 @@
   "state": "in_progress",
   "workspace": {
     "revision": "9651afd",
-    "sourceFingerprint": "B09.s1:correctable-memory-correction-supersede-cache-event",
+    "sourceFingerprint": "B10.s3:useful-initiative-approved-standing-goal-scope-selection-eligibility-notification-quiet-hours",
     "dirtyFiles": []
   },
-  "taskId": "B09",
+  "taskId": "B11",
   "sliceId": "s1",
   "phase": "verify",
-  "completedSlices": [
-    "B08.s1",
-    "B08.s2",
-    "B08.s3",
-    "B09.s1"
-  ],
-  "changedFiles": [
-    "server/persistence/migrations/0015_memory_correction.sql",
-    "server/memory/types.ts",
-    "server/memory/corrections.ts",
-    "server/memory/repository.ts",
-    "server/memory/retrieval.ts",
-    "server/memory/index.ts",
-    "server/events/types.ts",
-    "server/http/state.ts",
-    "server/app.ts",
-    "tests/memory/corrections.test.ts",
-    "e2e/smoke.spec.ts",
-    "public/sw.js",
-    "server/cognition/runtime.ts",
-    "server/cognition/stages/9.ts",
-    "server/llm/faculties.ts",
-    "tests/voice/live-session.test.ts"
-  ],
-  "lastCommand": "npx tsc --noEmit && npm run lint && npm test && npm run build && npx playwright test e2e/smoke.spec.ts",
-  "lastExitCode": 0,
-  "evidence": [
-    "npx tsc --noEmit -> 0",
-    "npm run lint -> 0 errors, 0 warnings",
-    "npm test -> 68 files, 1104 tests passed (+1 file +9 tests vs B08.s3)",
-    "npm run build -> 398.80k, 63 modules",
-    "npx playwright test e2e/smoke.spec.ts -> 2 passed (3.8s)",
-    "B09.s1 migration 0015: memory_correction table + 12 lifecycle_status guard triggers (superseded legal on all 6 domain tables)",
-    "corrections.ts: correctPreference in one db.transaction -> correction record + mark old superseded + insert new active + append memory.corrected event",
-    "repository.ts: all six list* methods exclude superseded; getPreference ORDER BY ensures active > superseded; setPreference excludes superseded from upsert lookup",
-    "retrieval.ts: real cache with total_changes() fingerprint, fromCache true/false, invalidate() belt for corrections",
-    "app.ts: MemoryCorrections wired with EventBus + MemoryRetrieval -> event is durable + cache is invalidated",
-    "J08: correction survives close+reopen of file database AND survives full createApp stop+reboot (9th test)"
-  ],
-  "nextAction": "B09/s2: retrieval — DB-first filters, bounded paging, held-out Hinglish paraphrase recall (see docs/build/tasks/B09.md)",
+  "completedSlices": [],
+  "nextAction": "B11/s1: integrated journeys J01-J06",
   "blocker": null,
   "repairAttempts": 0,
   "workerLease": null,
-  "updatedAt": "2026-09-10T23:52:00.000Z"
+  "updatedAt": "2026-09-11T07:55:00.000Z"
 }

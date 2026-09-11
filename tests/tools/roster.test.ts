@@ -103,7 +103,7 @@ describe('the roster built from the installed tools', () => {
 
   it('gives every installed tool a description and an argument list', () => {
     const roster = toolRoster(app.registry.list());
-    expect(roster.length).toBe(7);
+    expect(roster.length).toBe(12);
     for (const tool of roster) {
       expect(tool.description.length).toBeGreaterThan(20);
       expect(tool.args).toBeDefined();

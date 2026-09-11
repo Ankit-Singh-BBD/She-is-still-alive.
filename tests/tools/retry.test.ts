@@ -238,7 +238,7 @@ describe('which production tools opt in', () => {
       // The assertion that locks the *policy* rather than the mechanism. A new tool
       // that writes and opts in has to change this line, which is the moment to ask
       // whether running it twice against an abandoned first run is really safe.
-      expect(optedIn).toEqual(['memory.recall', 'reminder.list']);
+      expect(optedIn).toEqual(['doc.read', 'memory.recall', 'reminder.list']);
 
       // And every tool that does not opt in gets one attempt at a deadline, whatever
       // `maxAttempts` it declares — so no tool is quietly claiming three.

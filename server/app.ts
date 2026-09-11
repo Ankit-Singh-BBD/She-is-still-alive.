@@ -60,6 +60,9 @@ import { LoopManager } from '@server/loops/manager.js';
 import { ProactiveEngine } from '@server/proactive/engine.js';
 import { AutonomicLoop, Noticing } from '@server/autonomic/index.js';
 import type { TickReport } from '@server/autonomic/index.js';
+import { HealthRegistry } from '@server/health/registry.js';
+import { GoalManager } from '@server/goal/manager.js';
+import { createCandidateSource } from '@server/goal/candidates.js';
 import { PersonalityRegistry } from '@server/personality/registry.js';
 import { PersonalityEngine } from '@server/personality/engine.js';
 import { PersonalityService, timeOfDayDeltas } from '@server/personality/index.js';
@@ -96,6 +99,8 @@ import { RuntimeStateProjector } from '@server/http/state.js';
 import { RateLimiter } from '@server/http/rate-limit.js';
 import { devOrigins } from '@server/http/server.js';
 import { VOICE_PATH } from '@server/http/ws.js';
+import { WorkRepository } from '@server/work/repository.js';
+import { WorkCoordinator } from '@server/work/coordinator.js';
 import type { RouteDeps } from '@server/http/deps.js';
 
 /** Where the numbered migration files live, resolved relative to this module. */
@@ -293,6 +298,8 @@ export interface MadhuritaApp {
   readonly faculties: LanguageFaculties | undefined;
   readonly facultyRouter: FacultyRouter | undefined;
   readonly worldModel: WorldModel;
+  readonly workRepo: WorkRepository;
+  readonly workCoordinator: WorkCoordinator;
 
   /**
    * The live model as an ear and a mouth, or `undefined` when she is text-only.
@@ -425,6 +432,38 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     pollIntervalMs: config.intervals.loopSweepMs,
   });
 
+  // ── Health ───────────────────────────────────────────────────────────────
+  //
+  // Health probes and registry for system component monitoring.
+  // Constructed early so Noticing can access it.
+  //
+  const healthRegistry = new HealthRegistry(db);
+
+  // ── Useful initiative ────────────────────────────────────────────────────
+  //
+  // Standing goals: what the owner has approved her to start on her own (B10.s3).
+  //
+  // No goal is registered here. `createGoalTemplates()` exists for the owner to
+  // approve from, and `registerGoal` *is* the approval — a template this file
+  // registered on his behalf would be the application widening its own scope,
+  // which is the one thing the whole subsystem is built to prevent. With none
+  // registered, `getUsefulNextAction` returns null and the `goal.initiative`
+  // sensor stays quiet, which is the honest state and not a bug.
+  //
+  // The candidate source is wired now because it is the seam where real state
+  // enters: open loops and health observations, never an invented placeholder.
+  const goalManager = new GoalManager(db, {
+    quietHours: {
+      startHour: config.proactivity.quietHoursStart,
+      endHour: config.proactivity.quietHoursEnd,
+    },
+    candidates: createCandidateSource({
+      loops: loopManager,
+      healthRegistry,
+      recovery: healthRegistry.recovery,
+    }),
+  });
+
   // ── Tools ────────────────────────────────────────────────────────────────
   //
   // Installed at construction rather than in `start()`, because `runtimeFor()`
@@ -442,7 +481,12 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     taskExecutor,
     db,
   });
+  // B05 is now inside installCoreTools (static imports above) — no second pass.
   const toolExecutor = new PipelineToolExecutor({ pipeline, identityRepo });
+
+  // ── B03/B04 — Durable work (WorkRepository + leased coordinator) ──────────
+  const workRepo = new WorkRepository(db);
+  const workCoordinator = new WorkCoordinator(db, workRepo, registry);
   const clearanceFor = clearanceLookup(registry);
 
   /**
@@ -482,7 +526,12 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
   // `runtimeFor` and `publishError` are function declarations below, so they are
   // hoisted and the loop can be fully constructed here. `start()` only switches
   // it on.
-  const noticing = new Noticing({ tasks: taskExecutor, loops: loopManager });
+  const noticing = new Noticing({
+    tasks: taskExecutor,
+    loops: loopManager,
+    healthRegistry: healthRegistry,
+    goalManager: goalManager,
+  });
 
   const autonomic = new AutonomicLoop({
     noticing,
@@ -736,6 +785,7 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
 
   let running = false;
   let weatherTimer: ReturnType<typeof setTimeout> | undefined;
+  let healthTimer: ReturnType<typeof setInterval> | undefined;
   let bootReport: BootReport | undefined;
 
   // ── The transport's dependencies ─────────────────────────────────────────
@@ -939,6 +989,8 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     runtimeFor,
     rememberOrigin,
     bootReport: () => bootReport,
+    workRepo,
+    workCoordinator,
     // `publishError` writes an `error.raised` event and an audit row, and
     // swallows its own failure. A route that reported into a `console.error`
     // instead would be a failure nothing could audit afterwards.
@@ -1168,6 +1220,27 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
       );
     }
 
+    // Health probes. Started here because a registry nobody probes is worse than
+    // no registry: `getAllObservations()` would keep returning whatever the last
+    // process managed to check, and the `component.health` sensor would read that
+    // stale row as current. Gated on the same flag as the rest of the autonomic
+    // half, because probing is only useful if something can act on the result.
+    if (config.flags.proactivity && config.proactivity.enabled) {
+      healthTimer = healthRegistry.start();
+      started.push('health probes (every 30000ms — components, capabilities, recovery recipes)');
+    } else {
+      absent.push(
+        'health probes — proactivity is off; component health stays unknown rather than being ' +
+          'reported as healthy',
+      );
+    }
+
+    // Work coordinator draining (leased steps). No-op when nothing queued.
+    if (config.flags.tasks) {
+      workCoordinator.start();
+      started.push('work coordinator (leased, fence-guarded)');
+    }
+
     const ownerEnrolled = identityRepo.hasOwner();
 
     // Her origin story, for a database that had an owner before this code existed.
@@ -1327,6 +1400,11 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
       clearTimeout(weatherTimer);
       weatherTimer = undefined;
     }
+    if (healthTimer) {
+      clearInterval(healthTimer);
+      healthTimer = undefined;
+    }
+    workCoordinator.stop();
     autonomic.stop();
     loopManager.stop();
     taskExecutor.stop();
@@ -1394,6 +1472,8 @@ export function createApp(options: AppOptions = {}): MadhuritaApp {
     faculties,
     facultyRouter,
     worldModel,
+    workRepo,
+    workCoordinator,
     voiceEar,
     projector,
     realtime,

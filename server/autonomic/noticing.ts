@@ -44,6 +44,8 @@
 
 import type { LoopManager, OpenLoopRow } from '@server/loops/manager.js';
 import type { TaskExecutor, TaskPayload } from '@server/tasks/executor.js';
+import type { HealthRegistry } from '@server/health/registry.js';
+import type { GoalManager } from '@server/goal/manager.js';
 
 import type { Notice, SensorId } from './types.js';
 
@@ -61,6 +63,14 @@ export const DEFAULT_STALL_AFTER_MS = 6 * 60 * 60 * 1000;
  */
 export const DEFAULT_FAILURE_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * How long before a health condition is worth restating.
+ *
+ * Probes run every few minutes; the engine's per-topic rate limit is measured in
+ * conversations rather than in probe cycles. This is the gap between the two.
+ */
+export const HEALTH_RESTATE_AFTER_MS = 5 * 60 * 1000;
+
 /** Per-sensor scores, in one place so they can be read against each other. */
 const SCORES = {
   'task.exhausted': {
@@ -76,6 +86,20 @@ const SCORES = {
     interruptionCost: 0.35,
     contextCompatibility: 0.7,
   },
+  'component.health': {
+    // Health conditions remain below the 0.8 quiet-hours bypass.
+    urgency: 0.7,
+    novelty: 0.8,
+    interruptionCost: 0.3,
+    contextCompatibility: 0.8,
+  },
+  'goal.initiative': {
+    // Useful initiative remains below the 0.8 quiet-hours bypass.
+    urgency: 0.5,
+    novelty: 0.6,
+    interruptionCost: 0.2,
+    contextCompatibility: 0.8,
+  },
 } as const satisfies Record<SensorId, Omit<Notice, 'identityId' | 'topic' | 'decision' | 'seed' | 'sensor'>>;
 
 export interface NoticingOptions {
@@ -86,6 +110,8 @@ export interface NoticingOptions {
 export interface NoticingDeps {
   readonly tasks: TaskExecutor;
   readonly loops: LoopManager;
+  readonly healthRegistry: HealthRegistry;
+  readonly goalManager: GoalManager;
   readonly options?: NoticingOptions;
 }
 
@@ -104,6 +130,8 @@ export interface SensorSweep {
 export class Noticing {
   private readonly tasks: TaskExecutor;
   private readonly loops: LoopManager;
+  private readonly healthRegistry: HealthRegistry;
+  private readonly goalManager: GoalManager;
   private readonly stallAfterMs: number;
   private readonly failureLookbackMs: number;
 
@@ -121,12 +149,20 @@ export class Noticing {
   constructor(deps: NoticingDeps) {
     this.tasks = deps.tasks;
     this.loops = deps.loops;
+    this.healthRegistry = deps.healthRegistry;
+    this.goalManager = deps.goalManager;
     this.stallAfterMs = deps.options?.stallAfterMs ?? DEFAULT_STALL_AFTER_MS;
     this.failureLookbackMs = deps.options?.failureLookbackMs ?? DEFAULT_FAILURE_LOOKBACK_MS;
   }
 
   /**
    * Run every sensor once, for one identity.
+   *
+   * Asynchronous because one sensor genuinely cannot be synchronous: proposing
+   * useful initiative means asking a candidate source what is worth doing, and
+   * that source reads the task queue and the health registry rather than a table
+   * this class holds. The other three sensors are synchronous reads wrapped for
+   * uniformity.
    *
    * A notice being produced here says nothing about whether she will say it. The
    * tree may suppress it, defer it into its own queue, or authorize it and then
@@ -137,7 +173,7 @@ export class Noticing {
    * in `TickReport.yielded`, so a number that is always high reads as sensors
    * firing at the wrong moments rather than as nothing happening.
    */
-  sweep(identityId: string, now: number = Date.now()): SensorSweep {
+  async sweep(identityId: string, now: number = Date.now()): Promise<SensorSweep> {
     const notices: Notice[] = [];
     const errors: string[] = [];
     const horizon = now - this.failureLookbackMs;
@@ -158,12 +194,24 @@ export class Noticing {
       errors.push(`loop.stalled: ${message(error)}`);
     }
 
+    try {
+      notices.push(...this.unhealthyComponents(identityId, now));
+    } catch (error) {
+      errors.push(`component.health: ${message(error)}`);
+    }
+
+    try {
+      notices.push(...(await this.usefulInitiative(identityId, now)));
+    } catch (error) {
+      errors.push(`goal.initiative: ${message(error)}`);
+    }
+
     return { notices, errors };
   }
 
   /** A proposer for `ProactiveEngine.runCycle`, bound to one identity. */
-  proposerFor(identityId: string): () => Notice[] {
-    return () => [...this.sweep(identityId).notices];
+  proposerFor(identityId: string): () => Promise<Notice[]> {
+    return async () => [...(await this.sweep(identityId)).notices];
   }
 
   // ── Sensors ──
@@ -220,6 +268,99 @@ export class Noticing {
       );
   }
 
+  /**
+   * Components a probe found degraded or unavailable.
+   *
+   * A **condition**, like `loop.stalled` — a component that was unavailable a
+   * minute ago is still unavailable now, and there is no instant to report once.
+   * But health probes run far more often than the loop sweep, so this sensor
+   * keeps its own short suppression window on top of the engine's per-topic rate
+   * limit; without it a probe cycling every few seconds would queue a notice
+   * every few seconds.
+   */
+  private unhealthyComponents(identityId: string, now: number): Notice[] {
+    const notices: Notice[] = [];
+
+    for (const obs of this.healthRegistry.getAllObservations()) {
+      if (obs.status !== 'degraded' && obs.status !== 'unavailable') continue;
+
+      const key = `health:${obs.componentId}`;
+      const lastReported = this.reported.get(key) ?? 0;
+      if (now - lastReported < HEALTH_RESTATE_AFTER_MS) continue;
+      this.reported.set(key, now);
+
+      const affected = obs.affectedCapabilities ?? [];
+      const unavailable = obs.status === 'unavailable';
+
+      notices.push(
+        this.notice({
+          identityId,
+          sensor: 'component.health',
+          subjectId: obs.componentId,
+          subject: { kind: 'component', id: obs.componentId },
+          seed:
+            `Your ${obs.componentId} has ${unavailable ? 'stopped working' : 'been working poorly'}` +
+            `${affected.length > 0 ? `, which affects ${affected.join(', ')}` : ''}. ` +
+            `I last checked it ${describeGap(now - obs.checkedAt)} ago.`,
+          // Both stay under the 0.8 bypass; an unavailable component is worse
+          // than a degraded one and still not worth waking him for.
+          scoresOverride: { urgency: unavailable ? 0.75 : 0.6 },
+        }),
+      );
+    }
+
+    return notices;
+  }
+
+  /**
+   * The one useful thing she could start right now, when there is one.
+   *
+   * Two things are worth saying about the shape of this sensor.
+   *
+   * **It reports at most one.** `GoalManager.getUsefulNextAction` already ranks
+   * every permitted candidate across every approved goal and returns the winner.
+   * Announcing the runners-up would be handing him a list to triage, which is the
+   * opposite of what an initiative is for.
+   *
+   * **It obeys the manager's notification decision, not its eligibility.** This
+   * is the whole point of the slice. An eligible action at 3am is work she may do
+   * and must not mention: `notificationFor` returns `notify: false, deferred:
+   * true`, and no notice is produced. The same action at 10am on a goal he marked
+   * important, or one that has hit a blocker, produces one. If this sensor tested
+   * `action.eligible` instead, she would announce quiet work at 3am — and if the
+   * manager gated the *work* on quiet hours instead, she would sit idle for nine
+   * hours a night.
+   *
+   * A **condition**, so no per-id bookkeeping: the same action stays the best one
+   * until something changes, and `goal.initiative:<goalId>` in the topic means the
+   * engine's rate limit is per goal rather than per class.
+   */
+  private async usefulInitiative(identityId: string, now: number): Promise<Notice[]> {
+    const action = await this.goalManager.getUsefulNextAction({ identityId, now });
+    if (action === null) return [];
+    if (!action.notification.notify) return [];
+
+    const goal = this.goalManager.getGoal(action.goalId);
+    const forGoal = goal === undefined ? '' : ` It goes towards "${goal.title}".`;
+    const blocked = action.blockers.length > 0;
+
+    return [
+      this.notice({
+        identityId,
+        sensor: 'goal.initiative',
+        subjectId: action.goalId,
+        subject: { kind: 'goal', id: action.goalId },
+        seed: blocked
+          ? `I was going to ${lowerFirst(action.action)}, but ${action.blockers.join('; ')}.` +
+            `${forGoal} I need you for this one.`
+          : `There is something useful I can start now: ${lowerFirst(action.action)}.${forGoal}`,
+        // A blocker means the work has stopped and only he can restart it, so it
+        // outranks an ordinary offer — and still stays under the 0.8 bypass.
+        scoresOverride: blocked ? { urgency: 0.7, interruptionCost: 0.3 } : {},
+      }),
+    ];
+  }
+
   // ── Internals ──
 
   /**
@@ -250,21 +391,23 @@ export class Noticing {
     subjectId: string;
     subject: Notice['subject'];
     seed: string;
+    scoresOverride?: Partial<Omit<Notice, 'identityId' | 'decision' | 'topic' | 'seed' | 'sensor'>>;
   }): Notice {
     const scores = SCORES[input.sensor];
+    const finalScores = { ...scores, ...input.scoresOverride };
     return {
       identityId: input.identityId,
       topic: `${input.sensor}:${input.subjectId}`,
       decision: {
         kind: 'speak',
         channel: 'text',
-        priority: scores.urgency >= 0.7 ? 'normal' : 'low',
+        priority: finalScores.urgency >= 0.7 ? 'normal' : 'low',
         text: input.seed,
       },
-      urgency: scores.urgency,
-      novelty: scores.novelty,
-      interruptionCost: scores.interruptionCost,
-      contextCompatibility: scores.contextCompatibility,
+      urgency: finalScores.urgency,
+      novelty: finalScores.novelty,
+      interruptionCost: finalScores.interruptionCost,
+      contextCompatibility: finalScores.contextCompatibility,
       reasoning: `${input.sensor} sensor, subject ${input.subjectId}`,
       seed: input.seed,
       sensor: input.sensor,
@@ -311,7 +454,22 @@ function describeLoop(loop: OpenLoopRow): string {
  */
 function describeGap(ms: number): string {
   const hours = Math.round(ms / 3_600_000);
+  if (hours < 1) {
+    const minutes = Math.max(1, Math.round(ms / 60_000));
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  }
   if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'}`;
   const days = Math.round(hours / 24);
   return `${days} day${days === 1 ? '' : 's'}`;
+}
+
+/**
+ * Lowercases a candidate's first letter so it reads inside a sentence.
+ *
+ * A candidate description is written to stand alone ("Look into why …"); dropped
+ * after "I can start now:" it needs to be a clause. Only the first character
+ * moves, so an id or an acronym mid-sentence keeps its case.
+ */
+function lowerFirst(text: string): string {
+  return text.length === 0 ? text : text[0]!.toLowerCase() + text.slice(1);
 }

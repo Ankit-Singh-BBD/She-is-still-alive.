@@ -177,6 +177,11 @@ describe('Composition root (server/app.ts)', () => {
         'reminder.schedule',
         'reminder.cancel',
         'reminder.list',
+        'doc.ingest',
+        'doc.read',
+        'artifact.save',
+        'brief.compose',
+        'source.fetch',
       ]);
     });
 

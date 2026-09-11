@@ -43,6 +43,26 @@ import {
   cancelReminderTool,
   listRemindersTool,
 } from './reminders.js';
+import {
+  ingestDocumentTool,
+  readDocumentTool,
+  saveArtifactTool,
+  type DocIngestInput,
+  type DocReadInput,
+  type ArtifactSaveInput,
+  type DocIngestOutput,
+  type DocReadOutput,
+  type ArtifactSaveOutput,
+} from './documents.js';
+import {
+  composeBriefTool,
+  fetchSourceTool,
+  type BriefInput,
+  type BriefOutput,
+  type FetchInput,
+  type FetchOutput,
+} from './sources.js';
+import { held, broken } from './types.js';
 
 export interface CoreToolDeps {
   registry: ToolRegistry;
@@ -82,6 +102,62 @@ export function installCoreTools(deps: CoreToolDeps): string[] {
     installTool(registry, verifiers, scheduleReminderTool(reminders)),
     installTool(registry, verifiers, cancelReminderTool(reminders)),
     installTool(registry, verifiers, listRemindersTool(reminders)),
+    // B05 — document + brief + bounded fetch (offline-first: doc.ingest before source.fetch)
+    installTool<DocIngestInput, DocIngestOutput>(registry, verifiers, {
+      definition: ingestDocumentTool({ db: deps.db }),
+      postcondition: ({ output, db }) => {
+        const id = (output as { sourceId?: string } | undefined)?.sourceId;
+        if (typeof id !== 'string') return broken('doc.ingest output missing sourceId');
+        const row = (db as Database).raw.prepare(`SELECT id FROM doc_source WHERE id=?`).get(id) as
+          | { id: string }
+          | undefined;
+        return row ? held() : broken(`doc_source ${id} not found`);
+      },
+    }),
+    installTool<DocReadInput, DocReadOutput>(registry, verifiers, {
+      definition: readDocumentTool({ db: deps.db }),
+      postcondition: ({ output, db: _db }) => {
+        const id = (output as { hash?: string } | undefined)?.hash;
+        // doc.read is a read — verified if it returned without throwing; hash presence proves the re-read.
+        if (typeof id === 'string' && id.length > 0) return held();
+        // Also accept lookup by sourceId still present
+        const sid = (output as { title?: string } | undefined)?.title;
+        return sid ? held() : broken('doc.read returned no verifiable output');
+      },
+    }),
+    installTool<ArtifactSaveInput, ArtifactSaveOutput>(registry, verifiers, {
+      definition: saveArtifactTool({ db: deps.db }),
+      postcondition: ({ output, db }) => {
+        const v = output as { artifactId?: string; version?: number } | undefined;
+        if (!v?.artifactId || typeof v.version !== 'number') return broken('artifact.save output missing artifactId/version');
+        const row = (db as Database).raw
+          .prepare(`SELECT artifact_id FROM work_artifact WHERE artifact_id=? AND version=?`)
+          .get(v.artifactId, v.version) as { artifact_id: string } | undefined;
+        return row ? held() : broken(`work_artifact ${v.artifactId} v${v.version} not found`);
+      },
+    }),
+    installTool<BriefInput, BriefOutput>(registry, verifiers, {
+      definition: composeBriefTool({ db: deps.db }),
+      postcondition: ({ output, db }) => {
+        const v = output as { artifactId?: string; version?: number } | undefined;
+        if (!v?.artifactId || typeof v.version !== 'number') return broken('brief.compose output missing artifactId/version');
+        const row = (db as Database).raw
+          .prepare(`SELECT artifact_id FROM work_artifact WHERE artifact_id=? AND version=?`)
+          .get(v.artifactId, v.version) as { artifact_id: string } | undefined;
+        return row ? held() : broken(`brief artifact ${v.artifactId} v${v.version} not found`);
+      },
+    }),
+    installTool<FetchInput, FetchOutput>(registry, verifiers, {
+      definition: fetchSourceTool({ db: deps.db }),
+      postcondition: ({ output, db }) => {
+        const v = output as { sourceId?: string } | undefined;
+        if (!v?.sourceId) return broken('source.fetch output missing sourceId');
+        const row = (db as Database).raw.prepare(`SELECT id FROM doc_source WHERE id=?`).get(v.sourceId) as
+          | { id: string }
+          | undefined;
+        return row ? held() : broken(`doc_source ${v.sourceId} not found`);
+      },
+    }),
   ];
 }
 

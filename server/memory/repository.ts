@@ -16,6 +16,7 @@ import type {
   Relationship,
   LearnedPattern,
   MemoryProvenance,
+  MemoryQueryOptions,
   SubjectKind,
   Sensitivity,
   SourceKind,
@@ -36,6 +37,69 @@ function fromIso(isoOrEpoch: string | number | undefined | null): number {
   return isNaN(parsed) ? Date.now() : parsed;
 }
 
+/**
+ * What a list method accepts.
+ *
+ * The string form is the original one — `listEpisodic(identityId, includeDeleted)` —
+ * and every existing caller still means exactly what it meant. The object form is
+ * B09.s2's: it carries the caller's sensitivity permissions and a page bound, so
+ * those become SQL rather than a filter applied after six tables have been read
+ * into the process.
+ */
+export type MemoryListFilter = string | MemoryQueryOptions;
+
+/** A list filter after both argument forms have been folded into one shape. */
+interface NormalizedQuery {
+  identityId: string | undefined;
+  allowedSensitivities: Sensitivity[] | undefined;
+  includeDeleted: boolean;
+  limit: number | undefined;
+  offset: number | undefined;
+}
+
+function normalizeQuery(
+  filter: MemoryListFilter | undefined,
+  includeDeleted: boolean,
+): NormalizedQuery {
+  if (typeof filter === 'string' || filter === undefined) {
+    return {
+      identityId: filter,
+      allowedSensitivities: undefined,
+      includeDeleted,
+      limit: undefined,
+      offset: undefined,
+    };
+  }
+  return {
+    identityId: filter.identityId,
+    allowedSensitivities: filter.allowedSensitivities,
+    // The second positional argument is meaningless in object form; the object
+    // carries its own answer, defaulting to the same "hide what left the view".
+    includeDeleted: filter.includeDeleted ?? false,
+    limit: filter.limit,
+    offset: filter.offset,
+  };
+}
+
+/**
+ * Statuses that take a row out of the default view.
+ *
+ * Episodic carries `consolidated` as well, because folding a duplicate recollection
+ * into a surviving one is a thing only that domain does (see `markEpisodicConsolidated`).
+ */
+const HIDDEN_STATUSES: readonly LifecycleStatus[] = [
+  'soft_deleted',
+  'archived',
+  'superseded',
+] as const;
+const HIDDEN_STATUSES_EPISODIC: readonly LifecycleStatus[] = [
+  'soft_deleted',
+  'consolidated',
+  'archived',
+  'superseded',
+] as const;
+
+
 export class MemoryRepository {
   private db: Database;
 
@@ -53,6 +117,96 @@ export class MemoryRepository {
    */
   get database(): Database {
     return this.db;
+  }
+
+  /**
+   * The WHERE tail every list method shares.
+   *
+   * Three filters, all of them in SQL rather than in a `.filter()` afterwards:
+   *
+   *  - identity, as before;
+   *  - lifecycle, as before — `HIDDEN_STATUSES` is the list each method used to spell
+   *    out inline, now in one place so the six cannot drift apart;
+   *  - sensitivity (B09.s2), which is new. Retrieval used to read every row of six
+   *    tables and then drop the ones the caller was not allowed to see. That is a
+   *    correct answer computed the wrong way round: the rows a guest may never read
+   *    still travelled through the process, and the cost of a question grew with the
+   *    whole store rather than with the answer. An `IN (...)` list is the same policy
+   *    stated where the rows actually are.
+   *
+   * An empty allow-list is honoured as "nothing", not as "no filter" — the caller
+   * permitted to read no sensitivity at all must get no rows, and `IN ()` is not
+   * valid SQL, so it becomes a false predicate.
+   */
+  private scopeClause(
+    opts: NormalizedQuery,
+    identityColumn: string,
+    hiddenStatuses: readonly LifecycleStatus[],
+  ): { sql: string; params: unknown[] } {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (opts.identityId) {
+      conditions.push(`${identityColumn} = ?`);
+      params.push(opts.identityId);
+    }
+
+    if (!opts.includeDeleted) {
+      // 'consolidated' is excluded alongside 'soft_deleted' because that is what the
+      // status *means*: the row has been folded into an identical surviving row and
+      // is no longer retrieved on its own (see server/advanced/dream.ts). Without
+      // this clause the status would be a label the retrieval layer ignored, which
+      // is the class of dishonesty this codebase is spending its effort removing.
+      //
+      // 'archived' joins them for the same reason and is the same argument one step on.
+      // The Scoped Learning Policy writes a non-owner's unverified claim about the owner
+      // as `archived` — Build Book XIII.4's quarantine, "Owner confirmation required" —
+      // and nothing in the codebase reads `provenance.quarantined` or `validatedBy`. So
+      // if the default view returned archived rows, an unconfirmed claim would reach
+      // recall indistinguishable from something she knows, which is precisely the
+      // outcome the quarantine exists to prevent. Passing `includeDeleted` still
+      // reaches them; that is the view a confirmation surface reads.
+      //
+      // 'superseded' (B09.s1) joins them for the correction contract: a row marked
+      // superseded means a correction record points away from it to a newer assertion.
+      // Retrieving the superseded one as an active fact would surface the pre-correction
+      // belief, defeating the correction. History is retained, not deleted.
+      conditions.push(
+        `lifecycle_status NOT IN (${hiddenStatuses.map(() => '?').join(', ')}) AND deleted_at IS NULL`,
+      );
+      params.push(...hiddenStatuses);
+    }
+
+    if (opts.allowedSensitivities) {
+      if (opts.allowedSensitivities.length === 0) {
+        conditions.push('0 = 1');
+      } else {
+        conditions.push(
+          `sensitivity IN (${opts.allowedSensitivities.map(() => '?').join(', ')})`,
+        );
+        params.push(...opts.allowedSensitivities);
+      }
+    }
+
+    return {
+      sql: conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '',
+      params,
+    };
+  }
+
+  /**
+   * The LIMIT/OFFSET tail, or nothing when the caller asked for no bound.
+   *
+   * SQLite rejects `OFFSET` without `LIMIT`, so an offset alone becomes the
+   * documented `LIMIT -1` — "no ceiling, but skip these".
+   */
+  private pageClause(opts: NormalizedQuery): { sql: string; params: unknown[] } {
+    if (opts.limit === undefined && opts.offset === undefined) {
+      return { sql: '', params: [] };
+    }
+    const limit = opts.limit ?? -1;
+    const offset = opts.offset ?? 0;
+    return { sql: ' LIMIT ? OFFSET ?', params: [limit, offset] };
   }
 
   // ==========================================
@@ -151,53 +305,25 @@ export class MemoryRepository {
     return this.mapEpisodicRow(row);
   }
 
-  listEpisodic(identityId?: string, includeDeleted = false): EpisodicMemory[] {
-    let query = `
+  listEpisodic(filter?: MemoryListFilter, includeDeleted = false): EpisodicMemory[] {
+    const opts = normalizeQuery(filter, includeDeleted);
+    const scope = this.scopeClause(opts, 'identity_id', HIDDEN_STATUSES_EPISODIC);
+    const page = this.pageClause(opts);
+
+    const query = `
       SELECT id, identity_id, subject_kind, sensitivity, confidence, source_kind,
              provenance_json, summary, details, embedding, occurred_at, importance,
              created_at, updated_at, expires_at, lifecycle_status, deleted_at, deleted_by
-      FROM episodic_memory
+      FROM episodic_memory${scope.sql} ORDER BY occurred_at DESC${page.sql}
     `;
-    const conditions: string[] = [];
-    const params: unknown[] = [];
 
-    if (identityId) {
-      conditions.push('identity_id = ?');
-      params.push(identityId);
-    }
-    if (!includeDeleted) {
-      // 'consolidated' is excluded alongside 'soft_deleted' because that is what the
-      // status *means*: the row has been folded into an identical surviving row and
-      // is no longer retrieved on its own (see server/advanced/dream.ts). Without
-      // this clause the status would be a label the retrieval layer ignored, which
-      // is the class of dishonesty this codebase is spending its effort removing.
-      //
-      // 'archived' joins them for the same reason and is the same argument one step on.
-      // The Scoped Learning Policy writes a non-owner's unverified claim about the owner
-      // as `archived` — Build Book XIII.4's quarantine, "Owner confirmation required" —
-      // and nothing in the codebase reads `provenance.quarantined` or `validatedBy`. So
-      // if the default view returned archived rows, an unconfirmed claim would reach
-      // recall indistinguishable from something she knows, which is precisely the
-      // outcome the quarantine exists to prevent. `listSemantic(id, true)` still
-      // reaches them; that is the view a confirmation surface reads.
-      //
-      // 'superseded' (B09.s1) joins them for the correction contract: a preference marked
-      // superseded means a correction record points away from it to a newer assertion.
-      // Retrieving the superseded one as an active fact would surface the pre-correction
-      // belief, defeating the correction. History is retained via `includeDeleted=true`.
-      conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'consolidated', 'archived', 'superseded') AND deleted_at IS NULL",
-      );
-    }
-
-    if (conditions.length > 0) {
-      query += ` WHERE ${conditions.join(' AND ')}`;
-    }
-    query += ' ORDER BY occurred_at DESC';
-
-    const rows = this.db.raw.prepare(query).all(...params) as Record<string, unknown>[];
+    const rows = this.db.raw.prepare(query).all(...scope.params, ...page.params) as Record<
+      string,
+      unknown
+    >[];
     return rows.map((r) => this.mapEpisodicRow(r));
   }
+
 
   /**
    * Fold a redundant recollection out of the default view.
@@ -397,35 +523,22 @@ export class MemoryRepository {
     return this.mapSemanticRow(row);
   }
 
-  listSemantic(identityId?: string, includeDeleted = false): SemanticMemory[] {
-    let query = `
+  listSemantic(filter?: MemoryListFilter, includeDeleted = false): SemanticMemory[] {
+    const opts = normalizeQuery(filter, includeDeleted);
+    const scope = this.scopeClause(opts, 'identity_id', HIDDEN_STATUSES);
+    const page = this.pageClause(opts);
+
+    const query = `
       SELECT id, identity_id, subject_kind, sensitivity, confidence, source_kind,
              provenance_json, subject, predicate, object, source_cycle, embedding,
              created_at, updated_at, expires_at, lifecycle_status, deleted_at, deleted_by
-      FROM semantic_memory
+      FROM semantic_memory${scope.sql} ORDER BY created_at DESC${page.sql}
     `;
-    const conditions: string[] = [];
-    const params: unknown[] = [];
 
-    if (identityId) {
-      conditions.push('identity_id = ?');
-      params.push(identityId);
-    }
-    if (!includeDeleted) {
-      // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
-      // retrieval layer ignores is worse than no status at all.
-      // 'superseded' (B09.s1) excluded: correction record points away from it to newer assertion.
-      conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'archived', 'superseded') AND deleted_at IS NULL",
-      );
-    }
-
-    if (conditions.length > 0) {
-      query += ` WHERE ${conditions.join(' AND ')}`;
-    }
-    query += ' ORDER BY created_at DESC';
-
-    const rows = this.db.raw.prepare(query).all(...params) as Record<string, unknown>[];
+    const rows = this.db.raw.prepare(query).all(...scope.params, ...page.params) as Record<
+      string,
+      unknown
+    >[];
     return rows.map((r) => this.mapSemanticRow(r));
   }
 
@@ -633,35 +746,22 @@ export class MemoryRepository {
     return this.mapPreferenceRow(row);
   }
 
-  listPreferences(identityId?: string, includeDeleted = false): Preference[] {
-    let query = `
+  listPreferences(filter?: MemoryListFilter, includeDeleted = false): Preference[] {
+    const opts = normalizeQuery(filter, includeDeleted);
+    const scope = this.scopeClause(opts, 'identity_id', HIDDEN_STATUSES);
+    const page = this.pageClause(opts);
+
+    const query = `
       SELECT id, identity_id, subject_kind, sensitivity, confidence, source_kind,
              provenance_json, key, value, stated_at, created_at, updated_at,
              expires_at, lifecycle_status, deleted_at, deleted_by
-      FROM preference
+      FROM preference${scope.sql} ORDER BY key ASC${page.sql}
     `;
-    const conditions: string[] = [];
-    const params: unknown[] = [];
 
-    if (identityId) {
-      conditions.push('identity_id = ?');
-      params.push(identityId);
-    }
-    if (!includeDeleted) {
-      // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
-      // retrieval layer ignores is worse than no status at all.
-      // 'superseded' (B09.s1) excluded: correction record points away from it to newer assertion.
-      conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'archived', 'superseded') AND deleted_at IS NULL",
-      );
-    }
-
-    if (conditions.length > 0) {
-      query += ` WHERE ${conditions.join(' AND ')}`;
-    }
-    query += ' ORDER BY key ASC';
-
-    const rows = this.db.raw.prepare(query).all(...params) as Record<string, unknown>[];
+    const rows = this.db.raw.prepare(query).all(...scope.params, ...page.params) as Record<
+      string,
+      unknown
+    >[];
     return rows.map((r) => this.mapPreferenceRow(r));
   }
 
@@ -810,35 +910,22 @@ export class MemoryRepository {
     return this.mapHabitRow(row);
   }
 
-  listHabits(identityId?: string, includeDeleted = false): Habit[] {
-    let query = `
+  listHabits(filter?: MemoryListFilter, includeDeleted = false): Habit[] {
+    const opts = normalizeQuery(filter, includeDeleted);
+    const scope = this.scopeClause(opts, 'identity_id', HIDDEN_STATUSES);
+    const page = this.pageClause(opts);
+
+    const query = `
       SELECT id, identity_id, subject_kind, sensitivity, confidence, source_kind,
              provenance_json, pattern, frequency, last_observed, created_at, updated_at,
              expires_at, lifecycle_status, deleted_at, deleted_by
-      FROM habit
+      FROM habit${scope.sql} ORDER BY last_observed DESC${page.sql}
     `;
-    const conditions: string[] = [];
-    const params: unknown[] = [];
 
-    if (identityId) {
-      conditions.push('identity_id = ?');
-      params.push(identityId);
-    }
-    if (!includeDeleted) {
-      // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
-      // retrieval layer ignores is worse than no status at all.
-      // 'superseded' (B09.s1) excluded: correction record points away from it to newer assertion.
-      conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'archived', 'superseded') AND deleted_at IS NULL",
-      );
-    }
-
-    if (conditions.length > 0) {
-      query += ` WHERE ${conditions.join(' AND ')}`;
-    }
-    query += ' ORDER BY last_observed DESC';
-
-    const rows = this.db.raw.prepare(query).all(...params) as Record<string, unknown>[];
+    const rows = this.db.raw.prepare(query).all(...scope.params, ...page.params) as Record<
+      string,
+      unknown
+    >[];
     return rows.map((r) => this.mapHabitRow(r));
   }
 
@@ -988,34 +1075,24 @@ export class MemoryRepository {
     return this.mapRelationshipRow(row);
   }
 
-  listRelationships(ownerId?: string, includeDeleted = false): Relationship[] {
-    let query = `
+  listRelationships(filter?: MemoryListFilter, includeDeleted = false): Relationship[] {
+    const opts = normalizeQuery(filter, includeDeleted);
+    // The relationship table names its subject column `owner_id`; every other domain
+    // calls it `identity_id`. `Relationship.identityId` is populated from it, so the
+    // difference stops at this line rather than reaching a caller.
+    const scope = this.scopeClause(opts, 'owner_id', HIDDEN_STATUSES);
+    const page = this.pageClause(opts);
+
+    const query = `
       SELECT id, owner_id, name, relation, notes, importance, sensitivity,
              created_at, updated_at, lifecycle_status, deleted_at, deleted_by
-      FROM relationship
+      FROM relationship${scope.sql} ORDER BY importance DESC, name ASC${page.sql}
     `;
-    const conditions: string[] = [];
-    const params: unknown[] = [];
 
-    if (ownerId) {
-      conditions.push('owner_id = ?');
-      params.push(ownerId);
-    }
-    if (!includeDeleted) {
-      // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
-      // retrieval layer ignores is worse than no status at all.
-      // 'superseded' (B09.s1) excluded: correction record points away from it to newer assertion.
-      conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'archived', 'superseded') AND deleted_at IS NULL",
-      );
-    }
-
-    if (conditions.length > 0) {
-      query += ` WHERE ${conditions.join(' AND ')}`;
-    }
-    query += ' ORDER BY importance DESC, name ASC';
-
-    const rows = this.db.raw.prepare(query).all(...params) as Record<string, unknown>[];
+    const rows = this.db.raw.prepare(query).all(...scope.params, ...page.params) as Record<
+      string,
+      unknown
+    >[];
     return rows.map((r) => this.mapRelationshipRow(r));
   }
 
@@ -1172,35 +1249,22 @@ export class MemoryRepository {
     return this.mapLearnedPatternRow(row);
   }
 
-  listLearnedPatterns(identityId?: string, includeDeleted = false): LearnedPattern[] {
-    let query = `
+  listLearnedPatterns(filter?: MemoryListFilter, includeDeleted = false): LearnedPattern[] {
+    const opts = normalizeQuery(filter, includeDeleted);
+    const scope = this.scopeClause(opts, 'identity_id', HIDDEN_STATUSES);
+    const page = this.pageClause(opts);
+
+    const query = `
       SELECT id, identity_id, subject_kind, sensitivity, confidence, source_kind,
              provenance_json, pattern, evidence_count, created_at, updated_at,
              expires_at, lifecycle_status, deleted_at, deleted_by
-      FROM learned_pattern
+      FROM learned_pattern${scope.sql} ORDER BY evidence_count DESC, created_at DESC${page.sql}
     `;
-    const conditions: string[] = [];
-    const params: unknown[] = [];
 
-    if (identityId) {
-      conditions.push('identity_id = ?');
-      params.push(identityId);
-    }
-    if (!includeDeleted) {
-      // 'archived' excluded with 'soft_deleted': see `listEpisodic` for why a status the
-      // retrieval layer ignores is worse than no status at all.
-      // 'superseded' (B09.s1) excluded: correction record points away from it to newer assertion.
-      conditions.push(
-        "lifecycle_status NOT IN ('soft_deleted', 'archived', 'superseded') AND deleted_at IS NULL",
-      );
-    }
-
-    if (conditions.length > 0) {
-      query += ` WHERE ${conditions.join(' AND ')}`;
-    }
-    query += ' ORDER BY evidence_count DESC, created_at DESC';
-
-    const rows = this.db.raw.prepare(query).all(...params) as Record<string, unknown>[];
+    const rows = this.db.raw.prepare(query).all(...scope.params, ...page.params) as Record<
+      string,
+      unknown
+    >[];
     return rows.map((r) => this.mapLearnedPatternRow(r));
   }
 

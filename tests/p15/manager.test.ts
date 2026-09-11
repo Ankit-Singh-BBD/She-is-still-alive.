@@ -16,6 +16,7 @@ describe('LoopManager (P15)', () => {
   let pipeline: ActionPipeline;
   let executor: TaskExecutor;
   let loopManager: LoopManager;
+  let conditions: Map<string, () => Promise<boolean> | boolean>;
 
   const owner: Identity = {
     id: 'usr_owner0000000000000000001',
@@ -38,7 +39,8 @@ describe('LoopManager (P15)', () => {
     registry = new ToolRegistry();
     pipeline = new ActionPipeline({ registry, db, eventBus });
     executor = new TaskExecutor(db, eventBus, { registry, pipeline });
-    loopManager = new LoopManager(db, eventBus, executor, { pollIntervalMs: 50 });
+    conditions = new Map();
+    loopManager = new LoopManager(db, eventBus, executor, { pollIntervalMs: 50, conditionRegistry: conditions });
   });
 
   afterEach(() => {
@@ -60,11 +62,9 @@ describe('LoopManager (P15)', () => {
     });
 
     const now = Date.now();
-    // 1st eval before schedule interval: no task
     let evals = await loopManager.evaluateAll(now);
     expect(evals[0]?.taskCreated).toBe(false);
 
-    // 2nd eval after interval: creates exactly 1 task
     evals = await loopManager.evaluateAll(now + 3600_050);
     expect(evals[0]?.taskCreated).toBe(true);
     expect(evals[0]?.taskId).not.toBeNull();
@@ -73,7 +73,6 @@ describe('LoopManager (P15)', () => {
     expect(pending.length).toBe(1);
     expect((pending[0]?.payload as { message: string }).message).toBe('Check the rain forecast');
 
-    // 3rd immediate eval: dedup prevents duplicate task
     evals = await loopManager.evaluateAll(now + 3600_050);
     expect(evals[0]?.taskCreated).toBe(false);
     expect(executor.getPendingTasks(owner.id).length).toBe(1);
@@ -81,14 +80,12 @@ describe('LoopManager (P15)', () => {
 
   it('evaluates a condition trigger and creates task when true', async () => {
     let conditionState = false;
+    conditions.set('battery-low', () => conditionState);
 
     loopManager.openLoop({
       identityId: owner.id,
       topic: 'Battery monitor',
-      triggerSpec: {
-        type: 'condition',
-        check: async () => conditionState,
-      },
+      triggerSpec: { type: 'condition', conditionId: 'battery-low' },
       actionSpec: {
         kind: 'task',
         taskKind: 'reminder',
@@ -96,11 +93,9 @@ describe('LoopManager (P15)', () => {
       },
     });
 
-    // When false: no task
     let evals = await loopManager.evaluateAll();
     expect(evals[0]?.taskCreated).toBe(false);
 
-    // When true: task created
     conditionState = true;
     evals = await loopManager.evaluateAll();
     expect(evals[0]?.taskCreated).toBe(true);
@@ -108,10 +103,11 @@ describe('LoopManager (P15)', () => {
   });
 
   it('does not produce tasks for closed or paused loops', async () => {
+    conditions.set('always-true', () => true);
     const loopId = loopManager.openLoop({
       identityId: owner.id,
       topic: 'Closed loop test',
-      triggerSpec: { type: 'condition', check: async () => true },
+      triggerSpec: { type: 'condition', conditionId: 'always-true' },
       actionSpec: {
         kind: 'task',
         taskKind: 'reminder',
@@ -119,24 +115,40 @@ describe('LoopManager (P15)', () => {
       },
     });
 
-    // Pause loop
     loopManager.pauseLoop(loopId);
     let evals = await loopManager.evaluateAll();
-    expect(evals.length).toBe(0); // paused loop not in active loops
+    expect(evals.length).toBe(0);
     expect(executor.getPendingTasks().length).toBe(0);
 
-    // Close loop
     loopManager.closeLoop(loopId);
     evals = await loopManager.evaluateAll();
     expect(evals.length).toBe(0);
     expect(executor.getPendingTasks().length).toBe(0);
   });
 
-  /**
-   * The same contract as `TaskExecutor`: a loop that could not announce it
-   * opened is still open, and the failed announcement is reported rather than
-   * left as an unhandled rejection for `main.ts` to shut the server down over.
-   */
+  it('survives restart: start() rebuilds triggers from durable rows without re-opening', async () => {
+    const loopId = loopManager.openLoop({
+      identityId: owner.id,
+      topic: 'survives restart',
+      triggerSpec: { type: 'schedule', intervalMs: 60_000 },
+      actionSpec: {
+        kind: 'task',
+        taskKind: 'reminder',
+        payload: { kind: 'reminder', message: 'rebuilt' },
+      },
+    });
+
+    // Simulate process restart: a new manager over the same DB re-attaches.
+    const conditions2 = new Map<string, () => Promise<boolean> | boolean>();
+    const rebooted = new LoopManager(db, eventBus, executor, { pollIntervalMs: 50, conditionRegistry: conditions2 });
+    rebooted.start();
+    expect(rebooted.getLoop(loopId)?.status).toBe('active');
+    // A rebuilt schedule loop must not fire immediately before its interval.
+    const evals = await rebooted.evaluateAll(Date.now());
+    expect(evals[0]?.taskCreated).toBe(false);
+    rebooted.stop();
+  });
+
   it('reports a failed event publish instead of taking the process down', async () => {
     const failures: string[] = [];
     const brokenBus = new EventBus(db);
