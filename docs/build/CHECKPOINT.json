@@ -1,18 +1,30 @@
 {
   "schemaVersion": 1,
-  "state": "blocked",
+  "state": "ready_for_review",
   "workspace": {
     "revision": "9651afd",
     "sourceFingerprint": "B10.s3:useful-initiative-approved-standing-goal-scope-selection-eligibility-notification-quiet-hours",
     "dirtyFiles": []
   },
   "taskId": "B11",
-  "sliceId": "s1",
-  "phase": "plan",
-  "completedSlices": [],
-  "nextAction": "B11/s1: integrated journeys J01-J06 \u2014 blocked: tests/journeys/ suite missing, requires B11 implementation",
-  "blocker": "B11/s1 blocked: tests/journeys/ does not exist yet; remaining: integrated journeys J01-J12 + docs/RELEASE_REPORT.md",
+  "sliceId": "s3",
+  "phase": "report",
+  "completedSlices": [
+    "s1",
+    "s2",
+    "s3"
+  ],
+  "nextAction": "Owner sign-off on voice/experience + optional Playwright smoke (npm start) before final tag",
+  "blocker": null,
   "repairAttempts": 0,
   "workerLease": null,
-  "updatedAt": "2026-09-11T07:57:00.000Z"
+  "updatedAt": "2026-09-11T05:45:16Z",
+  "evidence": {
+    "typecheck": "npx tsc --noEmit \u2192 0",
+    "lint": "npm run lint \u2192 0 errors, 0 warnings",
+    "build": "tsc && vite build \u2192 65 modules, 15.93 kB css + 411.54 kB js",
+    "tests": "npx vitest run \u2192 74 files, 1151 tests passed",
+    "journeys": "npx vitest run tests/journeys \u2192 12/12 pass (J01-J12, real SQLite)",
+    "report": "docs/RELEASE_REPORT.md at rev f85c101"
+  }
 }

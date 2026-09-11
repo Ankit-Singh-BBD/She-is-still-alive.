@@ -1054,3 +1054,34 @@ textarea {
     padding-top: 1.5rem;
   }
 }
+
+/* ------------------------------------------------------------- work (B07) */
+
+.work { max-width: 720px; margin: 1.5rem auto; padding: 0 1rem; }
+.work-bar { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+.work-bar-left { min-width:0; }
+.work-title { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+.work-meta { font-size:0.75rem; color:var(--ink-dim); }
+.work-toggle { max-width:720px; margin:0 auto; padding:0 1rem; display:flex; justify-content:flex-end; }
+.work-section { margin:1rem 0; }
+.work-h { font-size:0.7rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-dim); margin:0 0 0.5rem; }
+.work-steps { list-style:none; margin:0; padding:0; display:grid; gap:0.35rem; }
+.work-step { display:flex; gap:0.5rem; align-items:baseline; font-size:0.85rem; }
+.work-dot { width:1.2em; text-align:center; }
+.work-step[data-status='verified'] .work-dot { color: #3dd68c; }
+.work-step[data-status='running'] .work-dot { color: var(--accent); }
+.work-step[data-status='failed'] .work-dot { color: #e85d75; }
+.work-step-status { color:var(--ink-dim); font-size:0.75rem; }
+.work-step-current { font-size:0.7rem; color:var(--accent-soft); border:1px solid var(--accent-faint); padding:0 0.35em; border-radius:999px; }
+.work-summary { font-size:0.75rem; color:var(--ink-faint); margin-top:0.5rem; }
+.work-artifact { border:1px solid var(--hairline); border-radius:10px; padding:0.75rem; background:var(--surface); }
+.work-artifact-head { display:flex; gap:0.5rem; align-items:center; }
+.work-artifact-kind { font-weight:500; }
+.work-artifact-ver { font-size:0.75rem; color:var(--ink-dim); }
+.work-badge { font-size:0.7rem; padding:0 0.4em; border-radius:999px; border:1px solid var(--hairline); }
+.work-badge.ok { color:#3dd68c; border-color:rgba(61,214,140,0.3); }
+.work-hash, .work-ref { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:0.7rem; color:var(--ink-faint); margin-top:0.25rem; word-break:break-all; }
+.work-empty { font-size:0.8rem; color:var(--ink-faint); }
+.work-blockers { margin:0; padding-left:1.2em; color:var(--ink-soft); }
+.work-actions { display:flex; gap:0.5rem; flex-wrap:wrap; }
+.work-hint { font-size:0.72rem; color:var(--ink-faint); margin-top:0.5rem; }

@@ -50,12 +50,15 @@ import { useMotionAllowed } from '../state/useReducedMotion.js';
 import { useSession, type SessionState } from '../state/useSession.js';
 import { useSignature } from '../state/useSignature.js';
 import { useVoice } from '../state/useVoice.js';
+import { useWork } from '../state/useWork.js';
+import { api } from '../lib/api.js';
 import { PresenceCanvas } from '../visual/PresenceCanvas.js';
 import { moodFrom } from '../visual/mood.js';
 import { Ledger } from './Ledger.js';
 import { Notice } from './Notice.js';
 import { Presence } from './Presence.js';
 import { Threshold } from './Threshold.js';
+import { WorkView } from './WorkView.js';
 
 /**
  * The moment before `GET /api/hello` answers. Her name and nothing else — there is
@@ -122,6 +125,25 @@ export function App(): ReactElement {
   const place = usePlace({ active });
   const motion = useMotionAllowed();
   const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [workList, setWorkList] = useState<readonly string[]>([]);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [showWork, setShowWork] = useState(false);
+  const work = useWork(showWork ? activeJobId : null, active && showWork);
+  // Hydrate work list when entering room (for the work button) — non-blocking.
+  useEffect(() => {
+    if (!active) { setWorkList([]); setActiveJobId(null); setShowWork(false); return; }
+    let live = true;
+    void api.workList().then((r) => {
+      if (!live) return;
+      const ids = (r.items as readonly { job: { id: string } }[]).map((it) => it.job.id);
+      setWorkList(ids as unknown as string[]);
+      // Auto-select latest job when none selected and not explicitly hidden.
+      if (ids.length && !activeJobId) setActiveJobId(ids[0] as string);
+    }).catch(() => {});
+    return () => { live = false; };
+  // activeJobId intentionally omitted — auto-select only when none selected on entry.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, presence.cycleCommits]);
 
   // Either channel. `dialogue.thinking` is only this client's own outstanding turn;
   // the session state is her, thinking about whatever reached her — including a
@@ -170,6 +192,14 @@ export function App(): ReactElement {
         {session.phase === 'waking' ? <Waking /> : null}
         {session.phase === 'unreachable' ? <Unreachable session={session} /> : null}
         {session.phase === 'door' ? <Threshold session={session} /> : null}
+        {session.phase === 'room' && workList.length > 0 ? (
+          <div className="work-toggle">
+            <button className="pill" type="button" onClick={() => setShowWork((v) => !v)}>{showWork ? 'Hide work' : `Work (${String(workList.length)})`}</button>
+          </div>
+        ) : null}
+        {session.phase === 'room' && showWork && activeJobId ? (
+          <WorkView jobId={activeJobId} reading={work} onHide={() => setShowWork(false)} />
+        ) : null}
         {session.phase === 'room' ? (
           <Presence
             hello={session.hello}

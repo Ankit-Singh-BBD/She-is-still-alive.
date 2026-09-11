@@ -302,4 +302,75 @@ export const api = {
   /** Tell her where she is, so the sky in the room is the sky outside. */
   place: (coords: { lat: number; lng: number }): Promise<unknown> =>
     request<unknown>('/location', json(coords)),
+
+  // -- Work (B07): projection-only read + control. All version-guarded. --
+
+  /** List own jobs (latest 50). */
+  workList: (): Promise<{ items: readonly WorkSnapshot[] }> =>
+    request<{ items: readonly WorkSnapshot[] }>('/work'),
+
+  /** One job's durable snapshot. */
+  workSnapshot: (id: string): Promise<WorkSnapshot> =>
+    request<WorkSnapshot>(`/work/${encodeURIComponent(id)}`),
+
+  /** Pause/resume/cancel — caller supplies expectedVersion (409 on stale) + requestId (dedup). */
+  workControl: (
+    id: string,
+    action: 'pause' | 'resume' | 'cancel',
+    body: { expectedVersion: number; requestId: string },
+  ): Promise<{ ok: true; deduplicated?: boolean }> =>
+    request<{ ok: true; deduplicated?: boolean }>(
+      `/work/${encodeURIComponent(id)}/${action}`,
+      json(body),
+    ),
 };
+
+// -- Work wire types (hand-copied from server/work/contracts.ts) --
+
+export interface WorkJob {
+  readonly id: string;
+  readonly identityId: string;
+  readonly requestId: string;
+  readonly goal: string;
+  readonly status: string;
+  readonly version: number;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly controlIntent: string | null;
+  readonly schemaVersion: number;
+}
+
+export interface WorkStep {
+  readonly id: string;
+  readonly jobId: string;
+  readonly position: number;
+  readonly toolId: string;
+  readonly inputJson: string;
+  readonly status: string;
+  readonly version: number;
+  readonly fence: number;
+  readonly schemaVersion: number;
+}
+
+export interface WorkArtifact {
+  readonly artifactId: string;
+  readonly version: number;
+  readonly jobId: string;
+  readonly stepId: string;
+  readonly kind: string;
+  readonly mediaType: string;
+  readonly contentHash: string;
+  readonly contentRef: string;
+  readonly createdAt: number;
+  readonly verificationStatus: string;
+  readonly schemaVersion: number;
+}
+
+export interface WorkSnapshot {
+  readonly schemaVersion: number;
+  readonly job: WorkJob;
+  readonly steps: readonly WorkStep[];
+  readonly artifacts: readonly WorkArtifact[];
+  readonly blockers: readonly string[];
+  readonly allowedControls: readonly ('pause' | 'resume' | 'cancel')[];
+}
